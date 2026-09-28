@@ -84,12 +84,19 @@ public struct Store: Sendable {
     public func perform(
         label: String, memoID: String? = nil, _ body: @escaping @Sendable (Mutator) throws -> Void
     ) async throws -> Op? {
+        try await performReturning(label: label, memoID: memoID) { mutator -> Void in try body(mutator) }.op
+    }
+
+    /// Like `perform`, but also returns whatever `body` produced (for example a summary for the UI).
+    public func performReturning<Value: Sendable>(
+        label: String, memoID: String? = nil, _ body: @escaping @Sendable (Mutator) throws -> Value
+    ) async throws -> (op: Op?, value: Value) {
         let stamp = nowMs
         let makeID = self.makeID
         return try await writer.write { db in
             let mutator = Mutator(db: db, nowMs: stamp, makeID: makeID)
-            try body(mutator)
-            guard !mutator.pending.isEmpty else { return nil }
+            let value = try body(mutator)
+            guard !mutator.pending.isEmpty else { return (nil, value) }
             let op = Op(id: makeID(), memoID: memoID, createdAt: stamp, label: label)
             try op.insert(db)
             for (index, change) in mutator.pending.enumerated() {
@@ -98,7 +105,7 @@ public struct Store: Sendable {
                     beforeJSON: change.before, afterJSON: change.after
                 ).insert(db)
             }
-            return op
+            return (op, value)
         }
     }
 

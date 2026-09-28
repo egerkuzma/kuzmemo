@@ -59,7 +59,8 @@ public enum PhraseDateHint {
         return nil
     }
 
-    private static func weekday(for word: String) -> Weekday? {
+    /// The weekday a normalised word names ("пятницу" → .fri), if any.
+    static func weekday(for word: String) -> Weekday? {
         if word.hasPrefix("понедельник") { return .mon }
         if word.hasPrefix("вторник") { return .tue }
         if word == "среду" || word == "среда" || word == "среды" || word == "среде" { return .wed }

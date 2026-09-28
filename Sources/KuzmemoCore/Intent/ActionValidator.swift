@@ -1,0 +1,428 @@
+import Foundation
+
+public struct ValidationPolicy: Sendable {
+    public var maxActions = 8
+    /// More deletions (or bulk edits) than this in one phrase need an explicit confirmation.
+    public var maxDeletesWithoutConfirmation = 2
+    public var maxUpdatesWithoutConfirmation = 3
+    public var maxTitleLength = 200
+    public var maxDetailsLength = 1000
+    public var maxSpeechLength = 400
+    /// Between midnight and this time "завтра" is ambiguous (the user's day has not ended yet).
+    public var lateNightUntil = LocalTime(hour: 4, minute: 0)!
+
+    public init() {}
+    public static let standard = ValidationPolicy()
+}
+
+public struct ValidationContext: Sendable {
+    public var context: ContextPlan
+    public var resolver: RelativeDateResolver
+    public var store: Store
+    public var policy: ValidationPolicy
+
+    public init(context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard) {
+        self.context = context
+        self.resolver = resolver
+        self.store = store
+        self.policy = policy
+    }
+}
+
+/// Turns the model's answer into something the app may act on. The model is untrusted: this is the gate.
+/// Dates are computed here, references must point at entries the model was shown, limits protect against
+/// bulk damage, and anything doubtful becomes a clarification instead of a guess. Nothing is applied partially.
+public enum ActionValidator {
+    public static func validate(_ response: ParserResponse, in validation: ValidationContext) async -> Interpretation {
+        var run = Run(response: response, vc: validation)
+        do {
+            return try await run.execute()
+        } catch let stop as Stop {
+            return stop.interpretation
+        } catch {
+            return .unknown("validator failure: \(error)")
+        }
+    }
+
+    private struct Stop: Error {
+        let interpretation: Interpretation
+        init(_ interpretation: Interpretation) { self.interpretation = interpretation }
+    }
+
+    private struct Target {
+        var item: Item
+        var occurrenceDate: LocalDate?
+    }
+
+    private struct Run {
+        let response: ParserResponse
+        let vc: ValidationContext
+        var warnings: [String] = []
+
+        var policy: ValidationPolicy { vc.policy }
+        var resolver: RelativeDateResolver { vc.resolver }
+        var anchor: LocalDateTime { vc.resolver.anchor }
+
+        init(response: ParserResponse, vc: ValidationContext) {
+            self.response = response
+            self.vc = vc
+        }
+
+        // MARK: Entry
+
+        mutating func execute() async throws -> Interpretation {
+            switch response.intent {
+            case .unknown:
+                return .unknown(nil)
+            case .clarify:
+                if let clarification = response.clarification { return .clarify(sanitize(clarification)) }
+                if let speech = sanitizeSpeech(response.speech), !speech.isEmpty {
+                    return .clarify(Clarification(question: speech, reason: .other))
+                }
+                return .unknown("clarify without a question")
+            case .query:
+                guard let query = response.query else { return .unknown("query without details") }
+                return try resolve(query)
+            case .create, .update, .delete:
+                // A clarification next to actions means the model is unsure: ask, do not apply.
+                if let clarification = response.clarification { return .clarify(sanitize(clarification)) }
+                guard let actions = response.actions, !actions.isEmpty else {
+                    return .unknown("\(response.intent) without actions")
+                }
+                return try await mutation(actions)
+            }
+        }
+
+        // MARK: Mutations
+
+        mutating func mutation(_ raw: [ParsedAction]) async throws -> Interpretation {
+            var actions = raw
+            if actions.count > policy.maxActions {
+                actions = Array(actions.prefix(policy.maxActions))
+                warnings.append("more than \(policy.maxActions) actions: truncated")
+            }
+            let deletes = actions.filter { $0.op == .delete }.count
+            if deletes > policy.maxDeletesWithoutConfirmation {
+                throw Stop(.clarify(Clarification(
+                    question: "Удалить \(deletes) \(RussianFormat.plural(deletes, ("запись", "записи", "записей")))?",
+                    reason: .destructiveConfirm, options: ["Да, удалить", "Нет"]
+                )))
+            }
+            let updates = actions.filter { $0.op == .update }.count
+            if updates > policy.maxUpdatesWithoutConfirmation {
+                throw Stop(.clarify(Clarification(
+                    question: "Изменить \(updates) \(RussianFormat.plural(updates, ("запись", "записи", "записей")))?",
+                    reason: .destructiveConfirm, options: ["Да, изменить", "Нет"]
+                )))
+            }
+            try nextWeekdayGuard(actions)
+            try lateNightGuard(actions)
+
+            var planned: [PlannedAction] = []
+            for action in actions { planned.append(try await plan(action)) }
+            guard !planned.isEmpty else { return .unknown("no valid actions") }
+            return .mutate(MutationPlan(
+                actions: planned, warnings: warnings,
+                correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1)
+            ))
+        }
+
+        mutating func plan(_ action: ParsedAction) async throws -> PlannedAction {
+            switch action.op {
+            case .create:
+                guard let item = action.item else { throw Stop(.unknown("create without an item")) }
+                return .create(try newItem(from: item))
+            case .update:
+                let target = try await resolveTarget(action)
+                guard let changes = action.changes else { throw Stop(.unknown("update without changes")) }
+                return try updateAction(target: target, action: action, changes: changes)
+            case .complete:
+                let target = try await resolveTarget(action)
+                return .complete(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))
+            case .reopen:
+                let target = try await resolveTarget(action)
+                return .reopen(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))
+            case .delete:
+                let target = try await resolveTarget(action)
+                return .delete(itemID: target.item.id)
+            case .skipOccurrence:
+                let target = try await resolveTarget(action)
+                guard target.item.recurrence != nil, let date = action.occurrenceDate ?? target.occurrenceDate else {
+                    throw Stop(.clarify(Clarification(question: "Какое из повторений пропустить?", reason: .ambiguousTarget)))
+                }
+                return .skipOccurrence(itemID: target.item.id, occurrenceDate: date)
+            }
+        }
+
+        /// Recurring items are completed per occurrence; one-off items have no occurrence date.
+        func occurrence(for target: Target, action: ParsedAction) throws -> LocalDate? {
+            guard target.item.recurrence != nil else { return nil }
+            guard let date = action.occurrenceDate ?? target.occurrenceDate else {
+                throw Stop(.clarify(Clarification(question: "Какое из повторений отметить?", reason: .ambiguousTarget)))
+            }
+            return date
+        }
+
+        // MARK: Targets
+
+        mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
+            if let ref = action.ref {
+                if let entry = vc.context.entry(number: ref) {
+                    return Target(item: entry.item, occurrenceDate: entry.occurrenceDate)
+                }
+                warnings.append("ref \(ref) is not in the list the model was shown")
+            }
+            guard let hint = clean(action.targetHint) else {
+                throw Stop(.clarify(Clarification(question: "Какую запись вы имеете в виду?", reason: .targetNotFound)))
+            }
+            let hits = try await vc.store.search(hint, limit: 5)
+            switch hits.count {
+            case 0:
+                throw Stop(.clarify(Clarification(question: "Не нашёл запись «\(hint)». Что именно изменить?", reason: .targetNotFound)))
+            case 1:
+                return Target(item: hits[0], occurrenceDate: action.occurrenceDate)
+            default:
+                throw Stop(.clarify(Clarification(
+                    question: "Какую именно из этих записей?", reason: .ambiguousTarget,
+                    options: hits.prefix(3).map { describe($0) }
+                )))
+            }
+        }
+
+        func describe(_ item: Item) -> String {
+            item.date.map { "\(item.title), \(RussianFormat.date($0))" } ?? item.title
+        }
+
+        // MARK: Creation
+
+        mutating func newItem(from parsed: ParsedItem) throws -> NewItem {
+            guard let title = clean(parsed.title).map({ String($0.prefix(policy.maxTitleLength)) }) else {
+                throw Stop(.clarify(Clarification(question: "Не расслышал, что записать. Повторите?", reason: .unclearSpeech)))
+            }
+            var resolved = ResolvedWhen(date: nil, time: nil)
+            if let when = parsed.when { resolved = resolveWhen(when) }
+            let hasDate = resolved.date != nil
+
+            switch parsed.kind {
+            case .event:
+                if !hasDate {
+                    throw Stop(.clarify(Clarification(question: "На какую дату «\(title)»?", reason: .missingDate)))
+                }
+                if resolved.time == nil {
+                    let day = RussianFormat.relativeDay(resolved.date!, today: anchor.date)
+                    throw Stop(.clarify(Clarification(question: "Во сколько «\(title)» \(day)?", reason: .missingTime)))
+                }
+            case .reminder:
+                if !hasDate {
+                    throw Stop(.clarify(Clarification(question: "На какую дату напомнить?", reason: .missingDate)))
+                }
+            case .task, .note:
+                break
+            }
+
+            if parsed.recurrence == nil, let date = resolved.date, resolved.issues.contains(.inThePast) {
+                throw Stop(.clarify(Clarification(
+                    question: "Дата уже прошла (\(RussianFormat.date(date))). На какую поставить?", reason: .other
+                )))
+            }
+            let recurrence = parsed.recurrence.flatMap { sanitize($0, start: resolved.date) }
+            if parsed.recurrence != nil, !hasDate {
+                throw Stop(.clarify(Clarification(question: "С какого дня повторять?", reason: .missingDate)))
+            }
+            return NewItem(
+                kind: parsed.kind, title: title,
+                details: clean(parsed.details).map { String($0.prefix(policy.maxDetailsLength)) },
+                keywords: (parsed.keywords ?? []).compactMap { clean($0) }.prefix(6).joined(separator: " "),
+                date: resolved.date, time: resolved.time,
+                durationMin: parsed.durationMin.flatMap { (1 ... 1440).contains($0) ? $0 : nil },
+                approximate: resolved.approximate, recurrence: recurrence
+            )
+        }
+
+        // MARK: Updates
+
+        mutating func updateAction(target: Target, action: ParsedAction, changes parsed: ParsedChanges) throws -> PlannedAction {
+            var changes = ItemChanges()
+            changes.kind = parsed.kind
+            changes.title = clean(parsed.title).map { String($0.prefix(policy.maxTitleLength)) }
+            changes.details = clean(parsed.details).map { String($0.prefix(policy.maxDetailsLength)) }
+            if let keywords = parsed.keywords { changes.keywords = keywords.compactMap { clean($0) }.prefix(6).joined(separator: " ") }
+            changes.durationMin = parsed.durationMin.flatMap { (1 ... 1440).contains($0) ? $0 : nil }
+            changes.recurrence = parsed.recurrence.flatMap { sanitize($0, start: target.item.date) }
+
+            var newDate: LocalDate?
+            var newTime: LocalTime?
+            if let when = parsed.when, when.mode != .none || when.time != nil || when.dayPart != nil {
+                let resolved = resolveWhen(when)
+                if resolved.issues.contains(where: { if case .incomplete = $0 { true } else { false } }) {
+                    throw Stop(.clarify(Clarification(question: "На какую дату перенести?", reason: .missingDate)))
+                }
+                if resolved.issues.contains(.inThePast), let date = resolved.date {
+                    throw Stop(.clarify(Clarification(
+                        question: "Дата уже прошла (\(RussianFormat.date(date))). На какую перенести?", reason: .other
+                    )))
+                }
+                if when.mode != .none { newDate = resolved.date }
+                newTime = resolved.time
+            }
+
+            let onlyTimingChanged = changes.isEmpty
+            if target.item.recurrence != nil, onlyTimingChanged, newDate != nil || newTime != nil,
+               let occurrence = action.occurrenceDate ?? target.occurrenceDate {
+                return .moveOccurrence(
+                    itemID: target.item.id, occurrenceDate: occurrence,
+                    newDate: newDate ?? occurrence, newTime: newTime ?? target.item.time
+                )
+            }
+            changes.date = newDate
+            changes.time = newTime
+            guard !changes.isEmpty else { throw Stop(.unknown("update changes nothing")) }
+            return .update(itemID: target.item.id, changes: changes)
+        }
+
+        // MARK: Dates
+
+        /// Resolves a `when` and lets the local reading of the user's own words override the model's arithmetic.
+        mutating func resolveWhen(_ when: When) -> ResolvedWhen {
+            var resolved = resolver.resolve(when)
+            if case let .disagrees(local) = resolver.crossCheck(when, resolved: resolved) {
+                warnings.append("«\(when.phrase ?? "")»: model gave \(resolved.date.map(\.description) ?? "no date"), local reading \(local)")
+                resolved.date = local
+                resolved.issues.removeAll()
+                if resolver.isPast(date: local, time: resolved.time) { resolved.issues.append(.inThePast) }
+            }
+            return resolved
+        }
+
+        /// "В следующую пятницу" can mean the coming Friday or the one after it: the user decided to always
+        /// ask, so this is enforced here whatever the model answered.
+        func nextWeekdayGuard(_ actions: [ParsedAction]) throws {
+            for action in actions {
+                guard let when = action.item?.when ?? action.changes?.when, let phrase = when.phrase else { continue }
+                let words = SearchText.tokens(phrase)
+                guard words.contains(where: { $0.hasPrefix("следующ") }),
+                      let weekday = words.lazy.compactMap(PhraseDateHint.weekday(for:)).first else { continue }
+                let nearest = anchor.date.next(weekday)
+                let later = nearest.adding(days: 7)
+                throw Stop(.clarify(Clarification(
+                    question: "«\(phrase)» — это \(RussianFormat.date(nearest)) или \(RussianFormat.date(later))?",
+                    reason: .ambiguousDate,
+                    options: [RussianFormat.dateWithWeekday(nearest), RussianFormat.dateWithWeekday(later)]
+                )))
+            }
+        }
+
+        /// Between midnight and 04:00 "завтра" may mean the day that is already running: ask which.
+        func lateNightGuard(_ actions: [ParsedAction]) throws {
+            guard anchor.time < policy.lateNightUntil else { return }
+            for action in actions {
+                guard let when = action.item?.when ?? action.changes?.when, let phrase = when.phrase else { continue }
+                let words = SearchText.tokens(phrase)
+                guard words.contains("завтра") || words.contains("послезавтра") else { continue }
+                let days = words.contains("послезавтра") ? 2 : 1
+                let early = anchor.date.adding(days: days - 1)
+                let literal = anchor.date.adding(days: days)
+                throw Stop(.clarify(Clarification(
+                    question: "Сейчас после полуночи. «\(phrase)» — это \(RussianFormat.date(early)) или \(RussianFormat.date(literal))?",
+                    reason: .ambiguousDate,
+                    options: [RussianFormat.dateWithWeekday(early), RussianFormat.dateWithWeekday(literal)]
+                )))
+            }
+        }
+
+        func sanitize(_ recurrence: Recurrence, start: LocalDate?) -> Recurrence? {
+            var rule = recurrence
+            rule.interval = min(max(rule.interval, 1), 99)
+            if let count = rule.count { rule.count = count <= 0 ? nil : min(count, 1000) }
+            if let day = rule.byMonthday, !(1 ... 31).contains(day) { rule.byMonthday = nil }
+            if let days = rule.byWeekday { rule.byWeekday = days.isEmpty ? nil : Array(Set(days)).sorted() }
+            if let until = rule.until, let start, until < start { rule.until = nil }
+            return rule
+        }
+
+        // MARK: Queries
+
+        func resolve(_ query: ParsedQuery) throws -> Interpretation {
+            let today = anchor.date
+            let detail = query.detail ?? .digest
+            let includeDone = query.includeDone ?? false
+            let target: QueryPlan.Target
+            switch query.scope {
+            case .day:
+                let date = query.when.flatMap { resolver.resolve($0).date } ?? today
+                target = .days(date ... date)
+            case .range:
+                if let named = query.namedRange {
+                    target = .days(namedRange(named))
+                } else {
+                    let start = query.when.flatMap { resolver.resolve($0).date } ?? today
+                    let span = min(max(query.spanDays ?? 7, 1), 366)
+                    target = .days(start ... start.adding(days: span - 1))
+                }
+            case .next:
+                target = .upcoming(limit: detail == .first ? 1 : 5)
+            case .overdue:
+                target = .overdue
+            case .inbox:
+                target = .inbox
+            case .recurring:
+                target = .recurring
+            case .search:
+                guard let text = clean(query.text) else {
+                    throw Stop(.clarify(Clarification(question: "Что найти?", reason: .unclearSpeech)))
+                }
+                target = .search(text)
+            }
+            return .query(QueryPlan(target: target, includeDone: includeDone, detail: detail))
+        }
+
+        func namedRange(_ range: NamedRange) -> ClosedRange<LocalDate> {
+            let today = anchor.date
+            let endOfWeek = today.startOfWeek.adding(days: 6)
+            switch range {
+            case .thisWeek: return today ... endOfWeek
+            case .nextWeek: return endOfWeek.adding(days: 1) ... endOfWeek.adding(days: 7)
+            case .thisMonth: return today ... today.lastOfMonth
+            case .nextMonth:
+                let first = today.firstOfMonth.adding(months: 1)
+                return first ... first.lastOfMonth
+            }
+        }
+
+        // MARK: Text hygiene
+
+        func clean(_ text: String?) -> String? {
+            guard let text else { return nil }
+            let collapsed = text
+                .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+            return collapsed.isEmpty ? nil : collapsed
+        }
+
+        func sanitize(_ clarification: ParsedClarification) -> Clarification {
+            let question = clean(clarification.question).map { String($0.prefix(160)) } ?? Self.defaultQuestion(clarification.reason)
+            let options = (clarification.options ?? []).compactMap { clean($0) }.prefix(3).map { String($0.prefix(80)) }
+            return Clarification(question: question, reason: clarification.reason, options: Array(options))
+        }
+
+        func sanitizeSpeech(_ speech: String?) -> String? {
+            guard var text = clean(speech) else { return nil }
+            text = text.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
+            text = text.replacingOccurrences(of: #"[*_`#\[\]<>]"#, with: "", options: .regularExpression)
+            return clean(text).map { String($0.prefix(policy.maxSpeechLength)) }
+        }
+
+        static func defaultQuestion(_ reason: ClarificationReason) -> String {
+            switch reason {
+            case .missingDate: "На какую дату?"
+            case .missingTime: "Во сколько?"
+            case .ambiguousDate: "Какую дату вы имеете в виду?"
+            case .ambiguousTime: "Какое время вы имеете в виду?"
+            case .ambiguousTarget: "Какую именно запись?"
+            case .targetNotFound: "Не нашёл такую запись. Что именно изменить?"
+            case .unclearSpeech: "Не расслышал. Повторите, пожалуйста."
+            case .destructiveConfirm: "Подтвердите, пожалуйста."
+            case .other: "Уточните, пожалуйста."
+            }
+        }
+    }
+}

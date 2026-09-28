@@ -89,6 +89,12 @@ public final class Mutator {
         self.makeID = makeID
     }
 
+    /// The live (not deleted) item with this id.
+    public func item(id: String) throws -> Item? {
+        guard let row = try Item.fetchOne(db, key: id), row.deletedAt == nil else { return nil }
+        return row
+    }
+
     /// Inserts a new item. An empty `id` is replaced by a generated one; timestamps are set here.
     @discardableResult
     public func insert(_ item: Item) throws -> Item {
@@ -106,7 +112,7 @@ public final class Mutator {
     /// Edits an existing item in place and bumps `version` and `updatedAt`.
     @discardableResult
     public func update(id: String, _ edit: (inout Item) throws -> Void) throws -> Item {
-        guard var row = try Item.fetchOne(db, key: id) else { throw StoreError.itemNotFound(id) }
+        guard var row = try Item.fetchOne(db, key: id), row.deletedAt == nil else { throw StoreError.itemNotFound(id) }
         let before = try Snapshot.encode(row)
         try edit(&row)
         row.id = id

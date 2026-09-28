@@ -79,7 +79,8 @@ public struct RelativeDateResolver: Sendable {
         return nil
     }
 
-    private func isPast(date: LocalDate, time: LocalTime?) -> Bool {
+    /// Whether `date` (with `time`, if any) is already behind the anchor. All-day today is not past.
+    func isPast(date: LocalDate, time: LocalTime?) -> Bool {
         if date < anchor.date { return true }
         if date == anchor.date, let time { return time < anchor.time }
         return false
