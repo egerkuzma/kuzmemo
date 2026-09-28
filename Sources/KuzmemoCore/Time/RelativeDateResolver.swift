@@ -47,7 +47,11 @@ public struct RelativeDateResolver: Sendable {
             if let n = when.daysFromToday { date = anchor.date.adding(days: n) } else { issues.append(.incomplete("days_from_today")) }
         case .weekday:
             if let weekday = when.weekday {
-                date = anchor.date.next(weekday).adding(days: 7 * (when.weekOffset ?? 0))
+                // `week_offset` counts calendar weeks (Monday first) from the current one. With 0 the weekday of
+                // this week is used only while it is still ahead; today or a passed day rolls to next week.
+                let offset = when.weekOffset ?? 0
+                let inWeek = anchor.date.startOfWeek.adding(days: weekday.rawValue - 1 + 7 * offset)
+                date = (offset == 0 && inWeek <= anchor.date) ? inWeek.adding(days: 7) : inWeek
             } else {
                 issues.append(.incomplete("weekday"))
             }

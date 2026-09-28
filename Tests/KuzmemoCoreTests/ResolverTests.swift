@@ -31,6 +31,25 @@ struct ResolverTests {
         #expect(resolver().resolve(When(mode: .weekday, weekday: .sun)).date == date("2026-10-04"))
     }
 
+    @Test func weekOffsetCountsCalendarWeeks() {
+        // Wednesday 2026-09-30: Monday of this week is behind us, so offset 0 rolls to next week.
+        let wed = resolver("2026-09-30 10:00")
+        #expect(wed.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 0)).date == date("2026-10-05"))
+        #expect(wed.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 1)).date == date("2026-10-05")) // "на следующей неделе"
+        #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 0)).date == date("2026-10-02"))
+        #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 1)).date == date("2026-10-09"))
+        #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 2)).date == date("2026-10-16"))
+        #expect(wed.resolve(When(mode: .weekday, weekday: .wed, weekOffset: 0)).date == date("2026-10-07")) // today rolls over
+        // Sunday 2026-10-04: everything with offset 0 that is not later than today rolls
+        let sun = resolver("2026-10-04 10:00")
+        #expect(sun.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 0)).date == date("2026-10-05"))
+        #expect(sun.resolve(When(mode: .weekday, weekday: .sun, weekOffset: 0)).date == date("2026-10-11"))
+        // From Monday, "на следующей неделе" (mon, 1) is the coming Monday, not the one after
+        #expect(resolver().resolve(When(mode: .weekday, weekday: .mon, weekOffset: 1)).date == date("2026-10-05"))
+        // negative offsets point into the past and are flagged
+        #expect(resolver().resolve(When(mode: .weekday, weekday: .fri, weekOffset: -1)).issues == [.inThePast])
+    }
+
     @Test func minutesFromNowCrossMidnight() {
         let r1 = resolver().resolve(When(mode: .minutesFromNow, minutesFromNow: 120))
         #expect(r1.date == date("2026-09-28") && r1.time == LocalTime("16:30"))
@@ -163,7 +182,7 @@ struct CrossCheckTests {
         #expect(r.crossCheck(good, resolved: r.resolve(good)) == .agrees)
         let bad = When(mode: .daysFromToday, phrase: "послезавтра", daysFromToday: 3)
         #expect(r.crossCheck(bad, resolved: r.resolve(bad)) == .disagrees(localDate: LocalDate("2026-09-30")!))
-        let wrongWeek = When(mode: .weekday, phrase: "в понедельник", weekday: .mon, weekOffset: 1)
+        let wrongWeek = When(mode: .weekday, phrase: "в понедельник", weekday: .mon, weekOffset: 2)
         #expect(r.crossCheck(wrongWeek, resolved: r.resolve(wrongWeek)) == .disagrees(localDate: LocalDate("2026-10-05")!))
         let ambiguous = When(mode: .weekday, phrase: "в следующую пятницу", weekday: .fri, weekOffset: 1)
         #expect(r.crossCheck(ambiguous, resolved: r.resolve(ambiguous)) == .noHint)

@@ -86,7 +86,7 @@ struct ValidatorCreateTests {
         guard case let .mutate(plan) = wrong else { Issue.record("expected mutate"); return }
         #expect(plan.warnings.count == 1 && plan.warnings[0].contains("послезавтра"))
 
-        let weekday = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Планёрка","when":{"mode":"weekday","weekday":"mon","week_offset":1,"time":"10:00","phrase":"в понедельник в десять"}}}]}"#)
+        let weekday = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Планёрка","when":{"mode":"weekday","weekday":"mon","week_offset":2,"time":"10:00","phrase":"в понедельник в десять"}}}]}"#)
         #expect(created(weekday).first?.date == LocalDate("2026-10-05"))
     }
 
@@ -96,6 +96,15 @@ struct ValidatorCreateTests {
         #expect(c.reason == .ambiguousDate)
         #expect(c.options == ["пт, 2 октября", "пт, 9 октября"])
         #expect(c.question.contains("2 октября") && c.question.contains("9 октября"))
+    }
+
+    @Test func nextWeekPhrasesAreNotAmbiguous() async throws {
+        let answer = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон","when":{"mode":"weekday","weekday":"fri","week_offset":1,"time":"15:00","phrase":"на следующей неделе в пятницу в три"}}}]}"#
+        let result = try await validate(answer)
+        let new = try #require(created(result).first)
+        #expect(new.date == LocalDate("2026-10-09") && new.time == LocalTime("15:00"))
+        let approximate = try await validate(#"{"intent":"create","confidence":0.8,"actions":[{"op":"create","item":{"kind":"reminder","title":"Обсудить бюджет","when":{"mode":"weekday","weekday":"mon","week_offset":1,"phrase":"на следующей неделе","approximate":true}}}]}"#)
+        #expect(created(approximate).first?.date == LocalDate("2026-10-05") && created(approximate).first?.approximate == true)
     }
 
     @Test func lateNightRelativeDaysAreAmbiguous() async throws {

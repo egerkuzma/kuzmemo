@@ -300,8 +300,10 @@ public enum ActionValidator {
             for action in actions {
                 guard let when = action.item?.when ?? action.changes?.when, let phrase = when.phrase else { continue }
                 let words = SearchText.tokens(phrase)
-                guard words.contains(where: { $0.hasPrefix("следующ") }),
-                      let weekday = words.lazy.compactMap(PhraseDateHint.weekday(for:)).first else { continue }
+                // Only "следующую пятницу" (the adjective right before the weekday) is ambiguous;
+                // "на следующей неделе в пятницу" is not.
+                guard let index = words.indices.first(where: { PhraseDateHint.weekday(for: words[$0]) != nil && $0 > 0 && words[$0 - 1].hasPrefix("следующ") }),
+                      let weekday = PhraseDateHint.weekday(for: words[index]) else { continue }
                 let nearest = anchor.date.next(weekday)
                 let later = nearest.adding(days: 7)
                 throw Stop(.clarify(Clarification(
