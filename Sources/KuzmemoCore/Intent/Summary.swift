@@ -36,6 +36,14 @@ extension RussianFormat {
         }
     }
 
+    /// The rule for a list or an editor, with its end: "Каждую среду, до 31 декабря", "Каждый день, 10 раз".
+    public static func recurrenceDetailed(_ rule: Recurrence) -> String {
+        var text = recurrence(rule).capitalizedFirstLetter
+        if let until = rule.until { text += ", до \(date(until))" }
+        if let count = rule.count { text += ", \(count) \(plural(count, ("раз", "раза", "раз")))" }
+        return text
+    }
+
     static let weekdayAccusative = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"]
 
     /// "на завтра", "на пятницу, 2 октября" (within a week), "на 12 октября".

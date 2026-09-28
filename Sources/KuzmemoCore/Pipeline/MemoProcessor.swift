@@ -184,6 +184,21 @@ public actor MemoProcessor {
         return await process(memo)
     }
 
+    /// The person corrected the words of a failed memo (the Inbox card): replace the text and interpret it again.
+    public func editAndRetry(memoID: String, text: String) async -> ProcessOutcome? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !inFlight.contains(memoID), var memo = try? await store.memo(id: memoID) else { return nil }
+        memo.transcriptRaw = trimmed
+        memo.transcriptCorrected = nil
+        memo.status = .transcribed
+        memo.failStage = nil
+        memo.failReason = nil
+        memo.nextRetryAt = nil
+        memo.attempts = 0
+        try? await store.save(memo: memo)
+        return await process(memo)
+    }
+
     /// Resumes everything that was interrupted or is due for another attempt. Call at launch and on a timer.
     public func recoverUnfinished() async -> [ProcessOutcome] {
         guard let memos = try? await store.unfinishedMemos() else { return [] }

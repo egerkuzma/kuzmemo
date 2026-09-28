@@ -179,6 +179,19 @@ struct UtteranceProcessorTests {
         #expect(done.attempts == 1 && stt.callCount == 2)
     }
 
+    @Test func retryingARecordingTranscribesItNow() async throws {
+        let stt = ScriptedTranscriber([.fail(.modelMissing("/nowhere")), .reply("напомни позвонить")])
+        let r = try rig(stt: stt)
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let first = await r.utterances.process(Utterance(samples: recording()))
+        guard case .recognitionFailed = first.kind else { Issue.record("expected failure"); return }
+
+        let again = try #require(await r.utterances.retry(memoID: first.memoID))
+        guard case let .processed(outcome) = again.kind, case .applied = outcome.kind else { Issue.record("expected applied: \(again.kind)"); return }
+        #expect(try await r.store.memo(id: first.memoID)?.status == .applied && r.spool.files().isEmpty)
+        #expect(await r.utterances.retry(memoID: first.memoID) == nil) // nothing left to retry
+    }
+
     @Test func aMissingModelWaitsForTheUser() async throws {
         let stt = ScriptedTranscriber([.fail(.modelMissing("/nowhere")), .reply("напомни позвонить")])
         let r = try rig(stt: stt)

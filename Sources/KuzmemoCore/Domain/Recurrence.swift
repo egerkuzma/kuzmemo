@@ -57,3 +57,17 @@ public struct Recurrence: Codable, Hashable, Sendable {
         try c.encodeIfPresent(count, forKey: .count)
     }
 }
+
+extension Recurrence {
+    /// The rule with everything clamped to sane values: interval 1...99, at most 1000 occurrences, a valid day of
+    /// month, unique sorted weekdays, and no end date before the start.
+    public func normalized(start: LocalDate?) -> Recurrence {
+        var rule = self
+        rule.interval = min(max(rule.interval, 1), 99)
+        if let count = rule.count { rule.count = count <= 0 ? nil : min(count, 1000) }
+        if let day = rule.byMonthday, !(1 ... 31).contains(day) { rule.byMonthday = nil }
+        if let days = rule.byWeekday { rule.byWeekday = days.isEmpty ? nil : Array(Set(days)).sorted() }
+        if let until = rule.until, let start, until < start { rule.until = nil }
+        return rule
+    }
+}

@@ -144,6 +144,17 @@ public actor UtteranceProcessor {
         return results
     }
 
+    /// "Повторить" on a recording whose recognition failed: transcribe the kept audio now.
+    public func retry(
+        memoID: String, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
+    ) async -> UtteranceResult? {
+        guard !inFlight.contains(memoID), let memo = try? await store.memo(id: memoID), memo.status == .failed || memo.status == .recorded,
+              let path = memo.audioPath, let samples = try? spool.read(path: path) else { return nil }
+        inFlight.insert(memoID)
+        defer { inFlight.remove(memoID) }
+        return await transcribe(memo, samples: samples, onStage: onStage)
+    }
+
     // MARK: - Steps
 
     private var nowMs: Int64 { Int64(clock.now().timeIntervalSince1970 * 1000) }

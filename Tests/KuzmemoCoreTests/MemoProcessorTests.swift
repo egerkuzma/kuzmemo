@@ -158,6 +158,18 @@ struct MemoProcessorTests {
         #expect(try await store.memo(id: done.memo.id)?.status == .applied)
     }
 
+    @Test func correctedWordsAreInterpretedAgain() async throws {
+        let (processor, store, provider) = try processor([.fail(.notLoggedIn), .json(createAnswer)])
+        let failed = await processor.submit(text: "напомни про доступ в нотиан", inputKind: .voice)
+        guard case .failed = failed.kind else { Issue.record("expected failure"); return }
+        let fixed = try #require(await processor.editAndRetry(memoID: failed.memo.id, text: "  напомни послезавтра про доступ в Notion "))
+        guard case .applied = fixed.kind else { Issue.record("expected applied: \(fixed.kind)"); return }
+        let memo = try #require(try await store.memo(id: failed.memo.id))
+        #expect(memo.transcriptRaw == "напомни послезавтра про доступ в Notion" && memo.status == .applied && memo.attempts == 0 && memo.failReason == nil)
+        #expect(provider.requests.last?.userMessage.contains("<transcript>напомни послезавтра про доступ в Notion</transcript>") == true)
+        #expect(await processor.editAndRetry(memoID: failed.memo.id, text: "   ") == nil)
+    }
+
     @Test func aLoginProblemWaitsForTheUserInsteadOfRetrying() async throws {
         let (processor, store, _) = try processor([.fail(.notLoggedIn)])
         let outcome = await processor.submit(text: "напомни", inputKind: .text)

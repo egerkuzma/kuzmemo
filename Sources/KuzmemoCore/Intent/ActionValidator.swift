@@ -342,13 +342,7 @@ public enum ActionValidator {
         }
 
         func sanitize(_ recurrence: Recurrence, start: LocalDate?) -> Recurrence? {
-            var rule = recurrence
-            rule.interval = min(max(rule.interval, 1), 99)
-            if let count = rule.count { rule.count = count <= 0 ? nil : min(count, 1000) }
-            if let day = rule.byMonthday, !(1 ... 31).contains(day) { rule.byMonthday = nil }
-            if let days = rule.byWeekday { rule.byWeekday = days.isEmpty ? nil : Array(Set(days)).sorted() }
-            if let until = rule.until, let start, until < start { rule.until = nil }
-            return rule
+            recurrence.normalized(start: start)
         }
 
         // MARK: Queries
