@@ -1,0 +1,30 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+
+# macOS
+.DS_Store
+
+# App bundles produced by scripts/run_app.sh
+*.app
+
+# Voice recordings and generated audio must never be committed
+*.wav
+*.aiff
+*.caf
+*.m4a
+
+# Local data and secrets
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+signing/
+.env
+.env.*
+
+# Spike scratch output (summaries go to docs/spikes/)
+spikes/**/out/
+spikes/**/artifacts/
