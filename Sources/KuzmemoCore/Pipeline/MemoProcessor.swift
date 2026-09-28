@@ -66,23 +66,88 @@ public actor MemoProcessor {
 
     // MARK: - Entry points
 
-    /// Saves the utterance first, then interprets and applies it.
+    /// Saves the utterance first, then interprets and applies it. An answer to a clarifying question passes the
+    /// memo it answers as `parentMemoID` and the question; the answer is then read together with what was said
+    /// before, from the same moment.
     public func submit(
         text: String, inputKind: MemoInputKind, sttModel: String? = nil, sttMs: Int? = nil, durationMs: Int? = nil,
-        parentMemoID: String? = nil, anchor: LocalDateTime? = nil
+        parentMemoID: String? = nil, followupQuestion: String? = nil, anchor: LocalDateTime? = nil
     ) async -> ProcessOutcome {
+        var anchorText: String?
+        var timeZone = clock.timeZone.identifier
+        if let parentMemoID, let parent = try? await store.memo(id: parentMemoID) {
+            anchorText = parent.anchorLocal // "tomorrow" keeps meaning what it meant when the question was asked
+            timeZone = parent.tz
+        }
         let localNow = anchor ?? clock.localNow()
         let memo = Memo(
-            id: makeID(), createdAt: nowMs, anchorLocal: "\(localNow.date) \(localNow.time)", tz: clock.timeZone.identifier,
+            id: makeID(), createdAt: nowMs, anchorLocal: anchorText ?? "\(localNow.date) \(localNow.time)", tz: timeZone,
             inputKind: inputKind, status: .transcribed, durationMs: durationMs, sttModel: sttModel, sttMs: sttMs,
-            transcriptRaw: text, parentMemoID: parentMemoID
+            transcriptRaw: text, parentMemoID: parentMemoID, followupQuestion: followupQuestion
         )
         do {
             try await store.save(memo: memo)
         } catch {
             return ProcessOutcome(memo: memo, kind: .failed(.processFailed(exitCode: -1, stderr: "database: \(error)"), retryAt: nil), interpretation: nil)
         }
+        if let parentMemoID { await supersede(parentMemoID) }
         return await process(memo)
+    }
+
+    /// The question of a memo was answered: the answer's memo carries the phrase on.
+    public func supersede(_ memoID: String) async {
+        guard var memo = try? await store.memo(id: memoID), memo.status == .clarifying else { return }
+        memo.status = .superseded
+        try? await store.save(memo: memo)
+    }
+
+    /// Gives up on a memo the user was asked about (Esc, or a "no" in the middle of a question).
+    public func discard(memoID: String, reason: String) async {
+        guard var memo = try? await store.memo(id: memoID), memo.status == .clarifying || memo.status == .failed else { return }
+        memo.status = .discarded
+        memo.failReason = reason
+        memo.nextRetryAt = nil
+        try? await store.save(memo: memo)
+    }
+
+    /// Saves the words that started a conversation as a note without a date, for when a question got no answer.
+    public func keepAsNote(memoID: String) async -> ProcessOutcome? {
+        guard var memo = try? await store.memo(id: memoID) else { return nil }
+        let words = await chainTranscripts(endingAt: memo).first ?? memo.transcriptRaw
+        guard let text = words?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        let title = text.count <= 80 ? text : String(text.prefix(77)) + "…"
+        let plan = MutationPlan(actions: [.create(NewItem(kind: .note, title: title, details: title == text ? nil : text))])
+        do {
+            let applied = try await store.apply(plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: "Заметка из реплики")
+            memo.status = .applied
+            memo.opID = applied.op?.id
+            memo.failReason = nil
+            memo.nextRetryAt = nil
+            try? await store.save(memo: memo)
+            return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: nil)
+        } catch {
+            return ProcessOutcome(memo: memo, kind: .failed(.processFailed(exitCode: -2, stderr: "apply: \(error)"), retryAt: nil), interpretation: nil)
+        }
+    }
+
+    /// Transcripts along the chain of questions and answers ending at `memo`, oldest first.
+    private func chainTranscripts(endingAt memo: Memo) async -> [String] {
+        var parts: [String] = []
+        var current: Memo? = memo
+        var depth = 0
+        while let memo = current, depth < 6 {
+            if let text = memo.transcriptRaw { parts.insert(text, at: 0) }
+            current = memo.parentMemoID == nil ? nil : try? await store.memo(id: memo.parentMemoID!)
+            depth += 1
+        }
+        return parts
+    }
+
+    private func followUp(for memo: Memo) async -> FollowUp? {
+        guard let question = memo.followupQuestion, let parentID = memo.parentMemoID, let parent = try? await store.memo(id: parentID) else { return nil }
+        let earlier = await chainTranscripts(endingAt: parent)
+        guard !earlier.isEmpty else { return nil }
+        return FollowUp(previous: earlier.joined(separator: ". "), question: question)
     }
 
     /// A question the local router recognised: no model call. The memo is still recorded so history is complete.
@@ -167,7 +232,9 @@ public actor MemoProcessor {
         let started = Date()
         let result: InterpretResult
         do {
-            result = try await interpreter.interpret(InterpretRequest(transcript: transcript, anchor: anchor, timeZone: timeZone))
+            result = try await interpreter.interpret(InterpretRequest(
+                transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: await followUp(for: memo)
+            ))
         } catch let error as LLMError {
             return await fail(memo, error, elapsed: Date().timeIntervalSince(started))
         } catch {

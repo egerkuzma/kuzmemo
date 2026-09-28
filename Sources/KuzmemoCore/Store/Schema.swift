@@ -71,6 +71,12 @@ public enum Schema {
             """)
         }
 
+        // A spoken answer to a clarifying question is interpreted together with the phrase that caused the
+        // question; the question is stored with the answer so a retry after a failure still has the context.
+        migrator.registerMigration("v2-followup-question") { db in
+            try db.execute(sql: "ALTER TABLE memos ADD COLUMN followup_question TEXT")
+        }
+
         return migrator
     }
 }

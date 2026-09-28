@@ -1,14 +1,30 @@
 import Foundation
 
+/// The context of an answer to a clarifying question: the transcript is read together with what was said before
+/// and what the app asked, and the guards that make the app ask (an ambiguous "next Friday", "tomorrow" after
+/// midnight, a bulk deletion) do not fire a second time.
+public struct FollowUp: Equatable, Sendable {
+    /// The phrase that caused the question, followed by any earlier answers (oldest first).
+    public var previous: String
+    public var question: String
+
+    public init(previous: String, question: String) {
+        self.previous = previous
+        self.question = question
+    }
+}
+
 public struct InterpretRequest: Sendable {
     public var transcript: String
     public var anchor: LocalDateTime
     public var timeZone: TimeZone
+    public var followUp: FollowUp?
 
-    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone) {
+    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone, followUp: FollowUp? = nil) {
         self.transcript = transcript
         self.anchor = anchor
         self.timeZone = timeZone
+        self.followUp = followUp
     }
 }
 
@@ -55,9 +71,16 @@ public struct Interpreter: Sendable {
     public func interpret(_ request: InterpretRequest) async throws -> InterpretResult {
         let glossary = try await store.glossary()
         let transcript = Glossary.applyAliases(to: request.transcript, terms: glossary)
-        let context = try await planner.plan(transcript: transcript, anchor: request.anchor, store: store)
+        let followUp = request.followUp.map {
+            FollowUp(previous: Glossary.applyAliases(to: $0.previous, terms: glossary), question: $0.question)
+        }
+        // Entries are picked from everything that was said, since the earlier phrase may name the target.
+        let context = try await planner.plan(
+            transcript: [followUp?.previous, transcript].compactMap { $0 }.joined(separator: " "), anchor: request.anchor, store: store
+        )
         let message = promptBuilder.userMessage(
-            transcript: transcript, anchor: request.anchor, timeZone: request.timeZone, glossary: glossary, context: context
+            transcript: transcript, anchor: request.anchor, timeZone: request.timeZone, glossary: glossary, context: context,
+            followUp: followUp
         )
         let llmRequest = LLMRequest(
             systemPrompt: Prompt.system, userMessage: message, schema: ResponseSchema.compact,
@@ -73,7 +96,7 @@ public struct Interpreter: Sendable {
                 let validation = ValidationContext(
                     context: context,
                     resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
-                    store: store, policy: policy
+                    store: store, policy: policy, isFollowUp: followUp != nil
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)
                 return InterpretResult(

@@ -9,13 +9,14 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
-    _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30"
+    _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
+    followUp: Bool = false
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
         context: ContextPlan(entries: entries, expanded: false),
-        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store
+        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp
     )
     return await ActionValidator.validate(response, in: context)
 }
@@ -116,6 +117,28 @@ struct ValidatorCreateTests {
         #expect(created(try await validate(json)).count == 1)
         let relative = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"reminder","title":"Позвонить","when":{"mode":"minutes_from_now","minutes_from_now":120,"phrase":"через два часа"}}}]}"#, at: "2026-09-29 00:40")
         #expect(created(relative).count == 1)
+    }
+
+    @Test func anAnswerToAQuestionIsNotAskedAboutAgain() async throws {
+        // "Пятница следующей недели, 9 октября" was picked from the offered options; the guard must not fire again.
+        let nextFriday = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон","when":{"mode":"weekday","weekday":"fri","week_offset":1,"time":"15:00","phrase":"в следующую пятницу"}}}]}"#
+        #expect(clarification(try await validate(nextFriday)) != nil)
+        let answered = try await validate(nextFriday, followUp: true)
+        #expect(created(answered).first?.date == LocalDate("2026-10-09"))
+
+        // The same for "tomorrow" after midnight, once the person said which day they meant.
+        let tomorrow = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон","when":{"mode":"days_from_today","days_from_today":1,"time":"10:00","phrase":"завтра, 30 сентября"}}}]}"#
+        #expect(clarification(try await validate(tomorrow, at: "2026-09-29 00:40")) != nil)
+        #expect(created(try await validate(tomorrow, at: "2026-09-29 00:40", followUp: true)).count == 1)
+    }
+
+    @Test func aConfirmedBulkChangeIsApplied() async throws {
+        let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+        let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
+        let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
+        #expect(clarification(try await validate(json, entries: entries))?.reason == .destructiveConfirm)
+        guard case let .mutate(plan) = try await validate(json, entries: entries, followUp: true) else { Issue.record("expected the deletions"); return }
+        #expect(plan.actions.count == 3)
     }
 
     @Test func recurrenceRulesAreClampedAndNeedAStartDate() async throws {

@@ -196,7 +196,7 @@ public struct Store: Sendable {
 
     /// Memos that never reached a final state; the pipeline resumes them after a restart.
     public func unfinishedMemos() async throws -> [Memo] {
-        let final: [MemoStatus] = [.applied, .answered, .discarded]
+        let final: [MemoStatus] = [.applied, .answered, .discarded, .superseded]
         return try await writer.read { db in
             try Memo.filter(!final.contains(Column("status"))).order(Column("created_at")).fetchAll(db)
         }

@@ -14,6 +14,8 @@ public enum ItemSource: String, Codable, Sendable, CaseIterable, DatabaseValueCo
 
 public enum MemoStatus: String, Codable, Sendable, CaseIterable, DatabaseValueConvertible {
     case recorded, transcribing, transcribed, thinking, interpreted, applied, answered, clarifying, failed, discarded
+    /// A clarifying question was answered; the answer's memo carries the phrase on.
+    case superseded
 }
 
 public enum MemoInputKind: String, Codable, Sendable, DatabaseValueConvertible {

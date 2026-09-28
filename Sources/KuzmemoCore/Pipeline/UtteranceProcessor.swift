@@ -13,6 +13,18 @@ public struct Utterance: Sendable {
     }
 }
 
+/// A recording that answers a clarifying question the app asked.
+public struct Reply: Equatable, Sendable {
+    /// The memo that asked (it is `clarifying` until the answer has been recognised).
+    public var memoID: String
+    public var question: String
+
+    public init(memoID: String, question: String) {
+        self.memoID = memoID
+        self.question = question
+    }
+}
+
 /// Where a recording is, for a progress display.
 public enum UtteranceStage: Equatable, Sendable {
     case transcribing
@@ -71,15 +83,22 @@ public actor UtteranceProcessor {
     }
 
     public func process(
-        _ utterance: Utterance, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
+        _ utterance: Utterance, replyTo reply: Reply? = nil, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
     ) async -> UtteranceResult {
-        let anchor = utterance.spokenAt ?? clock.localNow()
+        let spoken = utterance.spokenAt ?? clock.localNow()
+        var anchorText = "\(spoken.date) \(spoken.time)"
+        var timeZone = clock.timeZone.identifier
+        if let reply, let asker = try? await store.memo(id: reply.memoID) {
+            anchorText = asker.anchorLocal // relative dates in the answer count from the original phrase
+            timeZone = asker.tz
+        }
         let id = makeID()
         inFlight.insert(id)
         defer { inFlight.remove(id) }
         var memo = Memo(
-            id: id, createdAt: nowMs, anchorLocal: "\(anchor.date) \(anchor.time)", tz: clock.timeZone.identifier,
-            inputKind: .voice, status: .recorded, durationMs: Int(Double(utterance.samples.count) / 16)
+            id: id, createdAt: nowMs, anchorLocal: anchorText, tz: timeZone,
+            inputKind: .voice, status: .recorded, durationMs: Int(Double(utterance.samples.count) / 16),
+            parentMemoID: reply?.memoID, followupQuestion: reply?.question
         )
         // If the spool cannot be written the phrase is still handled, just without the crash safety net.
         memo.audioPath = try? spool.write(utterance.samples, name: id)
@@ -166,9 +185,11 @@ public actor UtteranceProcessor {
             memo.audioPath = nil
             try? await store.save(memo: memo)
 
+            if let asker = memo.parentMemoID { await processor.supersede(asker) } // the answer carries the phrase on
             onStage(.interpreting(output.text))
             let anchor = MemoProcessor.parseAnchor(memo.anchorLocal) ?? clock.localNow()
-            if let plan = router.route(output.text, today: anchor.date) {
+            // An answer such as "завтра" must not be mistaken for the question "что на завтра".
+            if memo.parentMemoID == nil, let plan = router.route(output.text, today: anchor.date) {
                 let outcome = await processor.answerLocally(memo: memo, plan: plan)
                 return UtteranceResult(
                     kind: .processed(outcome), memoID: memo.id, transcript: output.text, audioSeconds: seconds, sttMs: sttMs, answeredLocally: true
@@ -191,7 +212,13 @@ public actor UtteranceProcessor {
         var retryAt: Date?
         let needsUser: Bool
         if case .modelMissing? = error as? TranscriberError { needsUser = true } else { needsUser = false }
-        if !needsUser, let delay = retryPolicy.delay(afterAttempts: memo.attempts) {
+        if memo.parentMemoID != nil {
+            // An answer that could not be recognised is not worth resuming later: the conversation has moved on.
+            memo.status = .discarded
+            spool.remove(path: memo.audioPath)
+            memo.audioPath = nil
+            memo.nextRetryAt = nil
+        } else if !needsUser, let delay = retryPolicy.delay(afterAttempts: memo.attempts) {
             retryAt = clock.now().addingTimeInterval(delay)
             memo.nextRetryAt = Int64(retryAt!.timeIntervalSince1970 * 1000)
         } else {

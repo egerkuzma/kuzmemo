@@ -58,6 +58,7 @@ private final class BlockingTranscriber: Transcriber, Sendable {
 
 private struct Rig {
     var utterances: UtteranceProcessor
+    var processorForTests: MemoProcessor
     var store: Store
     var spool: AudioSpool
     var provider: ScriptedProvider
@@ -79,8 +80,17 @@ private func rig(
         recognizer: Recognizer(transcriber: stt), processor: processor, store: store, spool: spool, clock: clock,
         retryPolicy: sttRetry, makeID: { "u" + ids.next() }
     )
-    return Rig(utterances: utterances, store: store, spool: spool, provider: provider, directory: directory)
+    return Rig(utterances: utterances, processorForTests: processor, store: store, spool: spool, provider: provider, directory: directory)
 }
+
+/// A memo that asked a clarifying question, made by speaking `phrase` (the first scripted model answer must be a question).
+private func askingMemo(_ r: Rig, phrase: String) async throws -> String {
+    let asked = await r.processorForTests.submit(text: phrase, inputKind: .voice)
+    guard case .clarify = asked.kind else { throw Skip("the first scripted answer was not a question") }
+    return asked.memo.id
+}
+
+private struct Skip: Error { let message: String; init(_ message: String) { self.message = message } }
 
 @Suite("UtteranceProcessor")
 struct UtteranceProcessorTests {
@@ -225,6 +235,45 @@ struct UtteranceProcessorTests {
             Issue.record("expected applied: \(result.kind)"); return
         }
         #expect(stt.callCount == 1 && r.provider.requests.count == 1)
+    }
+
+    @Test func aSpokenAnswerContinuesTheConversationAndSkipsTheRouter() async throws {
+        // "завтра" alone would be the question "что на завтра" to the router; as an answer it is a date.
+        let r = try rig(stt: ScriptedTranscriber([.reply("завтра")]), claude: [.json(ParserResponseTests.clarify), .json(ParserResponseTests.create)])
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let asker = try await askingMemo(r, phrase: "напомни позвонить Дмитрию")
+
+        let result = await r.utterances.process(Utterance(samples: recording()), replyTo: Reply(memoID: asker, question: "На какую дату напомнить?"))
+        guard case let .processed(outcome) = result.kind, case .applied = outcome.kind else {
+            Issue.record("expected applied: \(result.kind)"); return
+        }
+        #expect(!result.answeredLocally)
+        let message = try #require(r.provider.requests.last?.userMessage)
+        #expect(message.contains("<previous>напомни позвонить Дмитрию</previous>") && message.contains("<transcript>завтра</transcript>"))
+        let memo = try #require(try await r.store.memo(id: result.memoID))
+        #expect(memo.parentMemoID == asker && memo.followupQuestion == "На какую дату напомнить?" && memo.anchorLocal == "2026-09-28 14:30")
+        #expect(try await r.store.memo(id: asker)?.status == .superseded)
+    }
+
+    @Test func anAnswerWithoutSpeechLeavesTheQuestionOpen() async throws {
+        let r = try rig(stt: ScriptedTranscriber([]), claude: [.json(ParserResponseTests.clarify)])
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let asker = try await askingMemo(r, phrase: "напомни позвонить Дмитрию")
+        let result = await r.utterances.process(Utterance(samples: [Float](repeating: 0, count: 48000)), replyTo: Reply(memoID: asker, question: "?"))
+        guard case .noSpeech = result.kind else { Issue.record("expected noSpeech: \(result.kind)"); return }
+        #expect(try await r.store.memo(id: asker)?.status == .clarifying) // the app can still save it as a note
+    }
+
+    @Test func anAnswerThatCannotBeRecognisedIsNotResumedLater() async throws {
+        let r = try rig(stt: ScriptedTranscriber([.fail(.transcriptionFailed("busy"))]), claude: [.json(ParserResponseTests.clarify)])
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let asker = try await askingMemo(r, phrase: "напомни позвонить Дмитрию")
+        let result = await r.utterances.process(Utterance(samples: recording()), replyTo: Reply(memoID: asker, question: "?"))
+        guard case let .recognitionFailed(_, _, retryAt) = result.kind else { Issue.record("expected failure: \(result.kind)"); return }
+        #expect(retryAt == nil)
+        let memo = try #require(try await r.store.memo(id: result.memoID))
+        #expect(memo.status == .discarded && memo.audioPath == nil && r.spool.files().isEmpty)
+        #expect(try await r.store.memo(id: asker)?.status == .clarifying)
     }
 
     @Test func progressIsReportedInOrder() async throws {

@@ -47,10 +47,17 @@ struct GoldenExpectation: Codable, Sendable {
     var through: String?
 }
 
+/// The transcript of a follow-up case is the answer to `question`, said after `previous`.
+struct GoldenFollowUp: Codable, Sendable {
+    var previous: String
+    var question: String
+}
+
 struct GoldenCase: Codable, Sendable {
     var id: String
     var category: String
     var anchor: String?
+    var followUp: GoldenFollowUp?
     var transcript: String
     var items: [GoldenFixtureItem]?
     var expect: GoldenExpectation
@@ -135,10 +142,11 @@ enum Golden {
         let store = try await store(for: c)
         let anchor = anchor(for: c)
         let transcript = Glossary.applyAliases(to: c.transcript, terms: glossary)
-        let context = try await ContextPlanner().plan(transcript: transcript, anchor: anchor, store: store)
+        let planningText = [c.followUp?.previous, transcript].compactMap { $0 }.joined(separator: " ")
+        let context = try await ContextPlanner().plan(transcript: planningText, anchor: anchor, store: store)
         let response = try Interpreter.decode(structured)
         let interpretation = await ActionValidator.validate(response, in: ValidationContext(
-            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store
+            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store, isFollowUp: c.followUp != nil
         ))
         return (interpretation, response)
     }
@@ -150,7 +158,10 @@ enum Golden {
             let store = try await store(for: c)
             let interpreter = Interpreter(store: store, provider: provider, model: model)
             let started = Date()
-            let result = try await interpreter.interpret(InterpretRequest(transcript: c.transcript, anchor: anchor(for: c), timeZone: moscow))
+            let result = try await interpreter.interpret(InterpretRequest(
+                transcript: c.transcript, anchor: anchor(for: c), timeZone: moscow,
+                followUp: c.followUp.map { FollowUp(previous: $0.previous, question: $0.question) }
+            ))
             let failures = check(result.interpretation, against: c.expect)
             return GoldenRun(
                 caseID: c.id, category: c.category, passed: failures.isEmpty, failures: failures,
@@ -244,6 +255,7 @@ enum Golden {
                 default: nil
                 }
                 if let ref = e.ref { expect(id == ref, "target \(id ?? "nil"), expected \(ref)") }
+                if let count = e.count { expect(plan.actions.count == count, "\(plan.actions.count) actions, expected \(count)") }
             default:
                 break
             }

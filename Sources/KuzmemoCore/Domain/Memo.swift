@@ -30,6 +30,8 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
     public var nextRetryAt: Int64?
     public var opID: String?
     public var parentMemoID: String?
+    /// For a spoken or chosen answer: the question it answers.
+    public var followupQuestion: String?
 
     public init(
         id: String, createdAt: Int64, anchorLocal: String, tz: String, inputKind: MemoInputKind,
@@ -37,7 +39,8 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         sttMs: Int? = nil, transcriptRaw: String? = nil, transcriptCorrected: String? = nil,
         llmModel: String? = nil, llmMs: Int? = nil, llmUsageJSON: String? = nil, llmResponseJSON: String? = nil,
         intent: String? = nil, confidence: Double? = nil, failStage: String? = nil, failReason: String? = nil,
-        attempts: Int = 0, nextRetryAt: Int64? = nil, opID: String? = nil, parentMemoID: String? = nil
+        attempts: Int = 0, nextRetryAt: Int64? = nil, opID: String? = nil, parentMemoID: String? = nil,
+        followupQuestion: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -63,6 +66,7 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         self.nextRetryAt = nextRetryAt
         self.opID = opID
         self.parentMemoID = parentMemoID
+        self.followupQuestion = followupQuestion
     }
 
     enum CodingKeys: String, CodingKey {
@@ -89,6 +93,7 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         case nextRetryAt = "next_retry_at"
         case opID = "op_id"
         case parentMemoID = "parent_memo_id"
+        case followupQuestion = "followup_question"
     }
 }
 

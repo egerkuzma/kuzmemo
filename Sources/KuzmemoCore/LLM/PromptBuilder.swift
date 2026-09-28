@@ -10,7 +10,7 @@ public struct PromptBuilder: Sendable {
 
     public func userMessage(
         transcript: String, anchor: LocalDateTime, timeZone: TimeZone,
-        glossary: [GlossaryTerm], context: ContextPlan
+        glossary: [GlossaryTerm], context: ContextPlan, followUp: FollowUp? = nil
     ) -> String {
         var lines: [String] = []
         lines.append("<now>\(nowText(anchor, timeZone))</now>")
@@ -22,6 +22,10 @@ public struct PromptBuilder: Sendable {
             lines.append("[\(index + 1)] \(Self.describe(entry))")
         }
         lines.append("</items>")
+        if let followUp {
+            lines.append("<previous>\(Self.clean(followUp.previous))</previous>")
+            lines.append("<question>\(Self.clean(followUp.question))</question>")
+        }
         lines.append("<transcript>\(Self.clean(transcript))</transcript>")
         return lines.joined(separator: "\n")
     }

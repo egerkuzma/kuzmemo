@@ -67,6 +67,25 @@ struct InterpreterTests {
         #expect(message.contains("<glossary>Notion (нотион, нотиона)</glossary>"))
     }
 
+    @Test func anAnswerIsSentWithTheQuestionItAnswersAndSkipsTheGuards() async throws {
+        let store = try makeStore()
+        try await store.save(term: GlossaryTerm(canonical: "Notion", aliases: ["нотион"]))
+        let answer = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон","when":{"mode":"weekday","weekday":"fri","week_offset":1,"time":"15:00","phrase":"в следующую пятницу"}}}]}"#
+        let provider = ScriptedProvider([.json(answer)])
+        let result = try await Interpreter(store: store, provider: provider).interpret(InterpretRequest(
+            transcript: "пятницу следующей недели", anchor: mondayAfternoon, timeZone: moscow,
+            followUp: FollowUp(previous: "в следующую пятницу созвон в три с нотион", question: "Какую пятницу имеете в виду?")
+        ))
+        guard case let .mutate(plan) = result.interpretation, case let .create(new)? = plan.actions.first else {
+            Issue.record("expected a create plan, got \(result.interpretation)"); return
+        }
+        #expect(new.date == LocalDate("2026-10-09"))
+        let message = try #require(provider.requests.first?.userMessage)
+        #expect(message.contains("<previous>в следующую пятницу созвон в три с Notion</previous>")) // aliases apply to both parts
+        #expect(message.contains("<question>Какую пятницу имеете в виду?</question>"))
+        #expect(message.hasSuffix("<transcript>пятницу следующей недели</transcript>"))
+    }
+
     @Test func theModelSeesExistingEntriesAndTheirNumbersResolve() async throws {
         let store = try makeStore()
         try await store.perform(label: "seed") { m in

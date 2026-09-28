@@ -81,6 +81,83 @@ struct MemoProcessorTests {
         #expect(provider.callCount == 1)
     }
 
+    @Test func anAnswerIsReadWithTheQuestionFromTheMomentItWasAsked() async throws {
+        let clarify = ParserResponseTests.clarify
+        let (processor, store, provider) = try processor([.json(clarify), .json(createAnswer)], now: "2026-09-28 14:30")
+        let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        guard case .clarify = asked.kind else { Issue.record("expected a question: \(asked.kind)"); return }
+        #expect(try await store.memo(id: asked.memo.id)?.status == .clarifying)
+
+        let answered = await processor.submit(
+            text: "в пятницу", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: "На какую дату напомнить?",
+            anchor: LocalDateTime(date: LocalDate("2026-09-30")!, time: LocalTime("09:00")!) // ignored: the asker's moment wins
+        )
+        guard case .applied = answered.kind else { Issue.record("expected applied: \(answered.kind)"); return }
+        let message = try #require(provider.requests.last?.userMessage)
+        #expect(message.contains("<previous>напомни позвонить Дмитрию</previous>") && message.contains("<question>На какую дату напомнить?</question>"))
+        #expect(message.contains("<now>Monday 2026-09-28 14:30"))
+        #expect(try await store.memo(id: asked.memo.id)?.status == .superseded)
+        let memo = try #require(try await store.memo(id: answered.memo.id))
+        #expect(memo.parentMemoID == asked.memo.id && memo.followupQuestion == "На какую дату напомнить?" && memo.anchorLocal == "2026-09-28 14:30")
+        #expect(try await store.unfinishedMemos().isEmpty) // a superseded question is not left hanging
+    }
+
+    @Test func aRetryAfterAFailureKeepsTheConversation() async throws {
+        let (processor, _, provider) = try processor([.json(ParserResponseTests.clarify), .fail(.timedOut(seconds: 30)), .json(createAnswer)])
+        let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        let failed = await processor.submit(text: "в пятницу", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: "На какую дату напомнить?")
+        guard case .failed = failed.kind else { Issue.record("expected failure: \(failed.kind)"); return }
+        let retried = try #require(await processor.retry(memoID: failed.memo.id))
+        guard case .applied = retried.kind else { Issue.record("expected applied: \(retried.kind)"); return }
+        #expect(provider.requests.count == 3)
+        #expect(provider.requests[2].userMessage.contains("<previous>напомни позвонить Дмитрию</previous>"))
+    }
+
+    @Test func aSecondQuestionKeepsBothEarlierAnswersInView() async throws {
+        let (processor, _, provider) = try processor([.json(ParserResponseTests.clarify), .json(ParserResponseTests.clarify), .json(createAnswer)])
+        let first = await processor.submit(text: "созвон с Фигма", inputKind: .voice)
+        let second = await processor.submit(text: "в пятницу", inputKind: .voice, parentMemoID: first.memo.id, followupQuestion: "Какую пятницу?")
+        guard case .clarify = second.kind else { Issue.record("expected another question: \(second.kind)"); return }
+        _ = await processor.submit(text: "ближайшую", inputKind: .voice, parentMemoID: second.memo.id, followupQuestion: "Во сколько?")
+        #expect(provider.requests[2].userMessage.contains("<previous>созвон с Фигма. в пятницу</previous>"))
+        #expect(provider.requests[2].userMessage.contains("<question>Во сколько?</question>"))
+    }
+
+    @Test func aQuestionNobodyAnsweredBecomesANoteWithTheOriginalWords() async throws {
+        let (processor, store, _) = try processor([.json(ParserResponseTests.clarify)])
+        let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        let saved = try #require(await processor.keepAsNote(memoID: asked.memo.id))
+        guard case let .applied(result) = saved.kind, let change = result.changes.first else { Issue.record("expected a note: \(saved.kind)"); return }
+        #expect(change.item.kind == .note && change.item.title == "напомни позвонить Дмитрию" && change.item.date == nil)
+        #expect(change.item.source == .voice && change.item.memoID == asked.memo.id)
+        #expect(try await store.memo(id: asked.memo.id)?.status == .applied)
+        // and it can be undone like any other change
+        try await store.undo(opID: try #require(result.op).id)
+        #expect(try await store.inbox().isEmpty)
+    }
+
+    @Test func aLongPhraseKeepsAllItsWordsInTheNoteDetails() async throws {
+        let (processor, _, _) = try processor([.json(ParserResponseTests.clarify)])
+        let long = String(repeating: "очень длинная мысль ", count: 12).trimmingCharacters(in: .whitespaces)
+        let asked = await processor.submit(text: long, inputKind: .text)
+        let saved = try #require(await processor.keepAsNote(memoID: asked.memo.id))
+        guard case let .applied(result) = saved.kind, let item = result.changes.first?.item else { Issue.record("expected a note"); return }
+        #expect(item.title.count == 78 && item.title.hasSuffix("…") && item.details == long)
+    }
+
+    @Test func discardingAQuestionLeavesNothingBehind() async throws {
+        let (processor, store, _) = try processor([.json(ParserResponseTests.clarify), .json(createAnswer)])
+        let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        await processor.discard(memoID: asked.memo.id, reason: "cancelled")
+        let memo = try #require(try await store.memo(id: asked.memo.id))
+        #expect(memo.status == .discarded && memo.failReason == "cancelled")
+        #expect(try await store.unfinishedMemos().isEmpty)
+        // a finished memo is never rewritten
+        let done = await processor.submit(text: "напомни", inputKind: .text)
+        await processor.discard(memoID: done.memo.id, reason: "late")
+        #expect(try await store.memo(id: done.memo.id)?.status == .applied)
+    }
+
     @Test func aLoginProblemWaitsForTheUserInsteadOfRetrying() async throws {
         let (processor, store, _) = try processor([.fail(.notLoggedIn)])
         let outcome = await processor.submit(text: "напомни", inputKind: .text)

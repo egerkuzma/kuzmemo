@@ -20,12 +20,19 @@ public struct ValidationContext: Sendable {
     public var resolver: RelativeDateResolver
     public var store: Store
     public var policy: ValidationPolicy
+    /// The transcript answers a question the app already asked: the confirmations and ambiguity guards have
+    /// had their say and must not ask again.
+    public var isFollowUp: Bool
 
-    public init(context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard) {
+    public init(
+        context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
+        isFollowUp: Bool = false
+    ) {
         self.context = context
         self.resolver = resolver
         self.store = store
         self.policy = policy
+        self.isFollowUp = isFollowUp
     }
 }
 
@@ -102,21 +109,23 @@ public enum ActionValidator {
                 warnings.append("more than \(policy.maxActions) actions: truncated")
             }
             let deletes = actions.filter { $0.op == .delete }.count
-            if deletes > policy.maxDeletesWithoutConfirmation {
+            if deletes > policy.maxDeletesWithoutConfirmation && !vc.isFollowUp {
                 throw Stop(.clarify(Clarification(
                     question: "Удалить \(deletes) \(RussianFormat.plural(deletes, ("запись", "записи", "записей")))?",
                     reason: .destructiveConfirm, options: ["Да, удалить", "Нет"]
                 )))
             }
             let updates = actions.filter { $0.op == .update }.count
-            if updates > policy.maxUpdatesWithoutConfirmation {
+            if updates > policy.maxUpdatesWithoutConfirmation && !vc.isFollowUp {
                 throw Stop(.clarify(Clarification(
                     question: "Изменить \(updates) \(RussianFormat.plural(updates, ("запись", "записи", "записей")))?",
                     reason: .destructiveConfirm, options: ["Да, изменить", "Нет"]
                 )))
             }
-            try nextWeekdayGuard(actions)
-            try lateNightGuard(actions)
+            if !vc.isFollowUp {
+                try nextWeekdayGuard(actions)
+                try lateNightGuard(actions)
+            }
 
             var planned: [PlannedAction] = []
             for action in actions { planned.append(try await plan(action)) }

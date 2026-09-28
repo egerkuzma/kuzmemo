@@ -12,7 +12,7 @@ struct GoldenTests {
         #expect(Set(cases.map(\.id)).count == cases.count)
         let categories = Set(cases.map(\.category))
         for required in ["relative-day", "absolute-date", "relative-time", "day-part", "approximate", "recurrence",
-                         "clarify", "query", "edit", "notes-mixed", "safety"] {
+                         "clarify", "query", "edit", "notes-mixed", "safety", "follow-up"] {
             #expect(categories.contains(required), "category \(required)")
         }
         for c in cases {
