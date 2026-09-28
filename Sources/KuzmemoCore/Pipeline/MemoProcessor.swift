@@ -49,6 +49,9 @@ public actor MemoProcessor {
     private let clock: any NowProvider
     private let retryPolicy: RetryPolicy
     private let makeID: @Sendable () -> String
+    /// Memos being interpreted right now; actor methods interleave at every `await`, and a retry or recovery
+    /// that picked up the same memo would apply it twice.
+    private var inFlight: Set<String> = []
 
     public init(
         store: Store, interpreter: Interpreter, clock: any NowProvider = SystemNow(),
@@ -90,16 +93,29 @@ public actor MemoProcessor {
         let localNow = anchor ?? clock.localNow()
         let memo = Memo(
             id: makeID(), createdAt: nowMs, anchorLocal: "\(localNow.date) \(localNow.time)", tz: clock.timeZone.identifier,
-            inputKind: inputKind, status: .answered, durationMs: durationMs, sttModel: sttModel, sttMs: sttMs,
-            transcriptRaw: text, llmModel: "local-router", intent: Intent.query.rawValue, confidence: 1
+            inputKind: inputKind, status: .transcribed, durationMs: durationMs, sttModel: sttModel, sttMs: sttMs,
+            transcriptRaw: text
         )
+        return await answerLocally(memo: memo, plan: plan)
+    }
+
+    /// The same for a memo that already exists (a recording that has just been transcribed).
+    public func answerLocally(memo input: Memo, plan: QueryPlan) async -> ProcessOutcome {
+        var memo = input
+        memo.status = .answered
+        memo.llmModel = "local-router"
+        memo.intent = Intent.query.rawValue
+        memo.confidence = 1
+        memo.failStage = nil
+        memo.failReason = nil
+        memo.nextRetryAt = nil
         try? await store.save(memo: memo)
         return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: nil)
     }
 
     /// Runs a saved memo again (manual "Повторить" or the automatic retry).
     public func retry(memoID: String) async -> ProcessOutcome? {
-        guard let memo = try? await store.memo(id: memoID) else { return nil }
+        guard !inFlight.contains(memoID), let memo = try? await store.memo(id: memoID) else { return nil }
         return await process(memo)
     }
 
@@ -107,7 +123,7 @@ public actor MemoProcessor {
     public func recoverUnfinished() async -> [ProcessOutcome] {
         guard let memos = try? await store.unfinishedMemos() else { return [] }
         var outcomes: [ProcessOutcome] = []
-        for memo in memos where memo.transcriptRaw != nil {
+        for memo in memos where memo.transcriptRaw != nil && !inFlight.contains(memo.id) {
             switch memo.status {
             case .transcribed, .thinking, .interpreted:
                 outcomes.append(await process(memo))
@@ -125,6 +141,8 @@ public actor MemoProcessor {
     private var nowMs: Int64 { Int64(clock.now().timeIntervalSince1970 * 1000) }
 
     private func process(_ input: Memo) async -> ProcessOutcome {
+        inFlight.insert(input.id)
+        defer { inFlight.remove(input.id) }
         var memo = input
         guard let transcript = memo.transcriptRaw else {
             memo.status = .discarded

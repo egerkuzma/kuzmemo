@@ -59,6 +59,28 @@ struct MemoProcessorTests {
         #expect(provider.requests.count == 2)
     }
 
+    @Test func aMemoBeingInterpretedIsNotPickedUpAgain() async throws {
+        let store = try makeStore()
+        let provider = GatedProvider(ScriptedProvider([.json(createAnswer)]))
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        let live = Task { await processor.submit(text: "напомни мне послезавтра сказать Дмитрию", inputKind: .text) }
+        while provider.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+
+        // A timer-driven recovery or a manual retry fires while the model is still thinking.
+        #expect(await processor.recoverUnfinished().isEmpty)
+        let memoID = try #require(try await store.unfinishedMemos().first).id
+        #expect(await processor.retry(memoID: memoID) == nil)
+
+        await provider.gate.open()
+        let outcome = await live.value
+        guard case .applied = outcome.kind else { Issue.record("expected applied: \(outcome.kind)"); return }
+        #expect(try await store.items(on: LocalDate("2026-09-30")!).count == 1) // applied once, not twice
+        #expect(provider.callCount == 1)
+    }
+
     @Test func aLoginProblemWaitsForTheUserInsteadOfRetrying() async throws {
         let (processor, store, _) = try processor([.fail(.notLoggedIn)])
         let outcome = await processor.submit(text: "напомни", inputKind: .text)

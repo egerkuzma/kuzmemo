@@ -32,3 +32,6 @@ spikes/**/artifacts/
 # Python
 __pycache__/
 *.pyc
+
+# Throw-away spike lock files
+spikes/*/Package.resolved
