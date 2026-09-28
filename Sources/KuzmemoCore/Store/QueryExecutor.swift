@@ -87,3 +87,32 @@ extension Store {
         return "с \(RussianFormat.date(range.lowerBound)) по \(RussianFormat.date(range.upperBound))"
     }
 }
+
+public struct StoreCounts: Equatable, Sendable {
+    public var items: Int
+    public var memos: Int
+    public var ops: Int
+    public var unfinishedMemos: Int
+}
+
+extension Store {
+    public func counts() async throws -> StoreCounts {
+        try await writer.read { db in
+            StoreCounts(
+                items: try Item.filter(Column("deleted_at") == nil).fetchCount(db),
+                memos: try Memo.fetchCount(db),
+                ops: try Op.fetchCount(db),
+                unfinishedMemos: try Memo.filter(!["applied", "answered", "discarded"].contains(Column("status"))).fetchCount(db)
+            )
+        }
+    }
+
+    /// Removes every item, memo and journal entry (the glossary stays). For the dev bundle's test resets only.
+    public func eraseAllData() async throws {
+        try await writer.write { db in
+            for table in ["items_fts", "op_changes", "ops", "item_exceptions", "items", "memos", "notification_state"] {
+                try db.execute(sql: "DELETE FROM \(table)")
+            }
+        }
+    }
+}

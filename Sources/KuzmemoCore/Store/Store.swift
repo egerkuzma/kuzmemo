@@ -18,6 +18,11 @@ public struct Store: Sendable {
         self.makeID = makeID
     }
 
+    /// Opens (creating and migrating if needed) the SQLite database at `url`.
+    public init(databaseAt url: URL, clock: any NowProvider = SystemNow()) throws {
+        self.init(writer: try KuzmemoDatabase.open(at: url), clock: clock)
+    }
+
     private var nowMs: Int64 { Int64(clock.now().timeIntervalSince1970 * 1000) }
 
     // MARK: - Reads
