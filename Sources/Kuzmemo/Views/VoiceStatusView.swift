@@ -5,6 +5,13 @@ import SwiftUI
 struct VoiceStatusView: View {
     let voice: VoiceController
 
+    private var hint: String {
+        var keys: [String] = []
+        if voice.triggerRunning { keys.append("Fn") }
+        if let chord = voice.chordDescription { keys.append(chord) }
+        return keys.isEmpty ? "" : "или " + keys.joined(separator: " / ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -15,9 +22,7 @@ struct VoiceStatusView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(voice.isRecording ? .red : .accentColor)
                 .controlSize(.regular)
-                if voice.triggerRunning {
-                    Text("или клавиша Fn").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(verbatim: hint).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if voice.modelState == .loading {
                     ProgressView().controlSize(.small)

@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import KuzmemoCore
+import KeyboardShortcuts
 import KuzmemoSTT
 import Observation
 
@@ -120,6 +121,7 @@ final class VoiceController {
         )
 
         startTrigger()
+        registerChord()
         observeSystem()
         warmModel()
 
@@ -176,6 +178,15 @@ final class VoiceController {
             problem = .triggerUnavailable
         }
     }
+
+    /// The fallback chord feeds the same state machine as the Fn key.
+    private func registerChord() {
+        KeyboardShortcuts.onKeyDown(for: .recordVoice) { [weak self] in MainActor.assumeIsolated { self?.triggerDown() } }
+        KeyboardShortcuts.onKeyUp(for: .recordVoice) { [weak self] in MainActor.assumeIsolated { self?.triggerUp() } }
+    }
+
+    /// How the fallback chord is written, for hints ("⌃⌥M").
+    var chordDescription: String? { KeyboardShortcuts.getShortcut(for: .recordVoice)?.description }
 
     /// The grant is made in System Settings, outside the app, so look for it until it appears.
     private func waitForInputMonitoring() {

@@ -11,6 +11,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "1.1.0"),
+        // The fallback recording chord (Carbon hot key, no extra permissions) and its recorder in settings.
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "3.1.0"),
     ],
     targets: [
         // UI-free domain, storage, time and LLM-contract logic. Everything here is unit-tested.
@@ -40,7 +42,10 @@ let package = Package(
         // The menu-bar app: SwiftUI + AppKit shell around KuzmemoCore.
         .executableTarget(
             name: "Kuzmemo",
-            dependencies: ["KuzmemoCore", "KuzmemoSTT"],
+            dependencies: [
+                "KuzmemoCore", "KuzmemoSTT",
+                .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
+            ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("ExistentialAny"),

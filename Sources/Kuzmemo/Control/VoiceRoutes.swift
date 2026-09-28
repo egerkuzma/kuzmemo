@@ -11,6 +11,7 @@ enum VoiceRoutes {
         var body: [String: Any] = [
             "phase": "\(voice.phase)", "policy": voice.policyDescription, "model": "\(voice.modelState)",
             "problem": voice.problem.map { "\($0)" } ?? NSNull(), "triggerRunning": voice.triggerRunning,
+            "chord": voice.chordDescription ?? NSNull(),
             "pendingJobs": voice.pendingJobs, "lastTranscript": voice.lastTranscript ?? NSNull(),
             "hud": ["state": "\(voice.hud.model.state)", "level": voice.hud.model.level, "elapsed": voice.hud.model.elapsed],
             "speech": ["muted": voice.speech.muted, "speaking": voice.speech.isSpeaking],
