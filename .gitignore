@@ -28,3 +28,7 @@ signing/
 # Spike scratch output (summaries go to docs/spikes/)
 spikes/**/out/
 spikes/**/artifacts/
+
+# Python
+__pycache__/
+*.pyc
