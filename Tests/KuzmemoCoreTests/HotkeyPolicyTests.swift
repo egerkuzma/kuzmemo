@@ -87,6 +87,22 @@ struct HotkeyPolicyTests {
         #expect(idle.reset().isEmpty)
     }
 
+    @Test func listeningForAnAnswerBehavesLikeAHandsFreeRecording() {
+        var policy = HotkeyPolicy()
+        #expect(policy.beginHandsFree() == [.startRecording] && policy.state == .toggled)
+        // a tap of the key means "that is all": stop, and swallow the key-up that belongs to it
+        #expect(policy.triggerDown(at: 5) == [.stopRecording] && policy.state == .stopping)
+        #expect(policy.triggerUp(at: 5.1).isEmpty && policy.state == .idle)
+
+        // while the key is held, or a recording runs, nothing starts by itself
+        var held = HotkeyPolicy()
+        _ = held.triggerDown(at: 0)
+        #expect(held.beginHandsFree().isEmpty && held.state == .pressed(since: 0))
+        var running = HotkeyPolicy()
+        _ = running.beginHandsFree()
+        #expect(running.beginHandsFree().isEmpty)
+    }
+
     @Test func thresholdsAreConfigurable() {
         var config = HotkeyPolicy.Configuration()
         config.holdThreshold = 0.6

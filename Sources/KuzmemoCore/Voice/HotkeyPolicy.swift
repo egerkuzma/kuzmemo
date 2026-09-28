@@ -92,6 +92,14 @@ public struct HotkeyPolicy: Sendable {
         return [] // a long hold: the user is mid-sentence, ignore stray keys
     }
 
+    /// A hands-free recording starts without a key press (the app listens for the answer to its own question).
+    /// The next key-down stops it, exactly as after a tap.
+    public mutating func beginHandsFree() -> [Action] {
+        guard case .idle = state else { return [] }
+        state = .toggled
+        return [.startRecording]
+    }
+
     /// The recording ended by itself (silence timeout, hard limit, error) or was cancelled elsewhere.
     public mutating func recordingEnded() {
         state = .idle

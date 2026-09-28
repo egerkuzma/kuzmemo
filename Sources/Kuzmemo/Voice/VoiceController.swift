@@ -62,6 +62,8 @@ final class VoiceController {
     private struct Job {
         var id: Int
         var utterance: Utterance
+        /// Set when the recording answers a question the app asked.
+        var reply: AppEnvironment.PendingQuestion?
         var done: (@MainActor @Sendable (UtteranceResult) -> Void)?
     }
 
@@ -70,18 +72,22 @@ final class VoiceController {
         let meter: LevelMeter
         let startedAt: TimeInterval
         let spokenAt: LocalDateTime
+        /// The question this recording answers, if any.
+        let question: AppEnvironment.PendingQuestion?
         var handsFree = false
         var detector: EndOfSpeechDetector
         var smoothedLevel: Float = 0
         var warnedLimit = false
         var tick: Task<Void, Never>?
 
-        init(input: any AudioInput, meter: LevelMeter, startedAt: TimeInterval, spokenAt: LocalDateTime) {
+        init(input: any AudioInput, meter: LevelMeter, startedAt: TimeInterval, spokenAt: LocalDateTime, question: AppEnvironment.PendingQuestion?) {
             self.input = input
             self.meter = meter
             self.startedAt = startedAt
             self.spokenAt = spokenAt
-            detector = VoiceController.holdWatchdog()
+            self.question = question
+            handsFree = question != nil
+            detector = question == nil ? VoiceController.holdWatchdog() : VoiceController.answerDetector()
         }
     }
 
@@ -110,7 +116,7 @@ final class VoiceController {
                     self?.hud.showNote("Отменено", style: .success, seconds: 2)
                 }
             },
-            choose: { _ in }
+            choose: { [weak self] option in Task { @MainActor in await self?.choose(option) } }
         )
 
         startTrigger()
@@ -228,6 +234,11 @@ final class VoiceController {
 
     // MARK: - Recording
 
+    /// The window for answering a question: wait a few seconds for the first word, then stop shortly after the last.
+    static func answerDetector() -> EndOfSpeechDetector {
+        EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 1.5, speechWait: 7))
+    }
+
     static func holdWatchdog() -> EndOfSpeechDetector {
         // Push-to-talk ends when the key is released; this only catches a release that was never seen.
         EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 30, speechWait: 30))
@@ -260,7 +271,12 @@ final class VoiceController {
 
         let meter = LevelMeter()
         input.onLevel = { level in meter.record(level) }
-        hud.show(.recording(handsFree: false))
+        let question = env.pendingQuestion // a recording made while a question is open is its answer
+        if let question {
+            hud.show(.listening(env.toast ?? AppEnvironment.Toast(style: .question, lines: [question.question], options: question.options)))
+        } else {
+            hud.show(.recording(handsFree: false))
+        }
         do {
             try input.start()
         } catch {
@@ -269,9 +285,11 @@ final class VoiceController {
             return
         }
 
-        let session = Session(input: input, meter: meter, startedAt: ProcessInfo.processInfo.systemUptime, spokenAt: env.clock.localNow())
+        let session = Session(
+            input: input, meter: meter, startedAt: ProcessInfo.processInfo.systemUptime, spokenAt: env.clock.localNow(), question: question
+        )
         self.session = session
-        phase = .recording(handsFree: false)
+        phase = .recording(handsFree: question != nil)
         speech.stop()
         warmModel() // the model loads while the person is still talking
         session.tick = Task { @MainActor [weak self] in
@@ -300,7 +318,8 @@ final class VoiceController {
 
         switch session.detector.feed(level: peak, at: elapsed) {
         case .endOfSpeech: finishRecording()
-        case .noSpeech: cancelRecording(note: "Не слышу речи — запись остановлена.")
+        case .noSpeech:
+            if session.question != nil { giveUpListening() } else { cancelRecording(note: "Не слышу речи — запись остановлена.") }
         case .speechStarted, nil: break
         }
         guard self.session === session else { return }
@@ -312,47 +331,68 @@ final class VoiceController {
         }
     }
 
-    private func endSession() -> (samples: [Float], spokenAt: LocalDateTime)? {
+    private func endSession() -> (samples: [Float], spokenAt: LocalDateTime, question: AppEnvironment.PendingQuestion?)? {
         guard let session else { return nil }
         self.session = nil
         session.tick?.cancel()
         let samples = session.input.stop()
         phase = .idle
         policy.recordingEnded()
-        return (samples, session.spokenAt)
+        return (samples, session.spokenAt, session.question)
     }
 
+    /// Esc or the ✕ in the HUD. Cancelling an answer closes the question and saves nothing.
     func cancelRecording(note: String?) {
-        guard endSession() != nil else { return }
+        guard let ended = endSession() else { return }
         if let note { hud.showNote(note, style: .warning, seconds: 2.5) } else { hud.hide() }
+        if ended.question != nil { Task { await env.closeQuestion(keep: false) } }
+    }
+
+    /// Nobody answered the question in time: keep the original words as a note.
+    private func giveUpListening() {
+        guard endSession() != nil else { return }
+        Task { @MainActor in await closeUnanswered() }
+    }
+
+    private func closeUnanswered() async {
+        await env.closeQuestion(keep: true)
+        if let toast = env.toast { showBackground(.result(toast), autoHideAfter: Self.displaySeconds(for: toast)) } else { showBackground(.hidden) }
     }
 
     private func finishRecording() {
-        guard let (samples, spokenAt) = endSession() else { return }
+        guard let (samples, spokenAt, question) = endSession() else { return }
         let seconds = Double(samples.count) / 16_000
         guard seconds >= 0.6 else {
-            hud.showNote("Слишком короткая запись — пропускаю.", style: .warning, seconds: 2)
+            if question != nil {
+                Task { @MainActor in await closeUnanswered() }
+            } else {
+                hud.showNote("Слишком короткая запись — пропускаю.", style: .warning, seconds: 2)
+            }
             return
         }
-        enqueue(Utterance(samples: samples, spokenAt: spokenAt), done: nil)
+        if question != nil { _ = env.takeQuestion() } // from here on the question is being answered
+        enqueue(Utterance(samples: samples, spokenAt: spokenAt), reply: question, done: nil)
     }
 
     // MARK: - Queue
 
-    private func enqueue(_ utterance: Utterance, done: (@MainActor @Sendable (UtteranceResult) -> Void)?) {
+    private func enqueue(
+        _ utterance: Utterance, reply: AppEnvironment.PendingQuestion? = nil, done: (@MainActor @Sendable (UtteranceResult) -> Void)?
+    ) {
         nextJobID += 1
         pendingJobs += 1
         showBackground(modelState == .loading ? .preparingModel : .transcribing)
-        jobs.yield(Job(id: nextJobID, utterance: utterance, done: done))
+        jobs.yield(Job(id: nextJobID, utterance: utterance, reply: reply, done: done))
     }
 
     private func run(_ job: Job) async {
         activeJob = job.id
-        let result = await utterances.process(job.utterance) { [weak self] stage in
+        let reply = job.reply.map { Reply(memoID: $0.memoID, question: $0.question) }
+        let result = await utterances.process(job.utterance, replyTo: reply) { [weak self] stage in
             Task { @MainActor in self?.stageChanged(stage, job: job.id) }
         }
         activeJob = nil
-        await present(result)
+        await present(result, replyingTo: job.reply)
         pendingJobs -= 1
         job.done?(result)
     }
@@ -373,15 +413,19 @@ final class VoiceController {
 
     // MARK: - Presenting
 
-    private func present(_ result: UtteranceResult) async {
+    private func present(_ result: UtteranceResult, replyingTo question: AppEnvironment.PendingQuestion?) async {
         lastTranscript = result.transcript ?? lastTranscript
         switch result.kind {
         case .noSpeech:
-            showBackground(.note("Речи не слышно — ничего не записал.", .warning), autoHideAfter: 2.5)
+            if question != nil { await closeUnanswered() } else {
+                showBackground(.note("Речи не слышно — ничего не записал.", .warning), autoHideAfter: 2.5)
+            }
 
         case let .recognitionFailed(message, needsUser, retryAt):
             cues.play(.attention)
-            if needsUser {
+            if question != nil {
+                await closeUnanswered()
+            } else if needsUser {
                 modelState = .missing(message)
                 problem = .modelMissing
                 showBackground(.note("Нет модели распознавания. Запись сохранена — выполните scripts/install_models.sh.", .error), autoHideAfter: 8)
@@ -391,22 +435,52 @@ final class VoiceController {
             }
 
         case let .processed(outcome):
-            await env.present(outcome, announce: true)
-            guard let toast = env.toast else { showBackground(.hidden); return }
-            let spoken = await spokenText(for: outcome)
-            switch outcome.kind {
-            case .applied: cues.play(.saved)
-            case .unknown, .failed: cues.play(.attention)
-            case .answered, .clarify: break
-            }
-            if let spoken, session == nil {
-                showBackground(.result(toast))
-                await speech.speak(spoken)
-                showBackground(.result(toast), autoHideAfter: 2.5)
-            } else {
-                showBackground(.result(toast), autoHideAfter: Self.displaySeconds(for: toast))
-            }
+            await env.present(outcome, announce: true, round: (question?.round ?? 0) + 1)
+            await showOutcome(outcome)
         }
+    }
+
+    /// The HUD, sound and speech for an outcome that `AppEnvironment.present` has already recorded.
+    private func showOutcome(_ outcome: ProcessOutcome) async {
+        guard let toast = env.toast else { showBackground(.hidden); return }
+        let spoken = await spokenText(for: outcome)
+        switch outcome.kind {
+        case .applied: cues.play(.saved)
+        case .unknown, .failed: cues.play(.attention)
+        case .answered, .clarify: break
+        }
+        let asking = env.pendingQuestion != nil
+        if let spoken, session == nil {
+            showBackground(.result(toast))
+            await speech.speak(spoken)
+            if asking { startListening() } else { showBackground(.result(toast), autoHideAfter: 2.5) }
+        } else if asking {
+            startListening()
+        } else {
+            showBackground(.result(toast), autoHideAfter: Self.displaySeconds(for: toast))
+        }
+    }
+
+    /// Opens the microphone for the answer to the question on screen. Automation never opens the real
+    /// microphone on its own: it has to arm a scripted input first.
+    private func startListening() {
+        guard env.pendingQuestion != nil, session == nil else { return }
+        if AppPaths.controlEnabled && scriptedInput == nil { return }
+        perform(policy.beginHandsFree())
+    }
+
+    /// An option chosen by tapping it (in the HUD or the popover) answers the question without speech.
+    @discardableResult
+    func choose(_ option: String) async -> ProcessOutcome? {
+        guard let question = env.pendingQuestion else { return nil }
+        if session != nil { _ = endSession() } // stop listening; the tap is the answer
+        speech.stop()
+        showBackground(.interpreting(option))
+        pendingJobs += 1
+        defer { pendingJobs -= 1 }
+        guard let outcome = await env.answer(option, inputKind: question.inputKind) else { return nil }
+        await showOutcome(outcome)
+        return outcome
     }
 
     private func spokenText(for outcome: ProcessOutcome) async -> String? {

@@ -141,6 +141,56 @@ def main():
     state = call("GET", "/voice")
     check("a press that is too short is dropped with a note", state["phase"] == "idle" and "Слишком" in state["hud"]["state"] and counts()["memos"] == n)
 
+    print("clarifying questions")
+    def ask():
+        r = call("POST", "/record/inject-audio", {"path": wav("04")})
+        q = call("GET", "/voice").get("question")
+        check("an ambiguous phrase leaves a question open", r["outcome"]["kind"] == "clarify" and q is not None, json.dumps(r, ensure_ascii=False)[:200])
+        return q
+
+    # a spoken answer: the app listens by itself after asking (here the scripted microphone plays the answer)
+    call("POST", "/voice/input", {"path": wav("a2")})
+    ask()
+    wait_idle()
+    agenda = call("GET", "/agenda?from=2026-10-02&to=2026-10-02")["entries"]
+    check("«эту пятницу, второго октября» completes the phrase (event at 15:00 on 2 Oct)",
+          any(e["time"] == "15:00" and e["date"] == "2026-10-02" for e in agenda), str(agenda))
+    check("…and the question is closed", "question" not in call("GET", "/voice"))
+
+    # an option tapped in the HUD
+    q = ask()
+    r = call("POST", "/answer", {"option": q["options"][1]})
+    check("choosing «пятница следующей недели» books 9 Oct", r["kind"] == "applied" and r["changes"][0]["date"] == "2026-10-09", json.dumps(r, ensure_ascii=False)[:300])
+
+    # a typed answer
+    ask()
+    r = call("POST", "/answer", {"text": "Эту пятницу"})
+    check("a typed answer is accepted", r["kind"] == "applied" and r["changes"][0]["date"] == "2026-10-02", json.dumps(r, ensure_ascii=False)[:300])
+
+    # a refusal
+    items = counts()["items"]
+    call("POST", "/voice/input", {"path": wav("a3")})
+    ask()
+    wait_idle()
+    check("«нет, не надо, отмена» saves nothing", counts()["items"] == items and "question" not in call("GET", "/voice"))
+
+    # no answer at all: the words are kept as a note
+    call("POST", "/voice/input", {"path": wav("silence3")})
+    ask()
+    started = time.time()
+    wait_idle()
+    inbox = call("GET", "/inbox")["items"]
+    check("silence for the whole window keeps the phrase as a note", any(i["kind"] == "note" and "пятницу" in i["title"] for i in inbox), str(inbox))
+    check("…after about seven seconds", 5 < time.time() - started < 15, f"{time.time() - started:.1f}s")
+
+    # Esc while listening
+    inbox_before = len(call("GET", "/inbox")["items"])
+    call("POST", "/voice/input", {"path": wav("silence3")})
+    ask()
+    time.sleep(1.0)
+    call("POST", "/hotkey/escape")
+    check("Esc closes the question and saves nothing", "question" not in call("GET", "/voice") and len(call("GET", "/inbox")["items"]) == inbox_before)
+
     print("undo")
     items = counts()["items"]
     undone = call("POST", "/undo")

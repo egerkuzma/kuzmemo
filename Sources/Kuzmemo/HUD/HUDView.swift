@@ -57,6 +57,14 @@ struct HUDView: View {
             }
         case let .result(toast):
             ResultContent(toast: toast, actions: actions)
+        case let .listening(toast):
+            VStack(alignment: .leading, spacing: 10) {
+                ResultContent(toast: toast, actions: actions)
+                HStack(spacing: 10) {
+                    LevelBars(level: model.level)
+                    Text("Слушаю ответ… Esc — отмена").font(.caption).foregroundStyle(.secondary)
+                }
+            }
         case let .note(text, style):
             HStack(spacing: 10) {
                 Image(systemName: Self.symbol(style)).foregroundStyle(Self.tint(style))

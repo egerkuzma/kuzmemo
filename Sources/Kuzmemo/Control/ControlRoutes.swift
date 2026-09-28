@@ -11,6 +11,7 @@ enum ControlRoutes {
         case ("GET", "/state"): return await state(request, env)
         case ("POST", "/memo/transcript"): return await submit(request, env)
         case ("GET", "/agenda"): return await agenda(request, env)
+        case ("GET", "/inbox"): return await inbox(env)
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
         case ("POST", "/db/reset"): return await reset(env)
@@ -19,6 +20,8 @@ enum ControlRoutes {
         case ("POST", "/hotkey/down"), ("POST", "/hotkey/up"), ("POST", "/hotkey/other"), ("POST", "/hotkey/escape"):
             return VoiceRoutes.hotkey(request.path, env)
         case ("POST", "/voice/input"): return VoiceRoutes.armInput(request, env)
+        case ("POST", "/answer"): return await VoiceRoutes.answer(request, env)
+        case ("POST", "/question/close"): return await VoiceRoutes.closeQuestion(request, env)
         case ("POST", "/record/inject-audio"): return await VoiceRoutes.inject(request, env)
         case ("GET", "/speech/log"): return VoiceRoutes.speechLog(env)
         case ("POST", "/speech/mute"): return VoiceRoutes.mute(request, env)
@@ -88,6 +91,12 @@ enum ControlRoutes {
         }
     }
 
+    /// Entries without a date.
+    private static func inbox(_ env: AppEnvironment) async -> HTTPResponse {
+        guard let items = try? await env.store.inbox() else { return .error("cannot read the inbox", status: 500) }
+        return .json(["items": items.map { ["id": $0.id, "title": $0.title, "kind": $0.kind.rawValue, "details": $0.details ?? "", "source": $0.source.rawValue] }])
+    }
+
     private static func undo(_ env: AppEnvironment) async -> HTTPResponse {
         guard let op = try? await env.store.lastUndoableOp() else { return .error("nothing to undo", status: 404) }
         await env.undo(opID: op.id)
@@ -124,7 +133,7 @@ enum ControlRoutes {
         case "main": data = Snapshot.png(MainWindowView(env: env), width: max(width, 560), dark: dark)
         case "hud":
             guard let state = VoiceRoutes.hudState(request.query["state"] ?? "recording") else {
-                return .error("state must be one of preparing, recording, handsfree, transcribing, interpreting, result, question, note", status: 400)
+                return .error("state must be one of preparing, recording, handsfree, transcribing, interpreting, result, question, listening, note", status: 400)
             }
             data = Snapshot.png(HUDView(model: state), width: max(width, 420), dark: dark)
         default: return .error("view must be popover, main or hud", status: 400)

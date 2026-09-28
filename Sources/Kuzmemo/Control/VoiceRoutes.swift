@@ -19,6 +19,11 @@ enum VoiceRoutes {
             ],
         ]
         body["status"] = "\(env.status)"
+        if let question = env.pendingQuestion {
+            body["question"] = [
+                "memoID": question.memoID, "text": question.question, "options": question.options, "round": question.round,
+            ] as [String: Any]
+        }
         return .json(body)
     }
 
@@ -78,6 +83,28 @@ enum VoiceRoutes {
         return .json(body)
     }
 
+    /// A typed answer to the pending question, or an option chosen with a tap (`option`).
+    static func answer(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        guard let json = request.jsonBody, let text = (json["text"] ?? json["option"]) as? String else {
+            return .error("body must be {\"text\": \"...\"} or {\"option\": \"...\"}", status: 400)
+        }
+        let started = Date()
+        let outcome: ProcessOutcome?
+        if json["option"] != nil { outcome = await env.voice.choose(text) } else { outcome = await env.answer(text, inputKind: .text) }
+        guard let outcome else { return .error("no question is waiting for an answer", status: 409) }
+        var body = ControlRoutes.outcomeBody(outcome, env: env, started: started)
+        body["pendingQuestion"] = env.pendingQuestion?.question ?? NSNull()
+        return .json(body)
+    }
+
+    /// Closes the pending question the way a timeout does (`keep`: save the phrase as a note) or like Esc.
+    static func closeQuestion(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        let keep = (request.jsonBody?["keep"] as? Bool) ?? true
+        guard env.pendingQuestion != nil else { return .error("no question is waiting for an answer", status: 409) }
+        await env.closeQuestion(keep: keep)
+        return .json(["closed": true, "kept": keep, "lines": env.toast?.lines ?? []])
+    }
+
     static func speechLog(_ env: AppEnvironment) -> HTTPResponse {
         .json(["muted": env.voice.speech.muted, "speech": env.voice.speech.log, "cues": env.voice.cues.log])
     }
@@ -106,6 +133,12 @@ enum VoiceRoutes {
                 style: .question, lines: ["Какую пятницу имеете в виду?"],
                 options: ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
             ))
+        case "listening":
+            model.state = .listening(.init(
+                style: .question, lines: ["Какую пятницу имеете в виду?"],
+                options: ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
+            ))
+            model.level = 0.06
         case "note": model.state = .note("Речи не слышно — ничего не записал.", .warning)
         default: return nil
         }

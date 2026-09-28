@@ -14,8 +14,14 @@ struct ToastView: View {
                     Text(verbatim: line).font(.callout).fixedSize(horizontal: false, vertical: true)
                 }
                 if !toast.options.isEmpty {
-                    Text(verbatim: toast.options.map { "• \($0)" }.joined(separator: "\n"))
-                        .font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(toast.options, id: \.self) { option in
+                            Button { Task { await env.voice.choose(option) } } label: {
+                                Text(verbatim: option).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }
                 }
                 if let opID = toast.undoOpID {
                     Button("Отменить") { Task { await env.undo(opID: opID) } }

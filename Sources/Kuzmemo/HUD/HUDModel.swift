@@ -12,6 +12,8 @@ final class HUDModel {
         case transcribing
         case interpreting(String)
         case result(AppEnvironment.Toast)
+        /// A question is on screen and the microphone is open for the answer.
+        case listening(AppEnvironment.Toast)
         case note(String, AppEnvironment.Toast.Style)
     }
 

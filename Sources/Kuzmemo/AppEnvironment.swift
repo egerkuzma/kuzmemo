@@ -21,6 +21,20 @@ final class AppEnvironment {
         var undoOpID: String?
     }
 
+    /// A clarifying question waiting for an answer, typed, spoken or chosen.
+    struct PendingQuestion: Equatable {
+        var memoID: String
+        var question: String
+        var options: [String]
+        /// 1 for the first question about a phrase; asking stops after `maxQuestions`.
+        var round: Int
+        var inputKind: MemoInputKind
+    }
+
+    static let maxQuestions = 2
+    /// A question nobody answers within this long is closed and the phrase kept as a note.
+    static let questionLifetime: TimeInterval = 120
+
     let paths: AppPaths
     let clock = AdjustableNow()
     let store: Store
@@ -31,11 +45,13 @@ final class AppEnvironment {
     private var baseStatus: Status = .idle
     private(set) var toast: Toast?
     private(set) var queryResult: QueryResult?
+    private(set) var pendingQuestion: PendingQuestion?
     private(set) var version: String
 
     @ObservationIgnored private(set) var voice: VoiceController!
     @ObservationIgnored private var controlServer: ControlServer?
     @ObservationIgnored private var observer: Task<Void, Never>?
+    @ObservationIgnored private var questionExpiry: Task<Void, Never>?
 
     /// What the menu-bar icon shows: recording and pending voice work take precedence over the last outcome.
     var status: Status {
@@ -90,11 +106,59 @@ final class AppEnvironment {
     func submit(text: String, inputKind: MemoInputKind = .text) async -> ProcessOutcome? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, status != .thinking else { return nil }
+        if pendingQuestion != nil { return await answer(trimmed, inputKind: inputKind) } // typed reply to a question
         baseStatus = .thinking
         toast = nil
         let outcome = await processor.submit(text: trimmed, inputKind: inputKind)
         await present(outcome, announce: true)
         return outcome
+    }
+
+    /// An answer (typed, chosen or recognised) to the pending question, read together with the phrase behind it.
+    @discardableResult
+    func answer(_ text: String, inputKind: MemoInputKind) async -> ProcessOutcome? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let question = takeQuestion(), !trimmed.isEmpty else { return nil }
+        baseStatus = .thinking
+        toast = nil
+        let outcome = await processor.submit(
+            text: trimmed, inputKind: inputKind, parentMemoID: question.memoID, followupQuestion: question.question
+        )
+        await present(outcome, announce: true, round: question.round + 1)
+        return outcome
+    }
+
+    /// The person did not answer (or cancelled). With `keep` the original words become a note without a date.
+    /// `question` is the one being closed when it has already been taken out of play.
+    func closeQuestion(_ taken: PendingQuestion? = nil, keep: Bool) async {
+        guard let question = taken ?? takeQuestion() else { return }
+        if keep, let outcome = await processor.keepAsNote(memoID: question.memoID), case let .applied(result) = outcome.kind {
+            toast = Toast(
+                style: .warning, lines: ["Не дождался ответа — сохранил как заметку без даты."], undoOpID: result.op?.id
+            )
+        } else {
+            await processor.discard(memoID: question.memoID, reason: "the question was cancelled")
+            toast = nil
+        }
+        baseStatus = .idle
+    }
+
+    /// Takes the pending question out of play (it is being answered or closed).
+    func takeQuestion() -> PendingQuestion? {
+        questionExpiry?.cancel()
+        questionExpiry = nil
+        defer { pendingQuestion = nil }
+        return pendingQuestion
+    }
+
+    private func expectAnswer(to question: PendingQuestion) {
+        pendingQuestion = question
+        questionExpiry?.cancel()
+        questionExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.questionLifetime))
+            guard !Task.isCancelled, self?.pendingQuestion?.memoID == question.memoID else { return }
+            await self?.closeQuestion(keep: true)
+        }
     }
 
     func undo(opID: String) async {
@@ -110,7 +174,7 @@ final class AppEnvironment {
 
     // MARK: - Presenting outcomes
 
-    func present(_ outcome: ProcessOutcome, announce: Bool) async {
+    func present(_ outcome: ProcessOutcome, announce: Bool, round: Int = 1) async {
         let now = clock.localNow()
         switch outcome.kind {
         case let .applied(result):
@@ -126,7 +190,23 @@ final class AppEnvironment {
             toast = Toast(style: .answer, lines: [Self.digest(result, today: now.date)])
         case let .clarify(clarification):
             baseStatus = .idle
-            toast = Toast(style: .question, lines: [clarification.question], options: clarification.options)
+            if round > Self.maxQuestions || !announce {
+                // Two questions were not enough (or nobody is there to answer a recovered one): keep what was
+                // said rather than ask again.
+                if let saved = await processor.keepAsNote(memoID: outcome.memo.id), case let .applied(result) = saved.kind {
+                    toast = Toast(
+                        style: .warning, lines: ["Не удалось уточнить — сохранил как заметку без даты."], undoOpID: result.op?.id
+                    )
+                } else {
+                    toast = Toast(style: .warning, lines: ["Не удалось уточнить. Ничего не сохранено."])
+                }
+            } else {
+                toast = Toast(style: .question, lines: [clarification.question], options: clarification.options)
+                expectAnswer(to: PendingQuestion(
+                    memoID: outcome.memo.id, question: clarification.question, options: clarification.options,
+                    round: round, inputKind: outcome.memo.inputKind
+                ))
+            }
         case .unknown:
             baseStatus = .idle
             toast = Toast(style: .warning, lines: ["Не похоже на команду для календаря. Ничего не сохранено."])
