@@ -82,6 +82,21 @@ public actor MemoProcessor {
         return await process(memo)
     }
 
+    /// A question the local router recognised: no model call. The memo is still recorded so history is complete.
+    public func answerLocally(
+        text: String, plan: QueryPlan, inputKind: MemoInputKind, sttModel: String? = nil, sttMs: Int? = nil,
+        durationMs: Int? = nil, anchor: LocalDateTime? = nil
+    ) async -> ProcessOutcome {
+        let localNow = anchor ?? clock.localNow()
+        let memo = Memo(
+            id: makeID(), createdAt: nowMs, anchorLocal: "\(localNow.date) \(localNow.time)", tz: clock.timeZone.identifier,
+            inputKind: inputKind, status: .answered, durationMs: durationMs, sttModel: sttModel, sttMs: sttMs,
+            transcriptRaw: text, llmModel: "local-router", intent: Intent.query.rawValue, confidence: 1
+        )
+        try? await store.save(memo: memo)
+        return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: nil)
+    }
+
     /// Runs a saved memo again (manual "Повторить" or the automatic retry).
     public func retry(memoID: String) async -> ProcessOutcome? {
         guard let memo = try? await store.memo(id: memoID) else { return nil }

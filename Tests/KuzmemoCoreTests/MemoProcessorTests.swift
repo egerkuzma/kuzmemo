@@ -144,6 +144,17 @@ struct MemoProcessorTests {
         #expect(try await store.items(on: LocalDate("2026-09-22")!).count == 1)
     }
 
+    @Test func aLocallyRecognisedQuestionIsRecordedWithoutCallingTheModel() async throws {
+        let (processor, store, provider) = try processor([])
+        let plan = QueryPlan(target: .days(LocalDate("2026-09-28")! ... LocalDate("2026-09-28")!))
+        let outcome = await processor.answerLocally(text: "скажи что на сегодня", plan: plan, inputKind: .voice, sttModel: "whisper", sttMs: 500)
+        guard case let .answered(answered) = outcome.kind else { Issue.record("expected answered"); return }
+        #expect(answered == plan && provider.requests.isEmpty)
+        let memo = try #require(try await store.memo(id: outcome.memo.id))
+        #expect(memo.status == .answered && memo.llmModel == "local-router" && memo.intent == "query" && memo.sttMs == 500)
+        #expect(try await store.unfinishedMemos().isEmpty)
+    }
+
     @Test func glossaryCorrectionsAreRemembered() async throws {
         let (processor, store, _) = try processor([.json(#"{"intent":"unknown","confidence":0.9}"#)])
         try await store.save(term: GlossaryTerm(canonical: "Notion", aliases: ["нотиона"]))
