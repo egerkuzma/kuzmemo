@@ -1,0 +1,89 @@
+import Foundation
+import GRDB
+
+public struct QueryResult: Equatable, Sendable {
+    public var plan: QueryPlan
+    public var entries: [AgendaEntry]
+    /// Russian label for headings, for example "сегодня" or "с 28 сентября по 4 октября".
+    public var title: String
+}
+
+extension Store {
+    /// A stream that yields whenever calendar rows (items or per-occurrence overrides) change, so views can
+    /// reload. The first value arrives immediately.
+    public func changes() -> AsyncStream<Void> {
+        let writer = self.writer
+        return AsyncStream { continuation in
+            let observation = ValueObservation.tracking { db -> Int in
+                try Item.fetchCount(db) + ItemException.fetchCount(db)
+            }
+            let task = Task {
+                do {
+                    for try await _ in observation.values(in: writer) { continuation.yield() }
+                } catch {}
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Runs a validated query against the calendar.
+    public func run(_ plan: QueryPlan, now: LocalDateTime) async throws -> QueryResult {
+        let today = now.date
+        switch plan.target {
+        case let .days(range):
+            let entries = try await agenda(in: range, includeDone: plan.includeDone)
+            return QueryResult(plan: plan, entries: entries, title: Self.title(for: range, today: today))
+
+        case let .upcoming(limit):
+            let entries = try await agenda(in: today ... today.adding(days: 60), includeDone: false)
+                .filter { $0.date > today || ($0.date == today && ($0.time.map { $0 >= now.time } ?? true)) }
+            return QueryResult(plan: plan, entries: Array(entries.prefix(limit)), title: "ближайшее")
+
+        case .overdue:
+            let items = try await overdue(before: today, limit: 20)
+            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: "просрочено")
+
+        case .inbox:
+            return QueryResult(plan: plan, entries: try await inbox().map { Self.entry($0, today: today) }, title: "без даты")
+
+        case .recurring:
+            return QueryResult(plan: plan, entries: try await recurringSeries().map { Self.entry($0, today: today) }, title: "повторяющиеся")
+
+        case let .search(text):
+            var seen = Set<String>()
+            var items: [Item] = []
+            for variant in try await searchVariants(text) {
+                for item in try await search(variant, limit: 20) where seen.insert(item.id).inserted { items.append(item) }
+            }
+            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: "«\(text)»")
+        }
+    }
+
+    /// The query itself plus the glossary spellings of any term it mentions ("Figma" ↔ "фигма"),
+    /// so a search finds entries typed in either script.
+    func searchVariants(_ text: String) async throws -> [String] {
+        let words = Set(SearchText.tokens(text))
+        var variants = [text]
+        for term in try await glossary() where term.enabled {
+            let names = [term.canonical] + term.aliases
+            let normalized = names.map { SearchText.normalize($0) }
+            if normalized.contains(where: { name in words.contains(name) || SearchText.normalize(text).contains(name) }) {
+                variants += names.filter { !variants.contains($0) }
+            }
+        }
+        return variants
+    }
+
+    static func entry(_ item: Item, today: LocalDate) -> AgendaEntry {
+        AgendaEntry(
+            item: item, date: item.date ?? today, time: item.time, isDone: item.status == .done,
+            occurrenceDate: nil, wasMoved: false
+        )
+    }
+
+    static func title(for range: ClosedRange<LocalDate>, today: LocalDate) -> String {
+        if range.lowerBound == range.upperBound { return RussianFormat.relativeDay(range.lowerBound, today: today) }
+        return "с \(RussianFormat.date(range.lowerBound)) по \(RussianFormat.date(range.upperBound))"
+    }
+}
