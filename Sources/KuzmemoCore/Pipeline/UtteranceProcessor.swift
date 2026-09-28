@@ -23,8 +23,9 @@ public struct UtteranceResult: Sendable {
     public enum Kind: Sendable {
         /// Silence, noise or an invented phrase; nothing was stored except a discarded memo.
         case noSpeech(reason: String)
-        /// The engine could not run. The recording is kept and transcribed again later.
-        case recognitionFailed(String, retryAt: Date?)
+        /// The engine could not run. The recording is kept and transcribed again later; `needsUser` means it will
+        /// not be retried on its own (the speech model is not installed).
+        case recognitionFailed(String, needsUser: Bool, retryAt: Date?)
         case processed(ProcessOutcome)
     }
 
@@ -198,7 +199,7 @@ public actor UtteranceProcessor {
         }
         try? await store.save(memo: memo)
         return UtteranceResult(
-            kind: .recognitionFailed("\(error)", retryAt: retryAt), memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
+            kind: .recognitionFailed("\(error)", needsUser: needsUser, retryAt: retryAt), memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
         )
     }
 }

@@ -1,0 +1,114 @@
+import AVFoundation
+import Foundation
+import KuzmemoCore
+import KuzmemoSTT
+
+/// Control-channel routes for the voice path. They go through the same `VoiceController` the trigger key
+/// uses, so a check here exercises the real code; only the microphone is replaced by a file.
+enum VoiceRoutes {
+    static func state(_ env: AppEnvironment) -> HTTPResponse {
+        let voice = env.voice!
+        var body: [String: Any] = [
+            "phase": "\(voice.phase)", "policy": voice.policyDescription, "model": "\(voice.modelState)",
+            "problem": voice.problem.map { "\($0)" } ?? NSNull(), "triggerRunning": voice.triggerRunning,
+            "pendingJobs": voice.pendingJobs, "lastTranscript": voice.lastTranscript ?? NSNull(),
+            "hud": ["state": "\(voice.hud.model.state)", "level": voice.hud.model.level, "elapsed": voice.hud.model.elapsed],
+            "speech": ["muted": voice.speech.muted, "speaking": voice.speech.isSpeaking],
+            "permissions": [
+                "microphone": "\(voice.permissions.microphone)", "inputMonitoring": voice.permissions.inputMonitoring,
+            ],
+        ]
+        body["status"] = "\(env.status)"
+        return .json(body)
+    }
+
+    static func hotkey(_ path: String, _ env: AppEnvironment) -> HTTPResponse {
+        let voice = env.voice!
+        switch path {
+        case "/hotkey/down": voice.triggerDown()
+        case "/hotkey/up": voice.triggerUp()
+        case "/hotkey/other": voice.otherKeyPressed()
+        case "/hotkey/escape": voice.escapePressed()
+        default: return .error("unknown hotkey event", status: 404)
+        }
+        return state(env)
+    }
+
+    /// The next recording plays this file instead of listening to the microphone.
+    static func armInput(_ request: HTTPRequest, _ env: AppEnvironment) -> HTTPResponse {
+        guard let path = request.jsonBody?["path"] as? String else { return .error("body must be {\"path\": \"file.wav\"}", status: 400) }
+        do {
+            let samples = try AudioFileLoader.load(URL(fileURLWithPath: path))
+            env.voice.armScriptedInput(samples: samples)
+            return .json(["armed": path, "seconds": Double(samples.count) / 16_000])
+        } catch {
+            return .error("\(error)", status: 400)
+        }
+    }
+
+    /// Pushes a recording straight into the pipeline and answers when it has been fully processed.
+    static func inject(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        guard let path = request.jsonBody?["path"] as? String else { return .error("body must be {\"path\": \"file.wav\"}", status: 400) }
+        let samples: [Float]
+        do { samples = try AudioFileLoader.load(URL(fileURLWithPath: path)) } catch { return .error("\(error)", status: 400) }
+        let started = Date()
+        let spokenBefore = env.voice.speech.spokenCount
+        let result = await env.voice.inject(samples: samples)
+        let spoken = Array(env.voice.speech.log.suffix(env.voice.speech.spokenCount - spokenBefore))
+
+        var body: [String: Any] = [
+            "memoID": result.memoID, "transcript": result.transcript ?? NSNull(), "audioSeconds": result.audioSeconds,
+            "sttMs": result.sttMs ?? NSNull(), "answeredLocally": result.answeredLocally,
+            "wallMs": Int(Date().timeIntervalSince(started) * 1000), "lines": env.toast?.lines ?? [],
+            "spoken": spoken,
+        ]
+        switch result.kind {
+        case let .noSpeech(reason):
+            body["kind"] = "noSpeech"
+            body["reason"] = reason
+        case let .recognitionFailed(message, needsUser, retryAt):
+            body["kind"] = "recognitionFailed"
+            body["error"] = message
+            body["needsUser"] = needsUser
+            body["retryAt"] = retryAt.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull()
+        case let .processed(outcome):
+            body["kind"] = "processed"
+            body["outcome"] = ControlRoutes.outcomeBody(outcome, env: env, started: started)
+        }
+        return .json(body)
+    }
+
+    static func speechLog(_ env: AppEnvironment) -> HTTPResponse {
+        .json(["muted": env.voice.speech.muted, "speech": env.voice.speech.log, "cues": env.voice.cues.log])
+    }
+
+    static func mute(_ request: HTTPRequest, _ env: AppEnvironment) -> HTTPResponse {
+        guard let muted = request.jsonBody?["muted"] as? Bool else { return .error("body must be {\"muted\": true|false}", status: 400) }
+        env.voice.setMuted(muted)
+        return .json(["muted": muted])
+    }
+
+    /// A HUD in a given state, for `/render?view=hud&state=…`.
+    static func hudState(_ name: String) -> HUDModel? {
+        let model = HUDModel()
+        switch name {
+        case "preparing": model.state = .preparingModel
+        case "recording": model.state = .recording(handsFree: false); model.level = 0.09; model.elapsed = 7
+        case "handsfree": model.state = .recording(handsFree: true); model.level = 0.05; model.elapsed = 12
+        case "transcribing": model.state = .transcribing
+        case "interpreting": model.state = .interpreting("напомни мне послезавтра сказать Дмитрию про доступ в Notion")
+        case "result":
+            model.state = .result(.init(
+                style: .success, lines: ["Напоминание «Сказать Дмитрию про доступ в Notion» — 30 сентября, весь день."], undoOpID: "op"
+            ))
+        case "question":
+            model.state = .result(.init(
+                style: .question, lines: ["Какую пятницу имеете в виду?"],
+                options: ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
+            ))
+        case "note": model.state = .note("Речи не слышно — ничего не записал.", .warning)
+        default: return nil
+        }
+        return model
+    }
+}

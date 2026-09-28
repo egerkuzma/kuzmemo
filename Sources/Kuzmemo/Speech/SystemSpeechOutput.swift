@@ -18,8 +18,10 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     var voiceIdentifier: String?
     var rate: Float = AVSpeechUtteranceDefaultSpeechRate
     var muted = false
-    /// Everything that was (or would have been) spoken, newest last.
+    /// Everything that was (or would have been) spoken, newest last (the last 100).
     private(set) var log: [String] = []
+    /// How many utterances there have been in total, so a caller can tell which log entries are new.
+    private(set) var spokenCount = 0
 
     override init() {
         super.init()
@@ -30,6 +32,7 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
 
     func speak(_ text: String) async {
         log.append(text)
+        spokenCount += 1
         if log.count > 100 { log.removeFirst(log.count - 100) }
         guard !muted, !text.isEmpty else { return }
         stop()

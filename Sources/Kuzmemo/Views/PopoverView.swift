@@ -15,6 +15,7 @@ struct PopoverView: View {
             header
             agenda
             if let toast = env.toast { ToastView(toast: toast, env: env) }
+            VoiceStatusView(voice: env.voice)
             input
             Divider()
             footer

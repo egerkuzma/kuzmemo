@@ -8,7 +8,7 @@ final class AppEnvironment {
     static let shared = AppEnvironment()
 
     enum Status: Equatable {
-        case idle, thinking, error
+        case idle, recording, thinking, error
     }
 
     /// What the user sees after a command: confirmation lines, an answer, a question or an error.
@@ -28,13 +28,21 @@ final class AppEnvironment {
     let provider: ClaudeCLIProvider
 
     private(set) var todayEntries: [AgendaEntry] = []
-    private(set) var status: Status = .idle
+    private var baseStatus: Status = .idle
     private(set) var toast: Toast?
     private(set) var queryResult: QueryResult?
     private(set) var version: String
 
-    private var controlServer: ControlServer?
-    private var observer: Task<Void, Never>?
+    @ObservationIgnored private(set) var voice: VoiceController!
+    @ObservationIgnored private var controlServer: ControlServer?
+    @ObservationIgnored private var observer: Task<Void, Never>?
+
+    /// What the menu-bar icon shows: recording and pending voice work take precedence over the last outcome.
+    var status: Status {
+        if voice?.isRecording == true { return .recording }
+        if voice?.isBusy == true || baseStatus == .thinking { return .thinking }
+        return baseStatus
+    }
 
     init() {
         paths = AppPaths.resolve()
@@ -58,6 +66,8 @@ final class AppEnvironment {
             guard let self else { return }
             for outcome in await processor.recoverUnfinished() { await present(outcome, announce: false) }
         }
+        voice = VoiceController(env: self)
+        voice.start()
         if AppPaths.controlEnabled {
             let server = ControlServer(socketPath: paths.controlSocket.path) { request in
                 await ControlRoutes.handle(request)
@@ -80,7 +90,7 @@ final class AppEnvironment {
     func submit(text: String, inputKind: MemoInputKind = .text) async -> ProcessOutcome? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, status != .thinking else { return nil }
-        status = .thinking
+        baseStatus = .thinking
         toast = nil
         let outcome = await processor.submit(text: trimmed, inputKind: inputKind)
         await present(outcome, announce: true)
@@ -105,23 +115,23 @@ final class AppEnvironment {
         switch outcome.kind {
         case let .applied(result):
             queryResult = nil
-            status = .idle
+            baseStatus = .idle
             if announce {
                 toast = Toast(style: .success, lines: result.changes.map { $0.summary(today: now.date) }, undoOpID: result.op?.id)
             }
         case let .answered(plan):
-            status = .idle
+            baseStatus = .idle
             let result = try? await store.run(plan, now: now)
             queryResult = result
             toast = Toast(style: .answer, lines: [Self.digest(result, today: now.date)])
         case let .clarify(clarification):
-            status = .idle
+            baseStatus = .idle
             toast = Toast(style: .question, lines: [clarification.question], options: clarification.options)
         case .unknown:
-            status = .idle
+            baseStatus = .idle
             toast = Toast(style: .warning, lines: ["Не похоже на команду для календаря. Ничего не сохранено."])
         case let .failed(error, retryAt):
-            status = .error
+            baseStatus = .error
             toast = Toast(style: .error, lines: [Self.message(for: error, retryAt: retryAt, today: now.date)])
         }
     }

@@ -5,6 +5,9 @@ import Foundation
 /// the Input Monitoring permission. Events are reported with monotonic timestamps so `HotkeyPolicy` can tell a
 /// tap from a hold; other keys pressed while the trigger is down are reported so a chord (Fn+arrow) can be
 /// told apart from a command. Nothing here consumes or alters events.
+///
+/// Event timestamps are nanoseconds on the same uptime clock as `ProcessInfo.systemUptime` (checked on Apple
+/// Silicon, where mach ticks are not nanoseconds), so a synthesised event can use the latter.
 nonisolated final class ModifierKeyMonitor: @unchecked Sendable {
     struct Key: Sendable {
         var keyCode: Int
@@ -21,6 +24,8 @@ nonisolated final class ModifierKeyMonitor: @unchecked Sendable {
         var down: @Sendable (TimeInterval) -> Void
         var up: @Sendable (TimeInterval) -> Void
         var otherKey: @Sendable (TimeInterval) -> Void
+        /// Esc was pressed (whether or not the trigger is down). Listen-only: the app in front still gets it.
+        var escape: @Sendable () -> Void = {}
     }
 
     private let key: Key
@@ -80,6 +85,7 @@ nonisolated final class ModifierKeyMonitor: @unchecked Sendable {
             if triggerDown { triggerDown = false; handlers.up(time) }
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         case .keyDown:
+            if event.getIntegerValueField(.keyboardEventKeycode) == 53 { handlers.escape() }
             if triggerDown { handlers.otherKey(time) }
         case .flagsChanged:
             let code = Int(event.getIntegerValueField(.keyboardEventKeycode))

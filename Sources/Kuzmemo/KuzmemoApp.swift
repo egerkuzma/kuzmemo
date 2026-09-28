@@ -46,6 +46,7 @@ struct MenuBarLabel: View {
     var body: some View {
         switch env.status {
         case .idle: Image(systemName: "calendar.badge.clock")
+        case .recording: Image(systemName: "record.circle.fill")
         case .thinking: Image(systemName: "ellipsis.circle")
         case .error: Image(systemName: "exclamationmark.triangle")
         }

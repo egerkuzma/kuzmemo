@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""End-to-end checks of the voice path through the dev app's control socket, without a person or a microphone.
+
+Needs: the dev app running (scripts/run_app.sh), the speech model installed, and the synthetic phrases from
+spikes/stt/make_synth.sh (spikes/stt/out/synth). Speech and sounds stay muted; the dev database is erased first.
+It calls the real Claude, so a run costs a few requests and about a minute.
+
+    scripts/e2e/voice.py
+"""
+import http.client
+import json
+import os
+import socket
+import sys
+import time
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SYNTH = os.path.join(ROOT, "spikes", "stt", "out", "synth")
+SOCK = os.path.expanduser("~/Library/Application Support/Kuzmemo-Dev/run/control.sock")
+
+
+class Unix(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(SOCK)
+
+
+def call(method, path, body=None):
+    conn = Unix("localhost", timeout=180)
+    payload = json.dumps(body) if body is not None else None
+    conn.request(method, path, body=payload)
+    response = conn.getresponse()
+    data = response.read()
+    conn.close()
+    return json.loads(data) if data else {}
+
+
+passed = failed = 0
+
+
+def check(name, condition, detail=""):
+    global passed, failed
+    if condition:
+        passed += 1
+        print(f"  ok   {name}")
+    else:
+        failed += 1
+        print(f"  FAIL {name} {detail}")
+
+
+def wav(name):
+    return os.path.join(SYNTH, f"{name}.wav")
+
+
+def wait_idle(timeout=90):
+    end = time.time() + timeout
+    while time.time() < end:
+        state = call("GET", "/voice")
+        if state["phase"] == "idle" and state["pendingJobs"] == 0:
+            return state
+        time.sleep(0.25)
+    raise SystemExit("timed out waiting for the voice pipeline to go idle")
+
+
+def counts():
+    return call("GET", "/state")["counts"]
+
+
+def main():
+    if not os.path.exists(SOCK):
+        sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
+    if not os.path.isdir(SYNTH):
+        sys.exit("synthetic phrases missing: run spikes/stt/make_synth.sh")
+
+    print("setup")
+    call("POST", "/db/reset")
+    call("POST", "/clock", {"local": "2026-09-28 14:30"})
+    call("POST", "/speech/mute", {"muted": True})
+    deadline = time.time() + 240
+    while call("GET", "/voice")["model"] not in ("ready",) and time.time() < deadline:
+        time.sleep(2)
+    check("speech model is ready", call("GET", "/voice")["model"] == "ready")
+
+    print("injected recordings")
+    r = call("POST", "/record/inject-audio", {"path": wav("01")})
+    o = r.get("outcome", {})
+    check("flagship phrase becomes a reminder for the day after tomorrow",
+          r["kind"] == "processed" and o.get("kind") == "applied"
+          and o["changes"][0]["date"] == "2026-09-30" and o["changes"][0]["itemKind"] == "reminder", json.dumps(r, ensure_ascii=False)[:400])
+    check("the change came from voice and carries the transcript", "Дмитрию" in o["changes"][0]["title"] and r["transcript"])
+    check("recognition is fast once warm", r["sttMs"] < 4000, f"sttMs={r['sttMs']}")
+
+    r = call("POST", "/record/inject-audio", {"path": wav("03")})
+    check("«скажи что на сегодня» is answered locally, without Claude", r["answeredLocally"] and r["outcome"]["kind"] == "answered" and "llm" not in r["outcome"])
+    check("…and read aloud (muted, but logged)", len(r["spoken"]) == 1 and "сегодня" in r["spoken"][0], str(r["spoken"]))
+
+    r = call("POST", "/record/inject-audio", {"path": wav("04")})
+    check("an ambiguous Friday is asked about", r["outcome"]["kind"] == "clarify" and len(r["outcome"]["options"]) >= 2, json.dumps(r, ensure_ascii=False)[:300])
+    check("…and the question is spoken", len(r["spoken"]) == 1)
+
+    before = counts()
+    for name in ("silence3", "noise5"):
+        r = call("POST", "/record/inject-audio", {"path": wav(name)})
+        check(f"{name} never reaches the model", r["kind"] == "noSpeech" and r["spoken"] == [])
+    check("…and creates no items", counts()["items"] == before["items"])
+
+    print("trigger key, with a scripted microphone")
+    call("POST", "/voice/input", {"path": wav("02")})
+    call("POST", "/hotkey/down"); time.sleep(0.12); call("POST", "/hotkey/up")
+    state = call("GET", "/voice")
+    check("a tap starts a hands-free recording", state["phase"].startswith("recording") and "true" in state["phase"], state["phase"])
+    started = time.time()
+    wait_idle()
+    check("it stops by itself after the silence that follows the phrase", time.time() - started > 4.5, f"{time.time() - started:.1f}s")
+    agenda = call("GET", "/agenda?from=2026-09-29&to=2026-09-29")["entries"]
+    check("«завтра в одиннадцать созвон» lands at 11:00", any(e["time"] == "11:00" and e["kind"] == "event" for e in agenda), str(agenda))
+
+    call("POST", "/voice/input", {"path": wav("10")})
+    call("POST", "/hotkey/down"); time.sleep(3.6)
+    check("holding keeps recording", call("GET", "/voice")["phase"].startswith("recording"))
+    released = time.time()
+    call("POST", "/hotkey/up")
+    wait_idle()
+    check("push-to-talk stops on release and is processed", time.time() - released < 12, f"{time.time() - released:.1f}s")
+    agenda = call("GET", "/agenda?from=2026-09-28&to=2026-09-28")["entries"]
+    check("«через полчаса» becomes today at 15:00", any(e["time"] == "15:00" for e in agenda), str(agenda))
+
+    n = counts()["memos"]
+    call("POST", "/voice/input", {"path": wav("14")})
+    call("POST", "/hotkey/down"); time.sleep(0.2); call("POST", "/hotkey/other"); call("POST", "/hotkey/up"); time.sleep(0.3)
+    state = call("GET", "/voice")
+    check("a chord cancels quietly", state["phase"] == "idle" and state["hud"]["state"] == "hidden" and counts()["memos"] == n, str(state["hud"]))
+
+    call("POST", "/voice/input", {"path": wav("14")})
+    call("POST", "/hotkey/down"); time.sleep(0.1); call("POST", "/hotkey/up"); time.sleep(1.0)
+    call("POST", "/hotkey/escape")
+    check("Esc cancels a hands-free recording", call("GET", "/voice")["phase"] == "idle" and counts()["memos"] == n)
+
+    call("POST", "/voice/input", {"path": wav("14")})
+    call("POST", "/hotkey/down"); time.sleep(0.4); call("POST", "/hotkey/up"); time.sleep(0.3)
+    state = call("GET", "/voice")
+    check("a press that is too short is dropped with a note", state["phase"] == "idle" and "Слишком" in state["hud"]["state"] and counts()["memos"] == n)
+
+    print("undo")
+    items = counts()["items"]
+    undone = call("POST", "/undo")
+    check("the last voice change can be undone", "undone" in undone and counts()["items"] == items - 1, str(undone))
+
+    log = call("GET", "/speech/log")
+    check("nothing was said aloud during automation", log["muted"] is True)
+
+    print(f"\n{passed} passed, {failed} failed")
+    sys.exit(1 if failed else 0)
+
+
+main()

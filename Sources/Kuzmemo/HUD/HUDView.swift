@@ -121,9 +121,12 @@ private struct ResultContent: View {
                     Text(verbatim: line).font(.callout).fixedSize(horizontal: false, vertical: true)
                 }
                 if !toast.options.isEmpty {
-                    HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 5) {
                         ForEach(toast.options, id: \.self) { option in
-                            Button(option) { actions.choose(option) }.buttonStyle(.bordered).controlSize(.small)
+                            Button { actions.choose(option) } label: {
+                                Text(verbatim: option).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
                         }
                     }
                 }

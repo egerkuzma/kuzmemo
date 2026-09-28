@@ -141,8 +141,8 @@ struct UtteranceProcessorTests {
         defer { try? FileManager.default.removeItem(at: r.directory) }
         let first = await r.utterances.process(Utterance(samples: recording()))
 
-        guard case let .recognitionFailed(message, retryAt) = first.kind else { Issue.record("expected failure: \(first.kind)"); return }
-        #expect(message.contains("ANE busy") && retryAt == Date(timeIntervalSince1970: 1_790_595_030)) // 30 s later
+        guard case let .recognitionFailed(message, needsUser, retryAt) = first.kind else { Issue.record("expected failure: \(first.kind)"); return }
+        #expect(message.contains("ANE busy") && !needsUser && retryAt == Date(timeIntervalSince1970: 1_790_595_030)) // 30 s later
         let failed = try #require(try await r.store.memo(id: first.memoID))
         #expect(failed.status == .failed && failed.failStage == "stt" && failed.attempts == 1 && failed.nextRetryAt == 1_790_595_030_000)
         #expect(failed.audioPath != nil && r.spool.files().count == 1)
@@ -174,8 +174,8 @@ struct UtteranceProcessorTests {
         let r = try rig(stt: stt)
         defer { try? FileManager.default.removeItem(at: r.directory) }
         let first = await r.utterances.process(Utterance(samples: recording()))
-        guard case let .recognitionFailed(_, retryAt) = first.kind else { Issue.record("expected failure"); return }
-        #expect(retryAt == nil)
+        guard case let .recognitionFailed(_, needsUser, retryAt) = first.kind else { Issue.record("expected failure"); return }
+        #expect(needsUser && retryAt == nil)
         #expect(try await r.store.memo(id: first.memoID)?.nextRetryAt == nil)
 
         #expect(await r.utterances.recoverUnfinished(includeBlocked: false).isEmpty) // a timer does not hammer a missing model

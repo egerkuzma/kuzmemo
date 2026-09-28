@@ -10,6 +10,8 @@ struct AppPaths {
     var claudeWorkingDirectory: URL { support.appendingPathComponent("claude-cwd", isDirectory: true) }
     var runDirectory: URL { support.appendingPathComponent("run", isDirectory: true) }
     var controlSocket: URL { runDirectory.appendingPathComponent("control.sock") }
+    /// Recordings waiting to be transcribed (deleted as soon as their text is stored).
+    var audioSpool: URL { support.appendingPathComponent("spool", isDirectory: true) }
     var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }
 
     static func resolve() -> AppPaths {

@@ -1,0 +1,523 @@
+import AppKit
+import AVFoundation
+import KuzmemoCore
+import KuzmemoSTT
+import Observation
+
+/// The voice path from key press to spoken answer: trigger events drive `HotkeyPolicy`, a recording session
+/// captures audio, finished recordings go through a serial queue to `UtteranceProcessor`, and the outcome is
+/// shown in the HUD, confirmed with a sound and, for answers and questions, read aloud.
+@Observable
+final class VoiceController {
+    enum Phase: Equatable {
+        case idle
+        case recording(handsFree: Bool)
+    }
+
+    enum ModelState: Equatable {
+        case notLoaded, loading, ready
+        case missing(String)
+        case failed(String)
+    }
+
+    /// Something the user has to fix before voice input works; the popover explains it.
+    enum Problem: Equatable {
+        case microphoneDenied
+        case inputMonitoringMissing
+        case triggerUnavailable
+        case modelMissing
+    }
+
+    private(set) var phase: Phase = .idle
+    private(set) var modelState: ModelState = .notLoaded
+    private(set) var problem: Problem?
+    private(set) var triggerRunning = false
+    private(set) var lastTranscript: String?
+    private(set) var pendingJobs = 0
+
+    var isRecording: Bool { if case .recording = phase { true } else { false } }
+    var isBusy: Bool { pendingJobs > 0 }
+
+    let hud = HUDController()
+    let speech = SystemSpeechOutput()
+    let cues = SoundCues()
+    let permissions = PermissionsModel()
+
+    /// Recording limits: a hard cap with a warning ten seconds before it.
+    static let recordingLimit: TimeInterval = 120
+
+    private unowned let env: AppEnvironment
+    private let transcriber: WhisperKitTranscriber
+    private let utterances: UtteranceProcessor
+    @ObservationIgnored private var policy = HotkeyPolicy()
+    @ObservationIgnored private var monitor: ModifierKeyMonitor?
+    @ObservationIgnored private var session: Session?
+    @ObservationIgnored private var scriptedInput: (any AudioInput)?
+    @ObservationIgnored private var jobs: AsyncStream<Job>.Continuation
+    @ObservationIgnored private var jobStream: AsyncStream<Job>
+    @ObservationIgnored private var nextJobID = 0
+    @ObservationIgnored private var activeJob: Int?
+    @ObservationIgnored private var workers: [Task<Void, Never>] = []
+
+    private struct Job {
+        var id: Int
+        var utterance: Utterance
+        var done: (@MainActor @Sendable (UtteranceResult) -> Void)?
+    }
+
+    private final class Session {
+        let input: any AudioInput
+        let meter: LevelMeter
+        let startedAt: TimeInterval
+        let spokenAt: LocalDateTime
+        var handsFree = false
+        var detector: EndOfSpeechDetector
+        var smoothedLevel: Float = 0
+        var warnedLimit = false
+        var tick: Task<Void, Never>?
+
+        init(input: any AudioInput, meter: LevelMeter, startedAt: TimeInterval, spokenAt: LocalDateTime) {
+            self.input = input
+            self.meter = meter
+            self.startedAt = startedAt
+            self.spokenAt = spokenAt
+            detector = VoiceController.holdWatchdog()
+        }
+    }
+
+    init(env: AppEnvironment) {
+        self.env = env
+        let transcriber = WhisperKitTranscriber(configuration: .standard())
+        self.transcriber = transcriber
+        utterances = UtteranceProcessor(
+            recognizer: Recognizer(transcriber: transcriber), processor: env.processor, store: env.store,
+            spool: AudioSpool(directory: env.paths.audioSpool), clock: env.clock
+        )
+        (jobStream, jobs) = AsyncStream.makeStream(of: Job.self)
+    }
+
+    // MARK: - Lifecycle
+
+    func start() {
+        // Automation must never make noise: the control channel starts muted and opts in explicitly.
+        if AppPaths.controlEnabled { speech.muted = true; cues.muted = true }
+
+        hud.actions = HUDActions(
+            cancel: { [weak self] in self?.cancelRecording(note: nil) },
+            undo: { [weak self] opID in
+                Task { @MainActor in
+                    await self?.env.undo(opID: opID)
+                    self?.hud.showNote("Отменено", style: .success, seconds: 2)
+                }
+            },
+            choose: { _ in }
+        )
+
+        startTrigger()
+        observeSystem()
+        warmModel()
+
+        workers.append(Task { @MainActor [weak self] in
+            guard let stream = self?.jobStream else { return }
+            for await job in stream { await self?.run(job) }
+        })
+        workers.append(Task { @MainActor [weak self] in
+            await self?.recoverUnfinished(includeBlocked: true)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                await self?.recoverUnfinished(includeBlocked: false)
+            }
+        })
+    }
+
+    /// Everything that was recorded or transcribed but not finished: the app quit, the model was missing, or a
+    /// scheduled retry has come due.
+    private func recoverUnfinished(includeBlocked: Bool) async {
+        let spoken = await utterances.recoverUnfinished(includeBlocked: includeBlocked)
+        let typed = await env.processor.recoverUnfinished()
+        for outcome in spoken.compactMap(\.outcome) + typed { await announceRecovered(outcome) }
+    }
+
+    private func announceRecovered(_ outcome: ProcessOutcome) async {
+        await env.present(outcome, announce: false)
+        guard case let .applied(result) = outcome.kind, !result.changes.isEmpty, session == nil else { return }
+        let today = env.clock.localNow().date
+        cues.play(.saved)
+        hud.showNote("Записал отложенное: " + result.changes.map { $0.summary(today: today) }.joined(separator: "; "), style: .success, seconds: 5)
+    }
+
+    // MARK: - Trigger
+
+    private func startTrigger() {
+        permissions.refresh()
+        guard permissions.inputMonitoring else {
+            triggerRunning = false
+            problem = .inputMonitoringMissing
+            waitForInputMonitoring()
+            return
+        }
+        let monitor = ModifierKeyMonitor(key: .fn, handlers: .init(
+            down: { [weak self] time in MainActor.assumeIsolated { self?.triggerDown(at: time) } },
+            up: { [weak self] time in MainActor.assumeIsolated { self?.triggerUp(at: time) } },
+            otherKey: { [weak self] time in MainActor.assumeIsolated { self?.otherKeyPressed(at: time) } },
+            escape: { [weak self] in MainActor.assumeIsolated { self?.escapePressed() } }
+        ))
+        self.monitor = monitor
+        triggerRunning = monitor.start()
+        if triggerRunning {
+            if problem == .inputMonitoringMissing || problem == .triggerUnavailable { problem = nil }
+        } else {
+            problem = .triggerUnavailable
+        }
+    }
+
+    /// The grant is made in System Settings, outside the app, so look for it until it appears.
+    private func waitForInputMonitoring() {
+        workers.append(Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled, !self.permissions.inputMonitoring {
+                try? await Task.sleep(for: .seconds(2))
+                self.permissions.refresh()
+            }
+            self?.startTrigger()
+        })
+    }
+
+    func requestInputMonitoring() {
+        permissions.requestInputMonitoring()
+        PermissionsModel.openSettings(.inputMonitoring)
+    }
+
+    func triggerDown(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        perform(policy.triggerDown(at: time, speaking: speech.isSpeaking))
+    }
+
+    func triggerUp(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        perform(policy.triggerUp(at: time))
+        enterHandsFreeIfTapped()
+    }
+
+    func otherKeyPressed(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        perform(policy.otherKeyPressed(at: time))
+    }
+
+    func escapePressed() {
+        if session != nil {
+            cancelRecording(note: nil)
+        } else if speech.isSpeaking {
+            speech.stop()
+        }
+    }
+
+    /// The popover's record button: the same as tapping the trigger key.
+    func toggleFromUI() {
+        let now = ProcessInfo.processInfo.systemUptime
+        triggerDown(at: now)
+        triggerUp(at: now + 0.05)
+    }
+
+    private func perform(_ actions: [HotkeyPolicy.Action]) {
+        for action in actions {
+            switch action {
+            case .interruptSpeech: speech.stop()
+            case .startRecording: startRecording()
+            case .stopRecording: finishRecording()
+            case .cancelRecording: cancelRecording(note: nil)
+            }
+        }
+    }
+
+    // MARK: - Recording
+
+    static func holdWatchdog() -> EndOfSpeechDetector {
+        // Push-to-talk ends when the key is released; this only catches a release that was never seen.
+        EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 30, speechWait: 30))
+    }
+
+    private func startRecording() {
+        guard session == nil else { return }
+        let input: any AudioInput
+        if let scripted = scriptedInput {
+            input = scripted
+            scriptedInput = nil
+        } else {
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized:
+                break
+            case .notDetermined:
+                policy.recordingEnded()
+                hud.showNote("Разрешите доступ к микрофону в системном окне и нажмите клавишу ещё раз.", style: .warning, seconds: 6)
+                Task { await permissions.requestMicrophone() }
+                return
+            default:
+                policy.recordingEnded()
+                problem = .microphoneDenied
+                hud.showNote("Нет доступа к микрофону. Разрешите его: Системные настройки → Конфиденциальность → Микрофон.", style: .error, seconds: 8)
+                return
+            }
+            input = MicCapture()
+        }
+        if problem == .microphoneDenied { problem = nil }
+
+        let meter = LevelMeter()
+        input.onLevel = { level in meter.record(level) }
+        hud.show(.recording(handsFree: false))
+        do {
+            try input.start()
+        } catch {
+            policy.recordingEnded()
+            hud.showNote("Не удалось включить микрофон: \(error)", style: .error, seconds: 6)
+            return
+        }
+
+        let session = Session(input: input, meter: meter, startedAt: ProcessInfo.processInfo.systemUptime, spokenAt: env.clock.localNow())
+        self.session = session
+        phase = .recording(handsFree: false)
+        speech.stop()
+        warmModel() // the model loads while the person is still talking
+        session.tick = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+                self?.tick()
+            }
+        }
+    }
+
+    /// A tap (released quickly) leaves the recording running hands-free, which stops on silence.
+    private func enterHandsFreeIfTapped() {
+        guard let session, !session.handsFree, case .toggled = policy.state else { return }
+        session.handsFree = true
+        session.detector = EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 2.5, speechWait: 20))
+        phase = .recording(handsFree: true)
+        hud.show(.recording(handsFree: true))
+    }
+
+    private func tick() {
+        guard let session else { return }
+        let elapsed = ProcessInfo.processInfo.systemUptime - session.startedAt
+        let peak = session.meter.takePeak()
+        session.smoothedLevel = max(peak, session.smoothedLevel * 0.7)
+        hud.updateRecording(level: session.smoothedLevel, elapsed: elapsed)
+
+        switch session.detector.feed(level: peak, at: elapsed) {
+        case .endOfSpeech: finishRecording()
+        case .noSpeech: cancelRecording(note: "Не слышу речи — запись остановлена.")
+        case .speechStarted, nil: break
+        }
+        guard self.session === session else { return }
+        if elapsed >= Self.recordingLimit {
+            finishRecording()
+        } else if elapsed >= Self.recordingLimit - 10, !session.warnedLimit {
+            session.warnedLimit = true
+            cues.play(.attention) // ten seconds left
+        }
+    }
+
+    private func endSession() -> (samples: [Float], spokenAt: LocalDateTime)? {
+        guard let session else { return nil }
+        self.session = nil
+        session.tick?.cancel()
+        let samples = session.input.stop()
+        phase = .idle
+        policy.recordingEnded()
+        return (samples, session.spokenAt)
+    }
+
+    func cancelRecording(note: String?) {
+        guard endSession() != nil else { return }
+        if let note { hud.showNote(note, style: .warning, seconds: 2.5) } else { hud.hide() }
+    }
+
+    private func finishRecording() {
+        guard let (samples, spokenAt) = endSession() else { return }
+        let seconds = Double(samples.count) / 16_000
+        guard seconds >= 0.6 else {
+            hud.showNote("Слишком короткая запись — пропускаю.", style: .warning, seconds: 2)
+            return
+        }
+        enqueue(Utterance(samples: samples, spokenAt: spokenAt), done: nil)
+    }
+
+    // MARK: - Queue
+
+    private func enqueue(_ utterance: Utterance, done: (@MainActor @Sendable (UtteranceResult) -> Void)?) {
+        nextJobID += 1
+        pendingJobs += 1
+        showBackground(modelState == .loading ? .preparingModel : .transcribing)
+        jobs.yield(Job(id: nextJobID, utterance: utterance, done: done))
+    }
+
+    private func run(_ job: Job) async {
+        activeJob = job.id
+        let result = await utterances.process(job.utterance) { [weak self] stage in
+            Task { @MainActor in self?.stageChanged(stage, job: job.id) }
+        }
+        activeJob = nil
+        await present(result)
+        pendingJobs -= 1
+        job.done?(result)
+    }
+
+    private func stageChanged(_ stage: UtteranceStage, job: Int) {
+        guard activeJob == job else { return }
+        switch stage {
+        case .transcribing: showBackground(modelState == .loading ? .preparingModel : .transcribing)
+        case let .interpreting(text): showBackground(.interpreting(text))
+        }
+    }
+
+    /// Shows a state unless the person is recording right now: the recording HUD always wins.
+    private func showBackground(_ state: HUDModel.State, autoHideAfter seconds: TimeInterval? = nil) {
+        guard session == nil else { return }
+        hud.show(state, autoHideAfter: seconds)
+    }
+
+    // MARK: - Presenting
+
+    private func present(_ result: UtteranceResult) async {
+        lastTranscript = result.transcript ?? lastTranscript
+        switch result.kind {
+        case .noSpeech:
+            showBackground(.note("Речи не слышно — ничего не записал.", .warning), autoHideAfter: 2.5)
+
+        case let .recognitionFailed(message, needsUser, retryAt):
+            cues.play(.attention)
+            if needsUser {
+                modelState = .missing(message)
+                problem = .modelMissing
+                showBackground(.note("Нет модели распознавания. Запись сохранена — выполните scripts/install_models.sh.", .error), autoHideAfter: 8)
+            } else {
+                let later = retryAt == nil ? "" : " Попробую ещё раз позже."
+                showBackground(.note("Не удалось распознать речь. Запись сохранена.\(later)", .error), autoHideAfter: 6)
+            }
+
+        case let .processed(outcome):
+            await env.present(outcome, announce: true)
+            guard let toast = env.toast else { showBackground(.hidden); return }
+            let spoken = await spokenText(for: outcome)
+            switch outcome.kind {
+            case .applied: cues.play(.saved)
+            case .unknown, .failed: cues.play(.attention)
+            case .answered, .clarify: break
+            }
+            if let spoken, session == nil {
+                showBackground(.result(toast))
+                await speech.speak(spoken)
+                showBackground(.result(toast), autoHideAfter: 2.5)
+            } else {
+                showBackground(.result(toast), autoHideAfter: Self.displaySeconds(for: toast))
+            }
+        }
+    }
+
+    private func spokenText(for outcome: ProcessOutcome) async -> String? {
+        switch outcome.kind {
+        case .answered:
+            guard let result = env.queryResult else { return nil }
+            let glossary = (try? await env.store.glossary()) ?? []
+            return AgendaSpeaker(glossary: glossary).speech(for: result, today: env.clock.localNow().date)
+        case let .clarify(clarification):
+            return clarification.question
+        default:
+            return nil
+        }
+    }
+
+    /// Long enough to read: 4 s at least, 12 s at most, more for longer texts; an undoable change stays 5 s.
+    static func displaySeconds(for toast: AppEnvironment.Toast) -> TimeInterval {
+        let characters = toast.lines.reduce(0) { $0 + $1.count }
+        let reading = min(12, max(4, 2.5 + Double(characters) * 0.06))
+        return toast.undoOpID == nil ? reading : max(5, reading)
+    }
+
+    // MARK: - Model
+
+    func warmModel() {
+        guard modelState != .loading else { return }
+        Task { @MainActor in await loadModel() }
+    }
+
+    private func loadModel() async {
+        if modelState == .ready, await transcriber.isLoaded { return }
+        modelState = .loading
+        // A load that takes more than a moment is the one-time compilation for this Mac: say so.
+        let slow = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self, self.session == nil, self.activeJob == nil, self.hud.model.state == .hidden else { return }
+            self.hud.show(.preparingModel)
+        }
+        defer {
+            slow.cancel()
+            if hud.model.state == .preparingModel, activeJob == nil { hud.hide() }
+        }
+        do {
+            try await transcriber.prepare()
+            modelState = .ready
+            if problem == .modelMissing { problem = nil }
+        } catch TranscriberError.modelMissing(let path) {
+            modelState = .missing(path)
+            problem = .modelMissing
+        } catch {
+            modelState = .failed("\(error)")
+        }
+    }
+
+    // MARK: - System events
+
+    private func observeSystem() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.interrupt() }
+        }
+        workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reviveTrigger() }
+        }
+        DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.interrupt() }
+        }
+        DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reviveTrigger() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.permissions.refresh() }
+        }
+    }
+
+    /// Sleep or a locked screen: a key-up may never arrive, so drop whatever is in progress.
+    private func interrupt() {
+        speech.stop()
+        perform(policy.reset())
+    }
+
+    private func reviveTrigger() {
+        permissions.refresh()
+        if monitor?.revive() == false || monitor == nil { startTrigger() }
+    }
+
+    // MARK: - Automation (control channel)
+
+    /// The next recording plays these samples instead of listening to the microphone.
+    func armScriptedInput(samples: [Float]) {
+        scriptedInput = ScriptedAudioInput(samples: samples)
+    }
+
+    /// Pushes a recording straight into the pipeline, as if the trigger had just been released, and waits for it.
+    func inject(samples: [Float]) async -> UtteranceResult {
+        await withCheckedContinuation { continuation in
+            enqueue(Utterance(samples: samples, spokenAt: env.clock.localNow())) { continuation.resume(returning: $0) }
+        }
+    }
+
+    func setMuted(_ muted: Bool) {
+        speech.muted = muted
+        cues.muted = muted
+    }
+
+    var policyDescription: String { "\(policy.state)" }
+}
+
+extension UtteranceResult {
+    /// The pipeline outcome, when the recording got as far as being interpreted.
+    var outcome: ProcessOutcome? {
+        if case let .processed(outcome) = kind { outcome } else { nil }
+    }
+}
