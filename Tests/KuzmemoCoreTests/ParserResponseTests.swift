@@ -11,7 +11,7 @@ struct ParserResponseTests {
     // Real answers recorded from `claude -p` during the M0 spike.
     static let create = #"{"intent":"create","confidence":0.95,"actions":[{"op":"create","item":{"kind":"reminder","title":"Сказать Дмитрию про доступ в Notion","when":{"mode":"days_from_today","days_from_today":2,"phrase":"послезавтра"}}}]}"#
     static let query = #"{"intent":"query","confidence":0.98,"query":{"scope":"day","when":{"mode":"days_from_today","days_from_today":0,"phrase":"сегодня"},"detail":"digest"}}"#
-    static let clarify = #"{"intent":"clarify","confidence":0.85,"clarification":{"question":"Какую пятницу имеете в виду?","reason":"ambiguous_date","options":["Ближайшая пятница, 2 октября","Пятница следующей недели, 9 октября"]},"speech":"Какую пятницу имеете в виду?"}"#
+    static let clarify = #"{"intent":"clarify","confidence":0.85,"clarification":{"question":"Какую пятницу ты имеешь в виду?","reason":"ambiguous_date","options":["Ближайшая пятница, 2 октября","Пятница следующей недели, 9 октября"]},"speech":"Какую пятницу ты имеешь в виду?"}"#
 
     @Test func decodesACreateAnswer() throws {
         let response = try decode(Self.create)
@@ -36,7 +36,7 @@ struct ParserResponseTests {
         #expect(response.intent == .clarify)
         #expect(response.clarification?.reason == .ambiguousDate)
         #expect(response.clarification?.options?.count == 2)
-        #expect(response.speech == "Какую пятницу имеете в виду?")
+        #expect(response.speech == "Какую пятницу ты имеешь в виду?")
     }
 
     @Test func decodesRecurringEventsAndUpdates() throws {

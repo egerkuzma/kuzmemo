@@ -364,7 +364,7 @@ struct LiveSileroTests {
         let speakers = await helper.speakers
         #expect(Set(speakers).isSuperset(of: ["aidar", "baya", "kseniya", "xenia", "eugene"]), "\(speakers)")
 
-        let phrase = try await helper.synthesize(text: "Сегодня у вас три дела: планёрка, созвон и статистика.", speaker: "eugene")
+        let phrase = try await helper.synthesize(text: "Сегодня у тебя три дела: планёрка, созвон и статистика.", speaker: "eugene")
         let plain = try measure(phrase.url)
         #expect(plain.seconds > 2.5 && plain.seconds < 12 && plain.peak > 0.2, "\(plain)")
         print("live: 6 s of speech took \(phrase.milliseconds) ms")
@@ -377,8 +377,8 @@ struct LiveSileroTests {
         print("live: raw \(rawSeconds) s, normalized \(spelledSeconds) s")
         #expect(spelledSeconds > rawSeconds + 1.5, "raw \(rawSeconds) s, normalized \(spelledSeconds) s")
 
-        let slow = try await helper.synthesize(text: "Сегодня у вас три дела: планёрка, созвон и статистика.", speaker: "eugene", rate: .slow)
-        let fast = try await helper.synthesize(text: "Сегодня у вас три дела: планёрка, созвон и статистика.", speaker: "eugene", rate: .fast)
+        let slow = try await helper.synthesize(text: "Сегодня у тебя три дела: планёрка, созвон и статистика.", speaker: "eugene", rate: .slow)
+        let fast = try await helper.synthesize(text: "Сегодня у тебя три дела: планёрка, созвон и статистика.", speaker: "eugene", rate: .fast)
         #expect(try measure(slow.url).seconds > measure(fast.url).seconds)
 
         do {

@@ -89,7 +89,7 @@ struct SpeechTextTests {
     }
 
     @Test func cyrillicTextIsLeftAlone() {
-        let phrase = "Сегодня у вас три дела: планёрка, созвон и статистика."
+        let phrase = "Сегодня у тебя три дела: планёрка, созвон и статистика."
         #expect(SpeechText.forNeuralVoice(phrase) == phrase)
     }
 

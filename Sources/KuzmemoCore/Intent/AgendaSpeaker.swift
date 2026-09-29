@@ -60,12 +60,12 @@ public struct AgendaSpeaker: Sendable {
         }
     }
 
-    /// The lead of a spoken answer about days: "Today you have" in English, "На сегодня у вас" in Russian.
+    /// The lead of a spoken answer about days: "Today you have" in English, "На сегодня у тебя" in Russian.
     static func label(for result: QueryResult, today: LocalDate) -> String {
         guard case let .days(range) = result.plan.target else { return "" }
         if range.lowerBound == range.upperBound {
             return Localization.current == .russian
-                ? RussianFormat.onDay(range.lowerBound, today: today).capitalizedFirstLetter + " у вас"
+                ? RussianFormat.onDay(range.lowerBound, today: today).capitalizedFirstLetter + " у тебя"
                 : tr("%1$@ you have", EnglishFormat.dayHeading(range.lowerBound, today: today))
         }
         return tr("From %1$@ to %2$@ you have", Wording.date(range.lowerBound), Wording.date(range.upperBound))
