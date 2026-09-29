@@ -152,6 +152,25 @@ struct AlertPlannerTests {
         #expect(RussianFormat.leadPhrase(1440) == "Через 1 день" && RussianFormat.leadPhrase(2880) == "Через 2 дня" && RussianFormat.leadPhrase(90) == "Через 90 минут")
     }
 
+    @Test func chosenLeadsReadAsAList() {
+        #expect(RussianFormat.leadBefore(0) == "в момент начала" && RussianFormat.leadBefore(1) == "за 1 минуту")
+        #expect(RussianFormat.leadBefore(5) == "за 5 минут" && RussianFormat.leadBefore(60) == "за 1 час" && RussianFormat.leadBefore(1440) == "за 1 день")
+        #expect(RussianFormat.leadChip(0) == "В момент" && RussianFormat.leadChip(5) == "5 мин" && RussianFormat.leadChip(90) == "90 мин")
+        #expect(RussianFormat.leadChip(60) == "1 час" && RussianFormat.leadChip(120) == "2 часа" && RussianFormat.leadChip(1440) == "1 день")
+    }
+
+    @Test func alertsAreDescribedForTheUpcomingList() {
+        let alerts = plan([
+            entry("Созвон", kind: .event, on: "2026-09-28", at: "15:00"), entry("Сказать Дмитрию", on: "2026-09-29"),
+            entry("Отчёт", on: "2026-10-01", at: "10:00"), entry("Оплатить хостинг", on: "2026-10-12", at: "10:00"),
+        ], now: "2026-09-28 12:00", limit: 60)
+        let now = instant("2026-09-28 12:00")
+        #expect(alerts.map { $0.whenText(now: now, in: moscow) } == [
+            "Сегодня, 14:55", "Сегодня, 15:00", "Завтра, 09:00", "В четверг, 1 октября, 10:00", "12 октября, 10:00",
+        ])
+        #expect(alerts.map(\.kindText) == ["За 5 минут", "В назначенное время", "Дело на весь день", "В назначенное время", "В назначенное время"])
+    }
+
     @Test func settingsAreReadForgivingly() async throws {
         let store = try makeStore()
         try await store.setSetting(#"{"eventLeads":[0,10,10,5,-3,99999],"allDayTimes":["18:00","09:00","09:00"],"horizonDays":500,"snoozeMinutes":[60,0,10,10]}"#, for: NotificationSettings.storageKey)

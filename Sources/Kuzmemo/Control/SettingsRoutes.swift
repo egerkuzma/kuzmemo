@@ -9,9 +9,11 @@ enum SettingsRoutes {
             "speech": object(await env.store.settings(SpeechSettings.self)),
             "recognition": object(await env.store.settings(RecognitionSettings.self)),
             "recording": object(await env.store.settings(RecordingSettings.self)),
+            "notifications": object(await env.store.settings(NotificationSettings.self)),
         ]
         let live: [String: Any] = [
             "speech": object(env.settings.speech), "recognition": object(env.settings.recognition), "recording": object(env.settings.recording),
+            "notifications": object(env.settings.notifications),
         ]
         return .json(["stored": stored, "live": live, "loaded": env.settings.loaded])
     }
@@ -22,6 +24,7 @@ enum SettingsRoutes {
         if let patch = json["speech"] as? [String: Any] { env.settings.speech = merged(env.settings.speech, patch) }
         if let patch = json["recognition"] as? [String: Any] { env.settings.recognition = merged(env.settings.recognition, patch) }
         if let patch = json["recording"] as? [String: Any] { env.settings.recording = merged(env.settings.recording, patch) }
+        if let patch = json["notifications"] as? [String: Any] { env.settings.notifications = merged(env.settings.notifications, patch) }
         try? await Task.sleep(for: .milliseconds(700)) // the settings are saved a moment after they change
         return await read(env)
     }

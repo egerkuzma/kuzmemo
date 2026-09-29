@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthesizes Kuzmemo's own alert chimes (Resources/Sounds/Kuzmemo-<id>.wav) with additive and FM synthesis and the
-standard library only. The files are committed; run this only to change them.
+standard library only. The files are not committed (*.wav is ignored); scripts/run_app.sh runs this when they are
+missing, and it is the place to change them.
 
     scripts/make_sounds.py
 

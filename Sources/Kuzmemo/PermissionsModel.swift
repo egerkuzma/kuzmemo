@@ -37,6 +37,13 @@ final class PermissionsModel {
         case inputMonitoring = "Privacy_ListenEvent"
     }
 
+    /// System Settings → Notifications, where the app's own entry (banner style, sounds) lives.
+    static func openNotificationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     static func openSettings(_ pane: Pane) {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)") {
             NSWorkspace.shared.open(url)

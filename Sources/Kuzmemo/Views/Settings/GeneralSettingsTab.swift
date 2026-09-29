@@ -41,6 +41,8 @@ struct GeneralSettingsTab: View {
                     action: ("Разрешить…", { env.voice.requestInputMonitoring() })
                 )
                 Hint("Без «Мониторинга ввода» клавиша Fn не работает, но кнопка записи и запасное сочетание остаются.")
+                PermissionRow(title: "Уведомления", state: env.notifications.permissionState, action: env.notifications.permissionAction)
+                Hint("Напоминания приходят системными уведомлениями. Как они выглядят и звучат, настраивается на вкладке «Уведомления».")
             }
             Section("Данные") {
                 LabeledContent("База данных") {
@@ -63,6 +65,7 @@ struct GeneralSettingsTab: View {
             permissions.refresh()
             loginStatus = SMAppService.mainApp.status
         }
+        .task { await env.notifications.refreshAccess() }
     }
 
     // MARK: Launch at login

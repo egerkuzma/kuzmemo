@@ -122,15 +122,38 @@ public struct AlertDiff: Equatable, Sendable {
 extension RussianFormat {
     /// "Сейчас", "Через 5 минут", "Через 1 час", "Через 1 день".
     public static func leadPhrase(_ minutes: Int) -> String {
-        if minutes <= 0 { return "Сейчас" }
+        minutes <= 0 ? "Сейчас" : "Через " + leadQuantity(minutes)
+    }
+
+    /// "в момент начала", "за 5 минут", "за 1 час", "за 2 дня": how a list of chosen lead times is read out.
+    public static func leadBefore(_ minutes: Int) -> String {
+        minutes <= 0 ? "в момент начала" : "за " + leadQuantity(minutes)
+    }
+
+    /// The short text of a choice chip: "В момент", "5 мин", "1 час", "1 день".
+    public static func leadChip(_ minutes: Int) -> String {
+        if minutes <= 0 { return "В момент" }
         if minutes >= 1440, minutes % 1440 == 0 {
             let days = minutes / 1440
-            return "Через \(days) \(plural(days, ("день", "дня", "дней")))"
+            return "\(days) \(plural(days, ("день", "дня", "дней")))"
         }
         if minutes >= 60, minutes % 60 == 0 {
             let hours = minutes / 60
-            return "Через \(hours) \(plural(hours, ("час", "часа", "часов")))"
+            return "\(hours) \(plural(hours, ("час", "часа", "часов")))"
         }
-        return "Через \(minutes) \(plural(minutes, ("минуту", "минуты", "минут")))"
+        return "\(minutes) мин"
+    }
+
+    /// "5 минут", "1 час", "2 дня": a length of time in the accusative, ready to follow "за" or "через".
+    private static func leadQuantity(_ minutes: Int) -> String {
+        if minutes >= 1440, minutes % 1440 == 0 {
+            let days = minutes / 1440
+            return "\(days) \(plural(days, ("день", "дня", "дней")))"
+        }
+        if minutes >= 60, minutes % 60 == 0 {
+            let hours = minutes / 60
+            return "\(hours) \(plural(hours, ("час", "часа", "часов")))"
+        }
+        return "\(minutes) \(plural(minutes, ("минуту", "минуты", "минут")))"
     }
 }

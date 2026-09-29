@@ -85,9 +85,10 @@ struct ItemEditorView: View {
                                     Text(verbatim: "Длительность: \(durationText)")
                                 }
                             }
-                            Picker("Напомнить", selection: $draft.remindLeadMin) {
-                                ForEach(Self.leads, id: \.minutes) { Text(verbatim: $0.title).tag($0.minutes) }
+                            Picker("Напомнить заранее", selection: $draft.remindLeadMin) {
+                                ForEach(Self.leadOptions(including: draft.remindLeadMin), id: \.minutes) { Text(verbatim: $0.title).tag($0.minutes) }
                             }
+                            Hint("Сроки уведомлений вообще выбираются в настройках. Здесь можно добавить ещё один ранний сигнал для этой записи.")
                         }
                     }
                 }
@@ -220,9 +221,15 @@ struct ItemEditorView: View {
     }
 
     private static let leads: [(minutes: Int, title: String)] = [
-        (0, "В назначенное время"), (5, "За 5 минут"), (10, "За 10 минут"), (15, "За 15 минут"),
+        (0, "Как в настройках"), (5, "За 5 минут"), (10, "За 10 минут"), (15, "За 15 минут"),
         (30, "За 30 минут"), (60, "За 1 час"), (1440, "За 1 день"),
     ]
+
+    /// The choices, plus the entry's own value when it is not one of them (an older or imported entry keeps it).
+    private static func leadOptions(including current: Int) -> [(minutes: Int, title: String)] {
+        guard current > 0, !leads.contains(where: { $0.minutes == current }) else { return leads }
+        return (leads + [(current, RussianFormat.leadBefore(current).capitalizedFirst)]).sorted { $0.minutes < $1.minutes }
+    }
 
     // MARK: Footer and saving
 

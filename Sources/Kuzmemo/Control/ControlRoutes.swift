@@ -15,6 +15,8 @@ enum ControlRoutes {
         case ("POST", "/dev/seed"): return await seed(env)
         case ("GET", "/settings"): return await SettingsRoutes.read(env)
         case ("POST", "/settings"): return await SettingsRoutes.update(request, env)
+        case ("GET", "/notifications"): return NotificationRoutes.state(request, env)
+        case ("POST", "/notifications/sync"): return await NotificationRoutes.sync(request, env)
         case ("POST", "/ui"): return await ui(request, env)
         case ("GET", "/window"): return WindowRoutes.describe(request.query["name"] ?? "main")
         case ("POST", "/window/open"): return await WindowRoutes.open(env, name: request.query["name"] ?? "main")
@@ -200,6 +202,11 @@ enum ControlRoutes {
         case "settings":
             env.settingsTab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
             data = Snapshot.png(SettingsView(env: env), width: 700, height: 600, dark: dark)
+        case "settingsTab":
+            // One tab on its own, as tall as asked, so the whole form is visible (the window scrolls it).
+            let tab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
+            let height = CGFloat(Double(request.query["height"] ?? "") ?? 1500)
+            data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.russian), width: 700, height: height, dark: dark)
         case "live":
             return await WindowRoutes.capture(
                 name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1", scale: 2

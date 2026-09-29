@@ -70,6 +70,7 @@ enum SoundCatalog {
 
     static func preview(_ sound: AlertSound) {
         stopPreview()
+        guard !AppPaths.isAutomation else { return } // the automation build never makes a sound
         guard let url = fileURL(for: sound), let next = NSSound(contentsOf: url, byReference: true) else { return }
         player = next
         next.play()

@@ -38,6 +38,12 @@ DEFAULT_SETTINGS = {
     "speech": {"voiceIdentifier": None, "rate": 0.5, "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True},
     "recognition": {"language": "ru", "languageAuto": False, "idleUnloadMinutes": 15, "modelVariant": "openai_whisper-large-v3-v20240930_turbo"},
     "recording": {"holdThreshold": 0.3, "handsFreeSilence": 2.5, "maxSeconds": 120},
+    "notifications": {
+        "enabled": True, "eventLeads": [5, 0], "reminderLeads": [0], "allDayTimes": ["09:00"],
+        "headsUpSound": {"kind": "system", "name": "Tink"}, "atTimeSound": {"kind": "system", "name": "Hero"},
+        "allDaySound": {"kind": "system", "name": "Glass"}, "speakTitle": False,
+        "quietHours": {"enabled": False, "from": "23:00", "to": "08:00"}, "snoozeMinutes": [10, 60], "horizonDays": 7,
+    },
 }
 
 passed = failed = 0
@@ -94,7 +100,7 @@ def run():
     print("the window")
     opened = call("POST", "/window/open?name=settings")
     check("it opens without taking the screen", opened.get("open") is True and opened.get("active") is False and opened.get("key") is False, str(opened))
-    for tab in ("general", "recording", "recognition", "speech", "glossary"):
+    for tab in ("general", "recording", "recognition", "speech", "notifications", "glossary"):
         call("POST", "/ui", {"settingsTab": tab})
         time.sleep(0.3)
         status, data = call("GET", f"/render?view=settings&tab={tab}", raw=True)

@@ -69,6 +69,7 @@ done
 
 # Alert sounds: the app's own chimes, and copies of the macOS system sounds (the notification system finds a sound
 # by its file name inside the app bundle).
+[ -e "$ROOT/Resources/Sounds/Kuzmemo-bell.wav" ] || python3 "$ROOT/scripts/make_sounds.py" # generated, not committed
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
 for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
 

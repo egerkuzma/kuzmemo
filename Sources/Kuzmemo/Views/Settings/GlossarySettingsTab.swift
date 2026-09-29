@@ -177,7 +177,7 @@ private struct TermRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Toggle("", isOn: Binding(get: { term.enabled }, set: toggle)).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            Toggle("", isOn: Binding(get: { term.enabled }, set: { toggle($0) })).labelsHidden().toggleStyle(.switch).controlSize(.small)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: term.canonical).fontWeight(.medium).foregroundStyle(term.enabled ? .primary : .secondary)
                 Text(verbatim: term.aliases.isEmpty ? "нет вариантов написания" : "слышится как: " + term.aliases.joined(separator: ", "))
