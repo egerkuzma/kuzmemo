@@ -51,6 +51,7 @@ enum ControlRoutes {
         case ("POST", "/speech/clone/choose"): return await CloneRoutes.choose(request, env)
         case ("POST", "/speech/clone/save"): return await CloneRoutes.save(request, env)
         case ("POST", "/speech/clone/cancel"): return CloneRoutes.cancel(env)
+        case ("POST", "/speech/clone/prewarm"): return await CloneRoutes.prewarm(request, env)
         case ("POST", "/speech/clone/forget"): return CloneRoutes.forget(env)
         case ("POST", "/speech/mute"): return VoiceRoutes.mute(request, env)
         default: return .error("no route \(request.method) \(request.path)", status: 404)

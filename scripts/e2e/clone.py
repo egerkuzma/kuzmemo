@@ -185,6 +185,26 @@ def run(work):
     state = call("GET", "/speech/clone")
     check("the last answer is reported", state["lastReport"]["lineCount"] == offline["lineCount"], json.dumps(state.get("lastReport"))[:200])
 
+    print("starting ahead")
+    def programs():
+        return int(subprocess.run("pgrep -f 'omnivoice-tts' | wc -l", shell=True, capture_output=True, text=True).stdout.strip() or 0)
+    check("no program is running between answers", programs() == 0, str(programs()))
+    call("POST", "/speech/clone/prewarm", {"wait": 2.5})
+    check("started ahead, the program waits for the text", programs() == 1, str(programs()))
+    ahead = call("POST", "/speech/clone/say", {"text": "Готово.", "cache": False})
+    plain = call("POST", "/speech/clone/say", {"text": "Готово.", "cache": False})
+    check("the answer uses it", ahead.get("startedAhead") is True and plain.get("startedAhead") is False, f"{ahead.get('startedAhead')} {plain.get('startedAhead')}")
+    check("…and is sooner for it", ahead["firstSoundSeconds"] < plain["firstSoundSeconds"] + 0.3, f"{ahead['firstSoundSeconds']:.2f} s against {plain['firstSoundSeconds']:.2f} s")
+    check("nothing is left running after the answer", programs() == 0, str(programs()))
+    call("POST", "/speech/clone/prewarm", {})
+    check("a program started and never used is there…", programs() == 1, str(programs()))
+    call("POST", "/settings", {"speech": {"cloneSteps": 20}})
+    for _ in range(30):
+        if programs() == 0: break
+        import time; time.sleep(0.1)
+    check("…and goes when the quality is changed (it was started with the old steps)", programs() == 0, str(programs()))
+    call("POST", "/settings", {"speech": {"cloneSteps": 12}})
+
     print("the answer path")
     wav = os.path.join(ROOT, "scripts", "fixtures", "out", "synth", "03.wav")  # "Скажи что на сегодня" ("tell me what is on today")
     if os.path.exists(wav):

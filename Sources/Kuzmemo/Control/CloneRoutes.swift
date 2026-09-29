@@ -103,6 +103,17 @@ enum CloneRoutes {
         return state(env)
     }
 
+    /// Starts the program ahead of the text, as the app does when a recording ends: the next `say` then reports
+    /// `startedAhead`. `{"wait": 2}` waits that many seconds first (the program loads in the meantime).
+    static func prewarm(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        let clone = env.voice.speech.clone
+        clone.refresh()
+        guard clone.isReady else { return .error(OmniVoiceSpeechOutput.message(for: OmniVoiceError.notReady(clone.status)), status: 409) }
+        clone.prewarm()
+        if let wait = request.jsonBody?["wait"] as? Double, wait > 0 { try? await Task.sleep(for: .seconds(min(wait, 20))) }
+        return .json(["ok": true])
+    }
+
     /// Forgets the voice of this bundle.
     static func forget(_ env: AppEnvironment) -> HTTPResponse {
         let clone = env.voice.speech.clone
