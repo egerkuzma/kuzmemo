@@ -5,6 +5,11 @@ import Observation
 public struct ActionOutcome: Equatable, Sendable {
     public var op: Op?
     public var lines: [String]
+
+    public init(op: Op?, lines: [String]) {
+        self.op = op
+        self.lines = lines
+    }
 }
 
 /// A repeating item with its next occurrence, for the "Повторяющиеся" list.

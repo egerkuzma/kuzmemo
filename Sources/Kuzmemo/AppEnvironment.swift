@@ -80,6 +80,7 @@ final class AppEnvironment {
     private(set) var version: String
 
     @ObservationIgnored private(set) var voice: VoiceController!
+    private(set) var notifications: NotificationScheduler!
     @ObservationIgnored private var controlServer: ControlServer?
     @ObservationIgnored private var observer: Task<Void, Never>?
     @ObservationIgnored private var questionExpiry: Task<Void, Never>?
@@ -113,7 +114,10 @@ final class AppEnvironment {
     private func start() {
         observer = Task { [weak self] in
             guard let store = self?.store else { return }
-            for await _ in store.changes() { await self?.reloadToday() }
+            for await _ in store.changes() {
+                await self?.reloadToday()
+                self?.notifications?.requestSync()
+            }
         }
         Task { [weak self] in
             guard let self else { return }
@@ -124,6 +128,9 @@ final class AppEnvironment {
         calendar.startObserving()
         voice = VoiceController(env: self)
         voice.start()
+        notifications = NotificationScheduler(env: self)
+        settings.observe { [weak self] group in if group == .notifications { self?.notifications.requestSync(after: .milliseconds(300)) } }
+        notifications.start()
         if AppPaths.controlEnabled {
             let server = ControlServer(socketPath: paths.controlSocket.path) { request in
                 await ControlRoutes.handle(request)

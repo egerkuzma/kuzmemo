@@ -19,7 +19,6 @@ enum ControlRoutes {
         case ("GET", "/window"): return WindowRoutes.describe(request.query["name"] ?? "main")
         case ("POST", "/window/open"): return await WindowRoutes.open(env, name: request.query["name"] ?? "main")
         case ("POST", "/window/close"): return WindowRoutes.close(request.query["name"] ?? "main")
-        case ("GET", "/window/texts"): return WindowRoutes.texts(sheet: request.query["sheet"] == "1")
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
         case ("POST", "/db/reset"): return await reset(env)

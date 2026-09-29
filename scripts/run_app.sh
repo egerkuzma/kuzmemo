@@ -67,6 +67,11 @@ for b in "$(swift build -c release --show-bin-path)"/*.bundle; do
   [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
+# Alert sounds: the app's own chimes, and copies of the macOS system sounds (the notification system finds a sound
+# by its file name inside the app bundle).
+cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
+for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

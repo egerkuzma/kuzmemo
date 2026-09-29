@@ -130,7 +130,7 @@ final class VoiceController {
             registerChord()
         }
         observeSystem()
-        env.settings.onChange = { [weak self] group in self?.settingsChanged(group) }
+        env.settings.observe { [weak self] group in self?.settingsChanged(group) }
         workers.append(Task { @MainActor [weak self] in
             // The saved preferences decide which model to load, so they come first.
             await self?.env.settings.load()
@@ -178,6 +178,8 @@ final class VoiceController {
         case .recording:
             policy.configuration.holdThreshold = settings.recording.holdThreshold
             policy.configuration.maxRecording = TimeInterval(settings.recording.maxSeconds)
+        case .notifications:
+            break // the notification scheduler listens to this one itself
         case .recognition:
             let configuration = Self.whisperConfiguration(settings.recognition)
             Task { @MainActor in

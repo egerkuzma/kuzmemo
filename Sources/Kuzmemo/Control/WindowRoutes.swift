@@ -36,28 +36,6 @@ enum WindowRoutes {
         return describe(name)
     }
 
-    /// The visible text and controls of the real window as assistive technology sees them: a way to check what is
-    /// really on screen (and that everything has a Russian accessibility label) without drawing anything.
-    static func texts(sheet: Bool) -> HTTPResponse {
-        guard let window = window("main") else { return .error("the main window is not open", status: 404) }
-        guard let root = (sheet ? window.attachedSheet : window) else { return .error("no sheet is attached", status: 404) }
-        var found: [[String: String]] = []
-        func walk(_ element: Any, depth: Int) {
-            guard depth < 40, let object = element as? NSObject else { return }
-            let role = (object as? NSAccessibilityProtocol)?.accessibilityRole()?.rawValue ?? ""
-            let label = (object as? NSAccessibilityProtocol)?.accessibilityLabel() ?? ""
-            var value = ""
-            if let raw = (object as? NSAccessibilityProtocol)?.accessibilityValue() { value = "\(raw)" }
-            let title = (object as? NSAccessibilityProtocol)?.accessibilityTitle() ?? ""
-            if !(label.isEmpty && value.isEmpty && title.isEmpty) {
-                found.append(["role": role, "label": label, "value": value, "title": title])
-            }
-            for child in (object as? NSAccessibilityProtocol)?.accessibilityChildren() ?? [] { walk(child, depth: depth + 1) }
-        }
-        walk(root.contentView as Any, depth: 0)
-        return .json(["count": found.count, "elements": found])
-    }
-
     static func close(_ name: String = "main") -> HTTPResponse {
         window(name)?.close()
         return describe(name)
