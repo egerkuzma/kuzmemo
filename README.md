@@ -63,7 +63,7 @@ The interface, the spoken answers and the recognition are available in **English
 - **Ordinary phrases.** Reminders, events, tasks and notes; "tomorrow", "next Monday", "in two hours", "every weekday at 6 pm", "on the 25th".
 - **Answers aloud.** "What's on today?", "what do I have tomorrow", "what's overdue", "find everything about the budget". Simple questions are answered locally in about half a second, and what has already passed today is not read out.
 - **The right microphone.** When macOS has selected a Bluetooth headset as the input, Kuzmemo records with the built-in microphone instead: a headset needs a few seconds to switch to call mode, which eats the first words. Settings → Recording lets you pick any input.
-- **Voices.** The system voice, or the optional neural [Silero](https://github.com/snakers4/silero-models) voice (Russian) that runs locally in a small Python helper.
+- **Voices.** The system voice, or an optional neural voice that runs locally: [Silero](https://github.com/snakers4/silero-models) (Russian, in a small Python helper) or, as an experiment, your own voice ("My voice", Russian), learned from a short recording of you with [omnivoice.cpp](https://github.com/ServeurpersoCom/omnivoice.cpp).
 - **Glossary.** Teach it names and jargon: how they are misheard, how they are written, how a voice should say them. It starts empty and can be exported and imported as JSON.
 
 **Calendar**
@@ -95,6 +95,8 @@ scripts/run_app.sh --prod
 On first launch grant **Microphone**, **Input Monitoring** (needed for the Fn key; the ⌃⌥M chord works without it) and **Notifications**, then download the speech model in **Settings → Recognition**. If Fn opens the emoji picker or dictation, set *System Settings → Keyboard → Press 🌐 key to* **Do Nothing**.
 
 The optional neural voice needs about 800 MB more: run `scripts/install_silero.sh` (Python 3.10+; it creates its own environment and downloads the model into `~/Library/Application Support/Kuzmemo/silero`), then choose it in *Settings → Speech*.
+
+The experimental "My voice" needs about 1 GB and the Xcode command line tools with CMake: run `scripts/install_omnivoice.sh` (it builds a small native program and downloads the model into `~/Library/Application Support/Kuzmemo/omnivoice`), choose it in *Settings → Speech*, then pick a recording of your own voice (8 to 12 seconds of clear speech) and check the words said in it. It starts speaking a few seconds after an answer is ready, while the other voices start at once; sentences it has said before are kept and play immediately.
 
 ### Things to say
 
@@ -138,7 +140,7 @@ python3 scripts/check_localization.py        # translation tables against the co
 scripts/run_app.sh                           # the automation build, then scripts/e2e/*.py drive the real app
 ```
 
-The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
+The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
 
 Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 
@@ -146,4 +148,4 @@ Status: version 1.0. The voice path, the calendar window, settings, notification
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (all MIT). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0, for non-commercial use.
+MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (all MIT). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0 and the model behind "My voice" (OmniVoice) CC BY-NC, both for non-commercial use.
