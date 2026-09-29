@@ -138,7 +138,23 @@ public final class CalendarModel {
 
     private func runSearch() async {
         let query = searchText.trimmingCharacters(in: .whitespaces)
-        searchResults = query.isEmpty ? [] : ((try? await store.search(query, limit: 100)) ?? [])
+        let found = query.isEmpty ? [] : ((try? await store.search(query, limit: 100)) ?? [])
+        searchResults = Self.ordered(found, today: today)
+    }
+
+    /// What is coming up first (from today on, soonest first), then what is past (latest first), then undated.
+    static func ordered(_ items: [Item], today: LocalDate) -> [Item] {
+        func rank(_ item: Item) -> Int {
+            guard let date = item.date else { return 2 }
+            return date >= today ? 0 : 1
+        }
+        return items.sorted { lhs, rhs in
+            if rank(lhs) != rank(rhs) { return rank(lhs) < rank(rhs) }
+            switch (lhs.date, rhs.date) {
+            case let (l?, r?) where l != r: return rank(lhs) == 0 ? l < r : l > r
+            default: return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+        }
     }
 
     /// Keeps the window in step with the database, whoever changes it (voice, typing, the editor).

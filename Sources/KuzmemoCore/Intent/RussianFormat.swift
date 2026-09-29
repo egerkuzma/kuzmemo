@@ -17,6 +17,29 @@ public enum RussianFormat {
         "\(weekdayShort[date.weekday.rawValue - 1]), \(Self.date(date))"
     }
 
+    static let monthsNominative = [
+        "январь", "февраль", "март", "апрель", "май", "июнь",
+        "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+    ]
+
+    /// "Сентябрь 2026", the title of a month view.
+    public static func monthTitle(_ date: LocalDate) -> String {
+        "\(monthsNominative[date.month - 1].capitalizedFirstLetter) \(date.year)"
+    }
+
+    /// "пн", "вт", ... for the weekday row of a month view.
+    public static func weekdayShortName(_ weekday: Weekday) -> String { weekdayShort[weekday.rawValue - 1] }
+
+    /// "Среда, 30 сентября", the title of a day.
+    public static func dayTitle(_ date: LocalDate) -> String {
+        "\(weekdayNames[date.weekday.rawValue - 1].capitalizedFirstLetter), \(Self.date(date))"
+    }
+
+    /// "нет записей", "1 запись", "3 записи", "12 записей"
+    public static func entryCount(_ count: Int) -> String {
+        count == 0 ? "нет записей" : "\(count) \(plural(count, ("запись", "записи", "записей")))"
+    }
+
     /// "15:00"
     public static func time(_ time: LocalTime) -> String { time.description }
 

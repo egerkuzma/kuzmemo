@@ -100,7 +100,7 @@ struct CalendarModelTests {
         let done = try await model.toggleDone(milk)
         try await model.toggleDone(standup)
         await model.reload()
-        #expect(model.dayEntries.allSatisfy(\.isDone) && model.markers[day("2026-09-28")] == DayMarker(open: 0, done: 2, hasRecurring: true))
+        #expect(model.dayEntries.allSatisfy(\.isDone) && model.markers[day("2026-09-28")] == DayMarker(open: 0, done: 2, openRecurring: 0, hasRecurring: true))
         #expect(done.lines.first?.hasPrefix("Выполнено") == true)
 
         // the first action can be undone through its op while nothing else touched that item
@@ -224,6 +224,16 @@ struct CalendarModelTests {
         model.setSearchText("  ")
         await model.settled()
         #expect(model.searchResults.isEmpty)
+    }
+
+    @Test func searchResultsShowWhatIsComingFirst() async throws {
+        let (model, store) = try rig()
+        for (title, date) in [("Отчёт прошлый", "2026-09-10"), ("Отчёт поздний", "2026-10-20"), ("Отчёт ближайший", "2026-09-29"), ("Отчёт без даты", nil), ("Отчёт давний", "2026-08-01")] {
+            try await store.create(ItemDraft(kind: .task, title: title, date: date.map(day)))
+        }
+        model.setSearchText("Отчёт")
+        await model.settled()
+        #expect(model.searchResults.map(\.title) == ["Отчёт ближайший", "Отчёт поздний", "Отчёт прошлый", "Отчёт давний", "Отчёт без даты"])
     }
 
     @Test func aFastTyperOnlyRunsTheLastQuery() async throws {

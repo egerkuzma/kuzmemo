@@ -12,10 +12,12 @@ enum ControlRoutes {
         case ("POST", "/memo/transcript"): return await submit(request, env)
         case ("GET", "/agenda"): return await agenda(request, env)
         case ("GET", "/inbox"): return await inbox(env)
+        case ("POST", "/dev/seed"): return await seed(env)
+        case ("POST", "/ui"): return await ui(request, env)
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
         case ("POST", "/db/reset"): return await reset(env)
-        case ("GET", "/render"): return render(request, env)
+        case ("GET", "/render"): return await render(request, env)
         case ("GET", "/voice"): return VoiceRoutes.state(env)
         case ("POST", "/hotkey/down"), ("POST", "/hotkey/up"), ("POST", "/hotkey/other"), ("POST", "/hotkey/escape"):
             return VoiceRoutes.hotkey(request.path, env)
@@ -91,6 +93,59 @@ enum ControlRoutes {
         }
     }
 
+    /// Demo data for looking at the window; refuses outside the dev bundle.
+    private static func seed(_ env: AppEnvironment) async -> HTTPResponse {
+        guard env.paths.isDev else { return .error("refusing to add demo data outside the dev bundle", status: 409) }
+        do {
+            try await DevSeed.run(env)
+            await env.calendar.reload()
+            return .json(["seeded": true])
+        } catch {
+            return .error("\(error)", status: 500)
+        }
+    }
+
+    /// Puts the window in a state: `mode`, `date`, `search`, and `editor` ("new" or a part of an entry's title).
+    private static func ui(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        guard let json = request.jsonBody else { return .error("body must be JSON", status: 400) }
+        let calendar = env.calendar
+        if let text = json["date"] as? String {
+            guard let date = LocalDate(text) else { return .error("bad date", status: 400) }
+            calendar.select(date)
+        }
+        if let text = json["mode"] as? String {
+            guard let mode = CalendarModel.Mode(rawValue: text) else { return .error("mode must be day, inbox, search or recurring", status: 400) }
+            if mode == .day { calendar.select(calendar.selectedDate) } else { calendar.show(mode) }
+        }
+        if let text = json["search"] as? String { calendar.setSearchText(text) }
+        await calendar.settled()
+        await calendar.reload()
+        if let editor = json["editor"] as? String {
+            if editor == "new" {
+                env.editorRequest = .new(ItemDraft(kind: .task, date: calendar.selectedDate))
+            } else if let item = await findItem(titleContaining: editor, env) {
+                env.editorRequest = .edit(item)
+            } else {
+                return .error("no entry with «\(editor)» in its title", status: 404)
+            }
+        } else if json["editor"] is NSNull {
+            env.editorRequest = nil
+        }
+        return .json([
+            "mode": calendar.mode.rawValue, "date": "\(calendar.selectedDate)", "today": "\(calendar.today)",
+            "dayEntries": calendar.dayEntries.count, "overdue": calendar.overdueEntries.count, "inbox": calendar.inboxCount,
+            "search": calendar.searchResults.count, "recurring": calendar.recurring.count,
+        ])
+    }
+
+    static func findItem(titleContaining part: String, _ env: AppEnvironment) async -> Item? {
+        let needle = SearchText.normalize(part)
+        let all = (try? await env.store.agenda(in: env.calendar.grid.range)) ?? []
+        if let hit = all.first(where: { SearchText.normalize($0.item.title).contains(needle) }) { return hit.item }
+        let extras = ((try? await env.store.inbox()) ?? []) + ((try? await env.store.recurringSeries()) ?? [])
+        return extras.first { SearchText.normalize($0.title).contains(needle) }
+    }
+
     /// Entries without a date.
     private static func inbox(_ env: AppEnvironment) async -> HTTPResponse {
         guard let items = try? await env.store.inbox() else { return .error("cannot read the inbox", status: 500) }
@@ -124,13 +179,26 @@ enum ControlRoutes {
         }
     }
 
-    private static func render(_ request: HTTPRequest, _ env: AppEnvironment) -> HTTPResponse {
+    private static func render(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         let dark = request.query["scheme"] == "dark"
         let width = CGFloat(Double(request.query["width"] ?? "") ?? 380)
         let data: Data?
         switch request.query["view"] ?? "popover" {
         case "popover": data = Snapshot.png(PopoverView(env: env), width: width, dark: dark)
-        case "main": data = Snapshot.png(MainWindowView(env: env), width: max(width, 560), dark: dark)
+        case "main":
+            let height = CGFloat(Double(request.query["height"] ?? "") ?? 660)
+            data = Snapshot.png(MainWindowView(env: env), width: max(width, 860), height: height, dark: dark)
+        case "editor":
+            let title = request.query["title"] ?? "new"
+            let editing: AppEnvironment.EditorRequest
+            if title == "new" {
+                editing = .new(ItemDraft(kind: .task, date: env.calendar.selectedDate))
+            } else if let item = await findItem(titleContaining: title, env) {
+                editing = .edit(item)
+            } else {
+                return .error("no entry with «\(title)» in its title", status: 404)
+            }
+            data = Snapshot.png(ItemEditorView(request: editing, env: env), width: 480, dark: dark)
         case "hud":
             guard let state = VoiceRoutes.hudState(request.query["state"] ?? "recording") else {
                 return .error("state must be one of preparing, recording, handsfree, transcribing, interpreting, result, question, listening, note", status: 400)

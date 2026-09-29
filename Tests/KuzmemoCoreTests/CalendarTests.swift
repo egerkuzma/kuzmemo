@@ -38,7 +38,8 @@ struct MonthGridTests {
         let markers = CalendarSummary.markers([
             entry("a", "2026-09-29"), entry("b", "2026-09-29", done: true), entry("c", "2026-09-29", repeating: true), entry("d", "2026-09-30", done: true),
         ])
-        #expect(markers[date("2026-09-29")] == DayMarker(open: 2, done: 1, hasRecurring: true))
+        #expect(markers[date("2026-09-29")] == DayMarker(open: 2, done: 1, openRecurring: 1, hasRecurring: true))
+        #expect(markers[date("2026-09-29")]?.openOneOff == 1)
         #expect(markers[date("2026-09-30")]?.total == 1 && markers[date("2026-09-30")]?.open == 0)
         #expect(markers[date("2026-10-01")] == nil)
     }

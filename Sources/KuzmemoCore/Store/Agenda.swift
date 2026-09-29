@@ -11,6 +11,15 @@ public struct AgendaEntry: Hashable, Sendable, Identifiable {
     public var occurrenceDate: LocalDate?
     public var wasMoved: Bool
 
+    public init(item: Item, date: LocalDate, time: LocalTime?, isDone: Bool, occurrenceDate: LocalDate?, wasMoved: Bool) {
+        self.item = item
+        self.date = date
+        self.time = time
+        self.isDone = isDone
+        self.occurrenceDate = occurrenceDate
+        self.wasMoved = wasMoved
+    }
+
     public var isRecurring: Bool { occurrenceDate != nil }
     public var id: String { occurrenceDate.map { "\(item.id)@\($0)" } ?? item.id }
 }

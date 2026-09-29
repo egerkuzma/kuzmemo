@@ -117,6 +117,10 @@ final class VoiceController {
                     self?.hud.showNote("Отменено", style: .success, seconds: 2)
                 }
             },
+            edit: { [weak self] itemID in
+                self?.hud.hide()
+                self?.env.openEditor(itemID: itemID)
+            },
             choose: { [weak self] option in Task { @MainActor in await self?.choose(option) } }
         )
 
@@ -478,6 +482,14 @@ final class VoiceController {
         guard env.pendingQuestion != nil, session == nil else { return }
         if AppPaths.controlEnabled && scriptedInput == nil { return }
         perform(policy.beginHandsFree())
+    }
+
+    /// "Повторить" on an Inbox card whose recording could not be recognised.
+    func retryRecognition(memoID: String) async {
+        pendingJobs += 1
+        defer { pendingJobs -= 1 }
+        guard let result = await utterances.retry(memoID: memoID) else { return }
+        await present(result, replyingTo: nil)
     }
 
     /// An option chosen by tapping it (in the HUD or the popover) answers the question without speech.

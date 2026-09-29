@@ -18,7 +18,21 @@ struct KuzmemoApp: App {
         Window("Kuzmemo", id: "main") {
             MainWindowView(env: env)
         }
-        .defaultSize(width: 900, height: 620)
+        .defaultSize(width: 1000, height: 660)
+        .commands {
+            CommandMenu("Календарь") {
+                Button("Сегодня") { env.calendar.goToToday() }.keyboardShortcut("t", modifiers: .command)
+                Button("Предыдущий месяц") { env.calendar.moveMonth(by: -1) }.keyboardShortcut(.leftArrow, modifiers: .command)
+                Button("Следующий месяц") { env.calendar.moveMonth(by: 1) }.keyboardShortcut(.rightArrow, modifiers: .command)
+                Divider()
+                Button("Новая запись…") { env.newItem(on: env.calendar.mode == .day ? env.calendar.selectedDate : nil) }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("Найти") { env.focusSearch() }.keyboardShortcut("f", modifiers: .command)
+                Divider()
+                Button("Входящие") { env.calendar.show(.inbox) }.keyboardShortcut("1", modifiers: .command)
+                Button("Повторяющиеся") { env.calendar.show(.recurring) }.keyboardShortcut("2", modifiers: .command)
+            }
+        }
     }
 }
 
@@ -42,8 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuBarLabel: View {
     let env: AppEnvironment
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        icon.onAppear {
+            // The label is always alive, so it is where the window-opening action is picked up for use elsewhere.
+            env.openWindowAction = { openWindow(id: "main") }
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
         switch env.status {
         case .idle: Image(systemName: "calendar.badge.clock")
         case .recording: Image(systemName: "record.circle.fill")

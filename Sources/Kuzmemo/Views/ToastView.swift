@@ -23,9 +23,12 @@ struct ToastView: View {
                         }
                     }
                 }
-                if let opID = toast.undoOpID {
-                    Button("Отменить") { Task { await env.undo(opID: opID) } }
-                        .buttonStyle(.link).font(.callout)
+                if toast.undoOpID != nil || toast.editItemID != nil {
+                    HStack(spacing: 14) {
+                        if let opID = toast.undoOpID { Button("Отменить") { Task { await env.undo(opID: opID) } } }
+                        if let itemID = toast.editItemID { Button("Изменить") { env.openEditor(itemID: itemID) } }
+                    }
+                    .buttonStyle(.link).font(.callout)
                 }
             }
             Spacer(minLength: 0)

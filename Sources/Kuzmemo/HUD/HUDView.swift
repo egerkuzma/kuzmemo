@@ -138,8 +138,12 @@ private struct ResultContent: View {
                         }
                     }
                 }
-                if let opID = toast.undoOpID {
-                    Button("Отменить") { actions.undo(opID) }.buttonStyle(.link).font(.callout)
+                if toast.undoOpID != nil || toast.editItemID != nil {
+                    HStack(spacing: 14) {
+                        if let opID = toast.undoOpID { Button("Отменить") { actions.undo(opID) } }
+                        if let itemID = toast.editItemID { Button("Изменить") { actions.edit(itemID) } }
+                    }
+                    .buttonStyle(.link).font(.callout)
                 }
             }
         }

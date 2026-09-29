@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import KuzmemoCore
 import Observation
@@ -19,6 +20,21 @@ final class AppEnvironment {
         var options: [String] = []
         /// The journal entry this toast can undo.
         var undoOpID: String?
+        /// A single item this toast is about, which the "Изменить" button opens in the editor.
+        var editItemID: String?
+    }
+
+    /// What the editor sheet is asked to show.
+    enum EditorRequest: Identifiable {
+        case new(ItemDraft)
+        case edit(Item)
+
+        var id: String {
+            switch self {
+            case .new: "new"
+            case let .edit(item): item.id
+            }
+        }
     }
 
     /// A clarifying question waiting for an answer, typed, spoken or chosen.
@@ -40,10 +56,22 @@ final class AppEnvironment {
     let store: Store
     let processor: MemoProcessor
     let provider: ClaudeCLIProvider
+    let calendar: CalendarModel
 
     private(set) var todayEntries: [AgendaEntry] = []
     private var baseStatus: Status = .idle
-    private(set) var toast: Toast?
+    private(set) var toast: Toast? {
+        didSet { scheduleToastDismissal() }
+    }
+    /// Set to open the editor sheet in the main window (from a toast, a menu command or a double click).
+    var editorRequest: EditorRequest?
+    /// Bumped by ⌘F; the window moves keyboard focus to its search field when this changes.
+    private(set) var searchFocusRequest = 0
+
+    func focusSearch() {
+        showMainWindow()
+        searchFocusRequest += 1
+    }
     private(set) var queryResult: QueryResult?
     private(set) var pendingQuestion: PendingQuestion?
     private(set) var version: String
@@ -52,6 +80,9 @@ final class AppEnvironment {
     @ObservationIgnored private var controlServer: ControlServer?
     @ObservationIgnored private var observer: Task<Void, Never>?
     @ObservationIgnored private var questionExpiry: Task<Void, Never>?
+    @ObservationIgnored private var toastDismissal: Task<Void, Never>?
+    /// Registered by a SwiftUI view that is always alive (the menu-bar label): opens the main window's scene.
+    @ObservationIgnored var openWindowAction: (() -> Void)?
 
     /// What the menu-bar icon shows: recording and pending voice work take precedence over the last outcome.
     var status: Status {
@@ -70,6 +101,7 @@ final class AppEnvironment {
         }
         provider = ClaudeCLIProvider(configuration: ClaudeCLIConfiguration(workingDirectory: paths.claudeWorkingDirectory))
         processor = MemoProcessor(store: store, interpreter: Interpreter(store: store, provider: provider), clock: clock)
+        calendar = CalendarModel(store: store, clock: clock)
         start()
     }
 
@@ -84,6 +116,7 @@ final class AppEnvironment {
             await processor.closeOrphanedQuestions()
             for outcome in await processor.recoverUnfinished() { await present(outcome, announce: false) }
         }
+        calendar.startObserving()
         voice = VoiceController(env: self)
         voice.start()
         if AppPaths.controlEnabled {
@@ -174,6 +207,110 @@ final class AppEnvironment {
 
     func dismissToast() { toast = nil }
 
+    /// Confirmations fade by themselves; questions, answers and errors stay until dealt with.
+    private func scheduleToastDismissal() {
+        toastDismissal?.cancel()
+        toastDismissal = nil
+        guard let shown = toast, shown.style == .success || shown.style == .warning, shown.options.isEmpty else { return }
+        toastDismissal = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, self?.toast == shown else { return }
+            self?.toast = nil
+        }
+    }
+
+    // MARK: - Actions from the window
+
+    /// Runs an action from the calendar window and reports it with an undo toast (or the reason it failed).
+    func act(_ work: @escaping @MainActor () async throws -> ActionOutcome) {
+        Task { @MainActor in
+            do {
+                let outcome = try await work()
+                if !outcome.lines.isEmpty {
+                    toast = Toast(style: .success, lines: outcome.lines, undoOpID: outcome.op?.id)
+                }
+            } catch {
+                toast = Toast(style: .error, lines: [Self.describe(error)])
+            }
+        }
+    }
+
+    static func describe(_ error: any Error) -> String {
+        switch error {
+        case let problem as ItemDraft.Problem:
+            switch problem {
+            case .emptyTitle: "Введите название записи."
+            case .repeatWithoutDate: "Для повторяющейся записи нужна дата начала."
+            }
+        case is StoreError:
+            "Запись уже изменилась: обновите окно и повторите."
+        default:
+            "Не удалось выполнить действие: \(error)"
+        }
+    }
+
+    /// Opens an item in the editor, bringing the main window to the front.
+    func openEditor(itemID: String) {
+        Task { @MainActor in
+            guard let item = try? await store.item(id: itemID) else { return }
+            editorRequest = .edit(item)
+            showMainWindow()
+        }
+    }
+
+    func newItem(on date: LocalDate?) {
+        editorRequest = .new(ItemDraft(kind: .task, date: date))
+        showMainWindow()
+    }
+
+    /// The window is a regular app window while it is open (Dock icon, menu), and the app returns to the menu bar
+    /// when it closes (see `AppDelegate`).
+    func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.title == "Kuzmemo" && $0.styleMask.contains(.titled) }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openWindowAction?()
+        }
+    }
+
+    // MARK: - Inbox cards
+
+    /// "Повторить": recognise the kept recording again, or ask Claude again.
+    func retry(memo: Memo) {
+        Task { @MainActor in
+            baseStatus = .thinking
+            if memo.failStage == "stt" {
+                await voice.retryRecognition(memoID: memo.id)
+            } else if let outcome = await processor.retry(memoID: memo.id) {
+                await present(outcome, announce: true)
+            }
+            if baseStatus == .thinking { baseStatus = .idle }
+        }
+    }
+
+    /// "Править текст и повторить".
+    func editAndRetry(memo: Memo, text: String) {
+        Task { @MainActor in
+            baseStatus = .thinking
+            if let outcome = await processor.editAndRetry(memoID: memo.id, text: text) { await present(outcome, announce: true) }
+            if baseStatus == .thinking { baseStatus = .idle }
+        }
+    }
+
+    func keepAsNote(memo: Memo) {
+        Task { @MainActor in
+            if let outcome = await processor.keepAsNote(memoID: memo.id), case let .applied(result) = outcome.kind {
+                toast = Toast(style: .success, lines: result.changes.map { $0.summary(today: clock.localNow().date) }, undoOpID: result.op?.id)
+            }
+        }
+    }
+
+    func discard(memo: Memo) {
+        Task { @MainActor in await processor.discard(memoID: memo.id, reason: "discarded from the Inbox") }
+    }
+
     // MARK: - Presenting outcomes
 
     func present(_ outcome: ProcessOutcome, announce: Bool, round: Int = 1) async {
@@ -183,7 +320,12 @@ final class AppEnvironment {
             queryResult = nil
             baseStatus = .idle
             if announce {
-                toast = Toast(style: .success, lines: result.changes.map { $0.summary(today: now.date) }, undoOpID: result.op?.id)
+                let single = result.changes.count == 1 ? result.changes[0] : nil
+                let editable = single.map { $0.kind == .created || $0.kind == .updated || $0.kind == .moved } ?? false
+                toast = Toast(
+                    style: .success, lines: result.changes.map { $0.summary(today: now.date) }, undoOpID: result.op?.id,
+                    editItemID: editable ? single?.item.id : nil
+                )
             }
         case let .answered(plan):
             baseStatus = .idle

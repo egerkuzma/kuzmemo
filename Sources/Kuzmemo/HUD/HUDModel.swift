@@ -28,5 +28,6 @@ final class HUDModel {
 struct HUDActions {
     var cancel: () -> Void = {}
     var undo: (String) -> Void = { _ in }
+    var edit: (String) -> Void = { _ in }
     var choose: (String) -> Void = { _ in }
 }

@@ -30,11 +30,23 @@ public struct MonthGrid: Equatable, Sendable {
 
 /// What a day cell shows about the day.
 public struct DayMarker: Equatable, Sendable {
+    /// Entries still to do, repeating ones included.
     public var open = 0
     public var done = 0
+    /// How many of the open entries are occurrences of a repeating item.
+    public var openRecurring = 0
     public var hasRecurring = false
 
     public var total: Int { open + done }
+    /// Open entries that are one-off: what the month view marks with a coloured dot.
+    public var openOneOff: Int { open - openRecurring }
+
+    public init(open: Int = 0, done: Int = 0, openRecurring: Int = 0, hasRecurring: Bool = false) {
+        self.open = open
+        self.done = done
+        self.openRecurring = openRecurring
+        self.hasRecurring = hasRecurring
+    }
 }
 
 public enum CalendarSummary {
@@ -44,7 +56,10 @@ public enum CalendarSummary {
         for entry in entries {
             var marker = result[entry.date] ?? DayMarker()
             if entry.isDone { marker.done += 1 } else { marker.open += 1 }
-            if entry.isRecurring { marker.hasRecurring = true }
+            if entry.isRecurring {
+                marker.hasRecurring = true
+                if !entry.isDone { marker.openRecurring += 1 }
+            }
             result[entry.date] = marker
         }
         return result
