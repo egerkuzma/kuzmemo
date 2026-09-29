@@ -266,7 +266,7 @@ enum ControlRoutes {
         case "live":
             return await WindowRoutes.capture(
                 name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1",
-                chrome: request.query["chrome"] == "1", scale: 2
+                chrome: request.query["chrome"] == "1", scale: CGFloat(Double(request.query["scale"] ?? "") ?? 2), scheme: request.query["scheme"]
             )
         case "editor":
             let title = request.query["title"] ?? "new"

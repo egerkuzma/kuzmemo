@@ -57,8 +57,18 @@ enum WindowRoutes {
     /// SwiftUI does not redraw a window that is fully covered, so a covered window captures half empty.
     /// `chrome` draws the whole window as the person sees it, title bar and toolbar (or tab strip) included, by
     /// capturing the frame view around the content; without it only the content is drawn.
-    static func capture(name: String = "main", sheet: Bool, front: Bool, chrome: Bool = false, scale: CGFloat) async -> HTTPResponse {
+    /// `scheme` ("light" or "dark") draws the window in that appearance instead of the system's, for the length of the
+    /// capture; `scale` is the pixel density of the picture (2 for a retina picture).
+    static func capture(
+        name: String = "main", sheet: Bool, front: Bool, chrome: Bool = false, scale: CGFloat, scheme: String? = nil
+    ) async -> HTTPResponse {
         guard let window = window(name) else { return .error("the \(name) window is not open", status: 404) }
+        let appearance: NSAppearance? = scheme == "dark" ? NSAppearance(named: .darkAqua) : scheme == "light" ? NSAppearance(named: .aqua) : nil
+        if let appearance {
+            window.appearance = appearance
+            try? await Task.sleep(for: .milliseconds(500)) // let SwiftUI draw the window again in the new appearance
+        }
+        defer { if appearance != nil { window.appearance = nil } }
         if front {
             window.orderFrontRegardless()
             try? await Task.sleep(for: .milliseconds(800))
@@ -68,21 +78,26 @@ enum WindowRoutes {
         guard let content = target?.contentView else { return .error(sheet ? "no sheet is attached" : "no content view", status: 404) }
         let view = (chrome ? content.superview : nil) ?? content
         view.layoutSubtreeIfNeeded()
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return .error("cannot capture", status: 500) }
+        let pixels = max(1, scale)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * pixels), pixelsHigh: Int(view.bounds.height * pixels),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return .error("cannot capture", status: 500) }
+        rep.size = view.bounds.size // more pixels than points: the picture is drawn at `scale` x
         // The window's own background is not part of its content view: without this, light text of a dark window
-        // lands on a white bitmap and looks like an empty pane.
-        if let context = NSGraphicsContext(bitmapImageRep: rep) {
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = context
-            (target ?? window).effectiveAppearance.performAsCurrentDrawingAppearance {
+        // lands on a white bitmap and looks like an empty pane. Everything is drawn in the window's own appearance
+        // (not the system's), or a light window would get a dark title bar.
+        (target ?? window).effectiveAppearance.performAsCurrentDrawingAppearance {
+            if let context = NSGraphicsContext(bitmapImageRep: rep) {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = context
                 NSColor.windowBackgroundColor.setFill()
                 NSRect(origin: .zero, size: rep.size).fill()
+                NSGraphicsContext.restoreGraphicsState()
             }
-            NSGraphicsContext.restoreGraphicsState()
+            view.cacheDisplay(in: view.bounds, to: rep)
         }
-        view.cacheDisplay(in: view.bounds, to: rep)
         guard let data = rep.representation(using: .png, properties: [:]) else { return .error("cannot encode", status: 500) }
-        _ = scale
         return .png(data)
     }
 }
