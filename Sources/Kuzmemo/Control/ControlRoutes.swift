@@ -13,10 +13,12 @@ enum ControlRoutes {
         case ("GET", "/agenda"): return await agenda(request, env)
         case ("GET", "/inbox"): return await inbox(env)
         case ("POST", "/dev/seed"): return await seed(env)
+        case ("GET", "/settings"): return await SettingsRoutes.read(env)
+        case ("POST", "/settings"): return await SettingsRoutes.update(request, env)
         case ("POST", "/ui"): return await ui(request, env)
-        case ("GET", "/window"): return WindowRoutes.describe()
-        case ("POST", "/window/open"): return await WindowRoutes.open(env)
-        case ("POST", "/window/close"): return WindowRoutes.close()
+        case ("GET", "/window"): return WindowRoutes.describe(request.query["name"] ?? "main")
+        case ("POST", "/window/open"): return await WindowRoutes.open(env, name: request.query["name"] ?? "main")
+        case ("POST", "/window/close"): return WindowRoutes.close(request.query["name"] ?? "main")
         case ("GET", "/window/texts"): return WindowRoutes.texts(sheet: request.query["sheet"] == "1")
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
@@ -122,6 +124,10 @@ enum ControlRoutes {
             if mode == .day { calendar.select(calendar.selectedDate) } else { calendar.show(mode) }
         }
         if let text = json["search"] as? String { calendar.setSearchText(text) }
+        if let text = json["settingsTab"] as? String {
+            guard let tab = SettingsView.Tab(rawValue: text) else { return .error("unknown settings tab", status: 400) }
+            env.settingsTab = tab
+        }
         await calendar.settled()
         await calendar.reload()
         if let editor = json["editor"] as? String {
@@ -192,8 +198,13 @@ enum ControlRoutes {
         case "main":
             let height = CGFloat(Double(request.query["height"] ?? "") ?? 660)
             data = Snapshot.png(MainWindowView(env: env), width: max(width, 860), height: height, dark: dark)
+        case "settings":
+            env.settingsTab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
+            data = Snapshot.png(SettingsView(env: env), width: 700, height: 600, dark: dark)
         case "live":
-            return await WindowRoutes.capture(sheet: request.query["sheet"] == "1", front: request.query["front"] == "1", scale: 2)
+            return await WindowRoutes.capture(
+                name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1", scale: 2
+            )
         case "editor":
             let title = request.query["title"] ?? "new"
             let editing: AppEnvironment.EditorRequest

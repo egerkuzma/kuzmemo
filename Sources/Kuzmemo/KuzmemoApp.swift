@@ -20,6 +20,9 @@ struct KuzmemoApp: App {
         }
         .defaultSize(width: 1000, height: 660)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Настройки…") { env.showSettings() }.keyboardShortcut(",", modifiers: .command)
+            }
             CommandMenu("Календарь") {
                 Button("Сегодня") { env.calendar.goToToday() }.keyboardShortcut("t", modifiers: .command)
                 Button("Предыдущий месяц") { env.calendar.moveMonth(by: -1) }.keyboardShortcut(.leftArrow, modifiers: .command)
@@ -33,6 +36,12 @@ struct KuzmemoApp: App {
                 Button("Повторяющиеся") { env.calendar.show(.recurring) }.keyboardShortcut("2", modifiers: .command)
             }
         }
+
+        // A Window scene rather than the Settings scene: it can be opened from anywhere, including a toast.
+        Window("Настройки", id: "settings") {
+            SettingsView(env: env)
+        }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -49,7 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor static func updateActivationPolicy() {
-        let hasRealWindow = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) && $0.title == "Kuzmemo" }
+        let hasRealWindow = NSApp.windows.contains {
+            $0.isVisible && $0.styleMask.contains(.titled) && ($0.title == "Kuzmemo" || $0.title == "Настройки")
+        }
         NSApp.setActivationPolicy(hasRealWindow ? .regular : .accessory)
     }
 }
@@ -62,6 +73,7 @@ struct MenuBarLabel: View {
         icon.onAppear {
             // The label is always alive, so it is where the window-opening action is picked up for use elsewhere.
             env.openWindowAction = { openWindow(id: "main") }
+            env.openSettingsAction = { openWindow(id: "settings") }
         }
     }
 

@@ -44,8 +44,8 @@ final class VoiceController {
     let cues = SoundCues()
     let permissions = PermissionsModel()
 
-    /// Recording limits: a hard cap with a warning ten seconds before it.
-    static let recordingLimit: TimeInterval = 120
+    /// The hard cap on a recording (a warning sounds ten seconds before it).
+    var recordingLimit: TimeInterval { TimeInterval(env.settings.recording.maxSeconds) }
 
     private unowned let env: AppEnvironment
     private let transcriber: WhisperKitTranscriber
@@ -130,7 +130,12 @@ final class VoiceController {
             registerChord()
         }
         observeSystem()
-        warmModel()
+        env.settings.onChange = { [weak self] group in self?.settingsChanged(group) }
+        workers.append(Task { @MainActor [weak self] in
+            // The saved preferences decide which model to load, so they come first.
+            await self?.env.settings.load()
+            self?.warmModel()
+        })
 
         workers.append(Task { @MainActor [weak self] in
             guard let stream = self?.jobStream else { return }
@@ -157,8 +162,59 @@ final class VoiceController {
         await env.present(outcome, announce: false)
         guard case let .applied(result) = outcome.kind, !result.changes.isEmpty, session == nil else { return }
         let today = env.clock.localNow().date
-        cues.play(.saved)
+        if env.settings.speech.confirmationSound { cues.play(.saved) }
         hud.showNote("Записал отложенное: " + result.changes.map { $0.summary(today: today) }.joined(separator: "; "), style: .success, seconds: 5)
+    }
+
+    // MARK: - Settings
+
+    /// Puts a changed preference to work.
+    func settingsChanged(_ group: AppSettings.Group) {
+        let settings = env.settings
+        switch group {
+        case .speech:
+            speech.voiceIdentifier = settings.speech.voiceIdentifier
+            speech.rate = Float(settings.speech.rate)
+        case .recording:
+            policy.configuration.holdThreshold = settings.recording.holdThreshold
+            policy.configuration.maxRecording = TimeInterval(settings.recording.maxSeconds)
+        case .recognition:
+            let configuration = Self.whisperConfiguration(settings.recognition)
+            Task { @MainActor in
+                await transcriber.reconfigure(configuration)
+                if settings.loaded { warmModel() } // a new model starts loading now, not at the first recording
+            }
+        }
+    }
+
+    /// The model, language and idle time to use; a saved model that is no longer installed falls back to the default.
+    static func whisperConfiguration(_ recognition: RecognitionSettings) -> WhisperKitConfiguration {
+        var variant = recognition.modelVariant
+        if let known = ModelCatalog.variant(id: variant), !ModelCatalog.isInstalled(known) { variant = RecognitionSettings.defaultVariant }
+        var configuration = WhisperKitConfiguration.standard(variant: variant, language: recognition.language)
+        configuration.idleUnloadSeconds = TimeInterval(recognition.idleUnloadMinutes * 60)
+        return configuration
+    }
+
+    /// Says a sample with the current voice and speed (the settings window's "Прослушать").
+    func previewSpeech(_ text: String) {
+        Task { @MainActor in await speech.speak(text) }
+    }
+
+    /// Recognises a short test recording without creating a memo (the settings window's check).
+    func recognizeForTest(_ samples: [Float]) async -> Result<Recognition, any Error> {
+        do { return .success(try await Recognizer(transcriber: transcriber).recognize(samples)) } catch { return .failure(error) }
+    }
+
+    /// The model that is loaded or loading, for the settings window.
+    var modelSummary: String {
+        switch modelState {
+        case .notLoaded: "не загружена (загрузится при первой записи)"
+        case .loading: "загружается…"
+        case .ready: "готова"
+        case .missing: "не найдена"
+        case let .failed(reason): "ошибка: \(reason)"
+        }
     }
 
     // MARK: - Trigger
@@ -322,7 +378,7 @@ final class VoiceController {
     private func enterHandsFreeIfTapped() {
         guard let session, !session.handsFree, case .toggled = policy.state else { return }
         session.handsFree = true
-        session.detector = EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 2.5, speechWait: 20))
+        session.detector = EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: env.settings.recording.handsFreeSilence, speechWait: 20))
         phase = .recording(handsFree: true)
         hud.show(.recording(handsFree: true))
     }
@@ -341,9 +397,9 @@ final class VoiceController {
         case .speechStarted, nil: break
         }
         guard self.session === session else { return }
-        if elapsed >= Self.recordingLimit {
+        if elapsed >= recordingLimit {
             finishRecording()
-        } else if elapsed >= Self.recordingLimit - 10, !session.warnedLimit {
+        } else if elapsed >= recordingLimit - 10, !session.warnedLimit {
             session.warnedLimit = true
             cues.play(.attention) // ten seconds left
         }
@@ -463,7 +519,7 @@ final class VoiceController {
         guard let toast = env.toast else { showBackground(.hidden); return }
         let spoken = await spokenText(for: outcome)
         switch outcome.kind {
-        case .applied: cues.play(.saved)
+        case .applied: if env.settings.speech.confirmationSound { cues.play(.saved) }
         case .unknown, .failed: cues.play(.attention)
         case .answered, .clarify: break
         }
@@ -510,13 +566,19 @@ final class VoiceController {
     }
 
     private func spokenText(for outcome: ProcessOutcome) async -> String? {
+        let speechSettings = env.settings.speech
         switch outcome.kind {
         case .answered:
-            guard let result = env.queryResult else { return nil }
+            guard speechSettings.speakAnswers, let result = env.queryResult else { return nil }
             let glossary = (try? await env.store.glossary()) ?? []
             return AgendaSpeaker(glossary: glossary).speech(for: result, today: env.clock.localNow().date)
         case let .clarify(clarification):
-            return clarification.question
+            return speechSettings.speakAnswers ? clarification.question : nil
+        case let .applied(result):
+            guard speechSettings.speakConfirmations, !result.changes.isEmpty else { return nil }
+            let glossary = (try? await env.store.glossary()) ?? []
+            let today = env.clock.localNow().date
+            return result.changes.map { $0.spokenConfirmation(today: today, glossary: glossary) }.joined(separator: " ")
         default:
             return nil
         }

@@ -77,6 +77,7 @@ struct PopoverView: View {
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
             }
+            Button("Настройки…") { env.showSettings() }
             Spacer()
             Button("Выйти") { NSApp.terminate(nil) }
         }

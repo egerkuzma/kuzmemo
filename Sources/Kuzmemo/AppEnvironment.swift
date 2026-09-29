@@ -57,6 +57,7 @@ final class AppEnvironment {
     let processor: MemoProcessor
     let provider: ClaudeCLIProvider
     let calendar: CalendarModel
+    let settings: AppSettings
 
     private(set) var todayEntries: [AgendaEntry] = []
     private var baseStatus: Status = .idle
@@ -65,6 +66,8 @@ final class AppEnvironment {
     }
     /// Set to open the editor sheet in the main window (from a toast, a menu command or a double click).
     var editorRequest: EditorRequest?
+    /// The tab the settings window shows.
+    var settingsTab: SettingsView.Tab = .general
     /// Bumped by ⌘F; the window moves keyboard focus to its search field when this changes.
     private(set) var searchFocusRequest = 0
 
@@ -83,6 +86,7 @@ final class AppEnvironment {
     @ObservationIgnored private var toastDismissal: Task<Void, Never>?
     /// Registered by a SwiftUI view that is always alive (the menu-bar label): opens the main window's scene.
     @ObservationIgnored var openWindowAction: (() -> Void)?
+    @ObservationIgnored var openSettingsAction: (() -> Void)?
 
     /// What the menu-bar icon shows: recording and pending voice work take precedence over the last outcome.
     var status: Status {
@@ -102,6 +106,7 @@ final class AppEnvironment {
         provider = ClaudeCLIProvider(configuration: ClaudeCLIConfiguration(workingDirectory: paths.claudeWorkingDirectory))
         processor = MemoProcessor(store: store, interpreter: Interpreter(store: store, provider: provider), clock: clock)
         calendar = CalendarModel(store: store, clock: clock)
+        settings = AppSettings(store: store)
         start()
     }
 
@@ -272,6 +277,18 @@ final class AppEnvironment {
             window.makeKeyAndOrderFront(nil)
         } else {
             openWindowAction?()
+        }
+    }
+
+    /// Opens the settings window in front of everything else.
+    func showSettings(tab: SettingsView.Tab? = nil) {
+        if let tab { settingsTab = tab }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.title == "Настройки" && $0.styleMask.contains(.titled) }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openSettingsAction?()
         }
     }
 

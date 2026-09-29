@@ -5,12 +5,14 @@ import Foundation
 /// close it, and capture what it really draws (including an attached sheet) from inside the process, which needs no
 /// screen-recording permission.
 enum WindowRoutes {
-    private static var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.title == "Kuzmemo" && $0.styleMask.contains(.titled) }
+    /// The calendar window (`main`) or the settings window (`settings`).
+    private static func window(_ name: String) -> NSWindow? {
+        let title = name == "settings" ? "Настройки" : "Kuzmemo"
+        return NSApp.windows.first { $0.title == title && $0.styleMask.contains(.titled) }
     }
 
-    static func describe() -> HTTPResponse {
-        guard let window = mainWindow, window.isVisible else {
+    static func describe(_ name: String = "main") -> HTTPResponse {
+        guard let window = window(name), window.isVisible else {
             return .json(["open": false, "policy": "\(NSApp.activationPolicy().rawValue)"])
         }
         return .json([
@@ -23,19 +25,21 @@ enum WindowRoutes {
 
     /// Opens the window through the scene, deliberately without activating the app: an accessory app's window then
     /// stays behind whatever the person is working in.
-    static func open(_ env: AppEnvironment) async -> HTTPResponse {
-        guard mainWindow?.isVisible != true else { return describe() }
-        guard let action = env.openWindowAction else { return .error("the window-opening action is not registered yet", status: 409) }
+    static func open(_ env: AppEnvironment, name: String = "main") async -> HTTPResponse {
+        guard window(name)?.isVisible != true else { return describe(name) }
+        guard let action = name == "settings" ? env.openSettingsAction : env.openWindowAction else {
+            return .error("the window-opening action is not registered yet", status: 409)
+        }
         action() // also brings back a window that was closed and is only being kept by the scene
-        for _ in 0 ..< 40 where mainWindow?.isVisible != true { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0 ..< 40 where window(name)?.isVisible != true { try? await Task.sleep(for: .milliseconds(50)) }
         try? await Task.sleep(for: .milliseconds(300)) // let the first layout pass finish
-        return describe()
+        return describe(name)
     }
 
     /// The visible text and controls of the real window as assistive technology sees them: a way to check what is
     /// really on screen (and that everything has a Russian accessibility label) without drawing anything.
     static func texts(sheet: Bool) -> HTTPResponse {
-        guard let window = mainWindow else { return .error("the main window is not open", status: 404) }
+        guard let window = window("main") else { return .error("the main window is not open", status: 404) }
         guard let root = (sheet ? window.attachedSheet : window) else { return .error("no sheet is attached", status: 404) }
         var found: [[String: String]] = []
         func walk(_ element: Any, depth: Int) {
@@ -54,15 +58,15 @@ enum WindowRoutes {
         return .json(["count": found.count, "elements": found])
     }
 
-    static func close() -> HTTPResponse {
-        mainWindow?.close()
-        return describe()
+    static func close(_ name: String = "main") -> HTTPResponse {
+        window(name)?.close()
+        return describe(name)
     }
 
     /// `front` puts the window on top for a moment (without activating the app or taking keyboard focus) because
     /// SwiftUI does not redraw a window that is fully covered, so a covered window captures half empty.
-    static func capture(sheet: Bool, front: Bool, scale: CGFloat) async -> HTTPResponse {
-        guard let window = mainWindow else { return .error("the main window is not open", status: 404) }
+    static func capture(name: String = "main", sheet: Bool, front: Bool, scale: CGFloat) async -> HTTPResponse {
+        guard let window = window(name) else { return .error("the \(name) window is not open", status: 404) }
         if front {
             window.orderFrontRegardless()
             try? await Task.sleep(for: .milliseconds(800))

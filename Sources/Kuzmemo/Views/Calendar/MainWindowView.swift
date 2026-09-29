@@ -45,6 +45,9 @@ struct MainWindowView: View {
                 SidebarRow(title: "Повторяющиеся", symbol: "repeat", badge: 0, selected: calendar.mode == .recurring) {
                     calendar.show(.recurring)
                 }
+                SidebarRow(title: "Настройки", symbol: "gearshape", badge: 0, selected: false) {
+                    env.showSettings()
+                }
             }
             Spacer(minLength: 0)
             VoiceStatusView(voice: env.voice)

@@ -35,6 +35,12 @@ def call(method, path, body=None, raw=False):
     return json.loads(data) if data else {}
 
 
+DEFAULT_SETTINGS = {
+    "speech": {"voiceIdentifier": None, "rate": 0.5, "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True},
+    "recognition": {"language": "ru", "languageAuto": False, "idleUnloadMinutes": 15, "modelVariant": "openai_whisper-large-v3-v20240930_turbo"},
+    "recording": {"holdThreshold": 0.3, "handsFreeSilence": 2.5, "maxSeconds": 120},
+}
+
 passed = failed = 0
 
 
@@ -59,6 +65,7 @@ def main():
 
     print("demo data")
     call("POST", "/db/reset")
+    call("POST", "/settings", DEFAULT_SETTINGS)
     call("POST", "/clock", {"local": "2026-09-28 14:30"})
     check("seeding works in the dev bundle", call("POST", "/dev/seed").get("seeded") is True)
 

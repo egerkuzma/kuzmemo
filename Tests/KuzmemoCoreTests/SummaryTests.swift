@@ -53,3 +53,37 @@ struct SummaryTests {
         #expect(RussianFormat.recurrence(Recurrence(freq: .yearly)) == "каждый год")
     }
 }
+
+@Suite("Spoken confirmations")
+struct SpokenConfirmationTests {
+    private let today = LocalDate("2026-09-28")!
+    private let glossary = [GlossaryTerm(canonical: "Figma", spoken: "Фигма"), GlossaryTerm(canonical: "Notion", spoken: "Нотион")]
+
+    private func change(_ kind: AppliedChange.Kind, _ item: Item, occurrence: String? = nil, newDate: String? = nil, newTime: String? = nil) -> AppliedChange {
+        AppliedChange(kind: kind, item: item, occurrenceDate: occurrence.flatMap(LocalDate.init), newDate: newDate.flatMap(LocalDate.init), newTime: newTime.flatMap(LocalTime.init))
+    }
+
+    @Test func aCreatedEntryIsReadOutWithItsDayAndSpelledOutTime() {
+        let meeting = Item(id: "1", kind: .event, title: "Созвон с Figma", date: LocalDate("2026-09-29"), time: LocalTime("11:00"))
+        #expect(change(.created, meeting).spokenConfirmation(today: today, glossary: glossary) == "Записал: событие на завтра в одиннадцать часов — Созвон с Фигма.")
+        let reminder = Item(id: "2", kind: .reminder, title: "Сказать Дмитрию про доступ в Notion", date: LocalDate("2026-09-30"))
+        #expect(change(.created, reminder).spokenConfirmation(today: today, glossary: glossary) == "Записал: напоминание на послезавтра — Сказать Дмитрию про доступ в Нотион.")
+        let note = Item(id: "3", kind: .note, title: "Идея про пуши")
+        #expect(change(.created, note).spokenConfirmation(today: today) == "Записал: заметку без даты — Идея про пуши.")
+    }
+
+    @Test func aRepeatingEntryMentionsHowItRepeats() {
+        let standup = Item(id: "4", kind: .event, title: "Планёрка", date: LocalDate("2026-10-05"), time: LocalTime("10:00"), recurrence: Recurrence(freq: .weekly, byWeekday: [.mon]))
+        #expect(change(.created, standup).spokenConfirmation(today: today) == "Записал: событие на 5 октября в десять часов, каждый понедельник — Планёрка.")
+    }
+
+    @Test func otherChangesHaveTheirOwnWording() {
+        let item = Item(id: "5", kind: .event, title: "Встреча с Дмитрием", date: LocalDate("2026-10-01"), time: LocalTime("15:00"))
+        #expect(change(.moved, item, occurrence: "2026-10-01", newDate: "2026-10-02", newTime: "16:30").spokenConfirmation(today: today) == "Перенёс: Встреча с Дмитрием на пятницу, 2 октября в шестнадцать тридцать.")
+        #expect(change(.completed, item).spokenConfirmation(today: today) == "Отметил выполненным: Встреча с Дмитрием.")
+        #expect(change(.deleted, item).spokenConfirmation(today: today) == "Удалил: Встреча с Дмитрием.")
+        #expect(change(.updated, item).spokenConfirmation(today: today) == "Изменил: Встреча с Дмитрием.")
+        #expect(change(.skipped, item).spokenConfirmation(today: today) == "Пропустил повторение: Встреча с Дмитрием.")
+        #expect(change(.reopened, item).spokenConfirmation(today: today) == "Вернул в работу: Встреча с Дмитрием.")
+    }
+}

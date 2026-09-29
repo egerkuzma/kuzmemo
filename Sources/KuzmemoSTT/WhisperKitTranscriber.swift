@@ -48,20 +48,35 @@ public struct WhisperKitConfiguration: Sendable {
 /// WhisperKit large-v3-turbo on the Neural Engine. The model loads lazily (about 1.4 s once the Core ML
 /// cache is warm), stays loaded while it is being used and is released after `idleUnloadSeconds`.
 public actor WhisperKitTranscriber: Transcriber {
-    public nonisolated let modelName: String
     private var configuration: WhisperKitConfiguration
     private var pipe: WhisperKit?
     private var isLoading = false
     private var idleTask: Task<Void, Never>?
+    /// Bumped when the configuration changes, so a load that started with the old one is thrown away.
+    private var generation = 0
 
     public init(configuration: WhisperKitConfiguration) {
         self.configuration = configuration
-        self.modelName = configuration.modelName
     }
 
     public var isLoaded: Bool { pipe != nil }
+    public var modelName: String { configuration.modelName }
 
     public func setLanguage(_ language: String?) { configuration.language = language }
+
+    /// Switches to another model, language or idle time. A different model is unloaded here and loads on the
+    /// next `prepare()` or recognition.
+    public func reconfigure(_ new: WhisperKitConfiguration) async {
+        let modelChanged = new.modelFolder != configuration.modelFolder || new.downloadBase != configuration.downloadBase
+            || new.prewarm != configuration.prewarm
+        configuration = new
+        if modelChanged {
+            generation += 1
+            await unload()
+        } else if pipe != nil {
+            scheduleIdleUnload()
+        }
+    }
 
     public func prepare() async throws {
         _ = try await loadedPipe()
@@ -88,7 +103,8 @@ public actor WhisperKitTranscriber: Transcriber {
         let text = results.map(\.text).joined(separator: " ")
         return TranscriptionOutput(
             text: Self.stripSpecialTokens(text), language: results.first?.language,
-            audioSeconds: Double(samples.count) / 16000, processingSeconds: Date().timeIntervalSince(started), model: modelName
+            audioSeconds: Double(samples.count) / 16000, processingSeconds: Date().timeIntervalSince(started),
+            model: configuration.modelName
         )
     }
 
@@ -113,11 +129,19 @@ public actor WhisperKitTranscriber: Transcriber {
         }
         isLoading = true
         defer { isLoading = false }
+        let started = generation
+        let settings = configuration
         do {
             let loaded = try await WhisperKit(WhisperKitConfig(
-                downloadBase: configuration.downloadBase, modelFolder: configuration.modelFolder.path,
-                verbose: false, logLevel: .error, prewarm: configuration.prewarm, load: true, download: false
+                downloadBase: settings.downloadBase, modelFolder: settings.modelFolder.path,
+                verbose: false, logLevel: .error, prewarm: settings.prewarm, load: true, download: false
             ))
+            if started != generation {
+                // The model was switched while this one was loading: drop it and load the current one.
+                await loaded.unloadModels()
+                isLoading = false
+                return try await loadedPipe()
+            }
             pipe = loaded
             return loaded
         } catch {
@@ -127,6 +151,7 @@ public actor WhisperKitTranscriber: Transcriber {
 
     private func scheduleIdleUnload() {
         idleTask?.cancel()
+        guard configuration.idleUnloadSeconds > 0 else { return } // 0: keep the model loaded
         let seconds = configuration.idleUnloadSeconds
         idleTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))

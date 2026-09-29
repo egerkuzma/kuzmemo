@@ -26,7 +26,6 @@ public enum TranscriberError: Error, Equatable {
 /// A speech-to-text engine. Implementations keep their heavy model inside (an actor) and accept 16 kHz mono
 /// Float32 samples, so the engine behind the protocol can be swapped without touching the pipeline.
 public protocol Transcriber: Sendable {
-    var modelName: String { get }
     /// Loads the model if needed (idempotent, safe to call on every key-down to hide the load time).
     func prepare() async throws
     func transcribe(_ samples: [Float]) async throws -> TranscriptionOutput
