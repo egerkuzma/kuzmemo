@@ -20,11 +20,30 @@ struct SpeechSettingsTab: View {
     var body: some View {
         @Bindable var settings = env.settings
         Form {
+            Section("Движок озвучки") {
+                Picker("Движок", selection: $settings.speech.engine) {
+                    Text("Системный голос macOS").tag(SpeechEngine.system)
+                    Text("Silero — нейросетевой голос").tag(SpeechEngine.silero)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if settings.speech.engine == .silero {
+                    sileroStatus(settings.speech)
+                } else {
+                    Hint("Голос, встроенный в macOS: быстрый, ничего не нужно устанавливать. Нейросетевой Silero звучит естественнее (как в проекте another project), но требует Python с torch.")
+                }
+            }
             Section("Голос") {
-                Picker("Голос", selection: $settings.speech.voiceIdentifier) {
-                    Text("Лучший из установленных").tag(String?.none)
-                    ForEach(voices) { voice in
-                        Text(verbatim: "\(voice.name) — \(voice.quality)").tag(Optional(voice.id))
+                if settings.speech.engine == .silero {
+                    Picker("Голос Silero", selection: $settings.speech.sileroSpeaker) {
+                        ForEach(sileroChoices(settings.speech.sileroSpeaker), id: \.id) { Text(verbatim: $0.title).tag($0.id) }
+                    }
+                } else {
+                    Picker("Голос", selection: $settings.speech.voiceIdentifier) {
+                        Text("Лучший из установленных").tag(String?.none)
+                        ForEach(voices) { voice in
+                            Text(verbatim: "\(voice.name) — \(voice.quality)").tag(Optional(voice.id))
+                        }
                     }
                 }
                 LabeledContent("Скорость") {
@@ -50,7 +69,10 @@ struct SpeechSettingsTab: View {
                     Spacer()
                     if env.voice.speech.muted { Hint("В этой сборке звук выключен (для автоматических проверок).") }
                 }
-                if !voices.isEmpty, voices.allSatisfy({ $0.quality == "стандартный" }) {
+                if let reason = env.voice.speech.lastFallback, settings.speech.engine == .silero {
+                    Hint("Последняя фраза прозвучала системным голосом: \(reason)")
+                }
+                if settings.speech.engine == .system, !voices.isEmpty, voices.allSatisfy({ $0.quality == "стандартный" }) {
                     Hint("Установлены только стандартные голоса. Улучшенные и премиум-голоса звучат заметно естественнее: Системные настройки → Универсальный доступ → Устный контент → Системный голос → «Управление голосами…».")
                     Button("Открыть настройки голосов") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Accessibility-Settings.extension") { NSWorkspace.shared.open(url) }
@@ -64,7 +86,76 @@ struct SpeechSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .task { voices = Self.installedVoices() }
+        .task {
+            voices = Self.installedVoices()
+            env.voice.speech.silero.refresh()
+        }
+    }
+
+    // MARK: Silero
+
+    private var silero: SileroSpeechOutput { env.voice.speech.silero }
+
+    /// The voices of the model when it is known, otherwise the five that Silero's Russian model ships with.
+    private func sileroChoices(_ selected: String) -> [SileroVoice.Speaker] {
+        var choices = SileroVoice.speakers
+        if !silero.speakers.isEmpty {
+            choices = silero.speakers.map { name in SileroVoice.speakers.first { $0.id == name } ?? .init(id: name, title: name) }
+        }
+        if !choices.contains(where: { $0.id == selected }) { choices.append(.init(id: selected, title: selected)) }
+        return choices
+    }
+
+    @ViewBuilder private func sileroStatus(_ speech: SpeechSettings) -> some View {
+        switch silero.status {
+        case .unknown:
+            Label("Проверяю…", systemImage: "hourglass").foregroundStyle(.secondary)
+        case let .ready(found):
+            Label("Готов · \(found.source)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Hint("Python: \(found.python.path)\nМодель: \(found.model.path)")
+            Hint("Нейросеть загружается в память при записи и выгружается через 10 минут простоя. Если она не готова, фраза прозвучит системным голосом.")
+        case let .unavailable(problem):
+            Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Hint("Пока фразы озвучивает системный голос. Чтобы включить Silero, выполните в Терминале:")
+            Text(verbatim: Self.installCommand).font(.caption.monospaced()).textSelection(.enabled)
+            Button("Скопировать команду") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(Self.installCommand, forType: .string)
+            }
+        case .missingHelper:
+            Label("В этой сборке нет вспомогательного файла Silero.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Hint("Соберите приложение заново: scripts/run_app.sh.")
+        }
+        if let error = silero.lastError { Text(verbatim: error).font(.caption).foregroundStyle(.red) }
+        HStack {
+            Button("Указать Python…") { choosePython() }
+            if speech.sileroPython != nil {
+                Button("Искать самому") { env.settings.speech.sileroPython = nil }
+            }
+            Spacer()
+            Button("Проверить") {
+                silero.refresh()
+                Task { await silero.prepare() }
+            }
+            .disabled(!silero.isReady || silero.isLoading)
+        }
+    }
+
+    /// What to run in the Terminal to set Silero up (the project folder is known from the build).
+    private static var installCommand: String {
+        let root = (Bundle.main.object(forInfoDictionaryKey: "KuzmemoSourceRoot") as? String) ?? "<папка проекта>"
+        return "\"\(root)/scripts/install_silero.sh\""
+    }
+
+    private func choosePython() {
+        let panel = NSOpenPanel()
+        panel.title = "Python с установленным torch"
+        panel.message = "Выберите python из окружения (например, venv/bin/python), где стоит torch."
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        env.settings.speech.sileroPython = url.path
     }
 
     private func preview() {

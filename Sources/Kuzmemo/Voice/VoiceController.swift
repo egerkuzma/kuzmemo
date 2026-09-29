@@ -40,7 +40,7 @@ final class VoiceController {
     var isBusy: Bool { pendingJobs > 0 }
 
     let hud = HUDController()
-    let speech = SystemSpeechOutput()
+    let speech: SpeechRouter
     let cues = SoundCues()
     let permissions = PermissionsModel()
 
@@ -94,6 +94,7 @@ final class VoiceController {
 
     init(env: AppEnvironment) {
         self.env = env
+        speech = SpeechRouter(cache: env.paths.speechCache)
         let transcriber = WhisperKitTranscriber(configuration: .standard())
         self.transcriber = transcriber
         utterances = UtteranceProcessor(
@@ -173,8 +174,16 @@ final class VoiceController {
         let settings = env.settings
         switch group {
         case .speech:
-            speech.voiceIdentifier = settings.speech.voiceIdentifier
-            speech.rate = Float(settings.speech.rate)
+            speech.system.voiceIdentifier = settings.speech.voiceIdentifier
+            speech.system.rate = Float(settings.speech.rate)
+            speech.engine = settings.speech.engine
+            speech.silero.speaker = settings.speech.sileroSpeaker
+            speech.silero.rate = settings.speech.rate
+            if speech.silero.pythonOverride != settings.speech.sileroPython || !speech.silero.isReady {
+                speech.silero.pythonOverride = settings.speech.sileroPython
+                speech.silero.refresh()
+            }
+            if settings.loaded { speech.prewarm() } // switching to the neural voice loads it now
         case .recording:
             policy.configuration.holdThreshold = settings.recording.holdThreshold
             policy.configuration.maxRecording = TimeInterval(settings.recording.maxSeconds)
@@ -368,6 +377,7 @@ final class VoiceController {
         phase = .recording(handsFree: question != nil)
         speech.stop()
         warmModel() // the model loads while the person is still talking
+        speech.prewarm() // …and so does the neural voice, if it is the one in use
         session.tick = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))

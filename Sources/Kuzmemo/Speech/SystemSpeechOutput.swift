@@ -9,8 +9,8 @@ protocol SpeechOutput: AnyObject {
 }
 
 /// Speaks with the system voice. Picks the best installed Russian voice (premium, then enhanced, then the
-/// compact default) unless the user chose one. While muted (dev automation, quiet hours) it only records
-/// what it would have said.
+/// compact default) unless the user chose one. While muted (dev automation, quiet hours) it says nothing;
+/// `SpeechRouter` keeps the record of what would have been said.
 final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
     private var continuation: CheckedContinuation<Void, Never>?
@@ -18,10 +18,6 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     var voiceIdentifier: String?
     var rate: Float = AVSpeechUtteranceDefaultSpeechRate
     var muted = false
-    /// Everything that was (or would have been) spoken, newest last (the last 100).
-    private(set) var log: [String] = []
-    /// How many utterances there have been in total, so a caller can tell which log entries are new.
-    private(set) var spokenCount = 0
 
     override init() {
         super.init()
@@ -31,9 +27,6 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
     func speak(_ text: String) async {
-        log.append(text)
-        spokenCount += 1
-        if log.count > 100 { log.removeFirst(log.count - 100) }
         guard !muted, !text.isEmpty else { return }
         stop()
         let utterance = AVSpeechUtterance(string: text)

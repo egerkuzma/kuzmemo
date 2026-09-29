@@ -71,6 +71,8 @@ done
 # by its file name inside the app bundle).
 [ -e "$ROOT/Resources/Sounds/Kuzmemo-bell.wav" ] || python3 "$ROOT/scripts/make_sounds.py" # generated, not committed
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
+# The Silero voice runs in a small Python helper (see scripts/install_silero.sh)
+cp "$ROOT/Resources/Silero/silero_helper.py" "$APP/Contents/Resources/"
 for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -95,6 +97,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>KuzmemoControlEnabled</key><$CONTROL/>
     <key>KuzmemoAutomation</key><$AUTOMATION/>
     <key>KuzmemoGitCommit</key><string>$GIT_HASH</string>
+    <key>KuzmemoSourceRoot</key><string>$ROOT</string>
 </dict>
 </plist>
 PLIST

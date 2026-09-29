@@ -35,7 +35,10 @@ def call(method, path, body=None, raw=False):
 
 
 DEFAULT_SETTINGS = {
-    "speech": {"voiceIdentifier": None, "rate": 0.5, "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True},
+    "speech": {
+        "engine": "system", "sileroSpeaker": "eugene", "sileroPython": None, "voiceIdentifier": None, "rate": 0.5,
+        "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True,
+    },
     "recognition": {"language": "ru", "languageAuto": False, "idleUnloadMinutes": 15, "modelVariant": "openai_whisper-large-v3-v20240930_turbo"},
     "recording": {"holdThreshold": 0.3, "handsFreeSilence": 2.5, "maxSeconds": 120},
     "notifications": {

@@ -33,6 +33,8 @@ enum ControlRoutes {
         case ("POST", "/question/close"): return await VoiceRoutes.closeQuestion(request, env)
         case ("POST", "/record/inject-audio"): return await VoiceRoutes.inject(request, env)
         case ("GET", "/speech/log"): return VoiceRoutes.speechLog(env)
+        case ("GET", "/speech/silero"): return SileroRoutes.state(env)
+        case ("POST", "/speech/silero/say"): return await SileroRoutes.say(request, env)
         case ("POST", "/speech/mute"): return VoiceRoutes.mute(request, env)
         default: return .error("no route \(request.method) \(request.path)", status: 404)
         }

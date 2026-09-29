@@ -21,13 +21,24 @@ extension Store {
     }
 }
 
+/// What produces the voice: the system's synthesizer, or the Silero neural voice (a Python helper process).
+public enum SpeechEngine: String, Codable, CaseIterable, Sendable {
+    case system, silero
+}
+
 /// Voice output.
 public struct SpeechSettings: SettingsGroup {
     public static let storageKey = "settings.speech"
 
+    /// The speech engine; the system voice is always the fallback when Silero is missing or fails.
+    public var engine = SpeechEngine.system
+    /// The Silero speaker ("eugene", "xenia", …).
+    public var sileroSpeaker = SileroVoice.defaultSpeaker
+    /// A Python interpreter with torch chosen by hand; `nil` looks in the usual places.
+    public var sileroPython: String?
     /// An `AVSpeechSynthesisVoice` identifier; `nil` picks the best installed Russian voice.
     public var voiceIdentifier: String?
-    /// The synthesizer's rate, 0...1; 0.5 is the system default.
+    /// The speaking rate, shared by both engines; 0.5 is the system default.
     public var rate = 0.5
     /// Read answers and questions aloud.
     public var speakAnswers = true
@@ -38,11 +49,17 @@ public struct SpeechSettings: SettingsGroup {
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case voiceIdentifier, rate, speakAnswers, speakConfirmations, confirmationSound }
+    enum CodingKeys: String, CodingKey {
+        case engine, sileroSpeaker, sileroPython, voiceIdentifier, rate, speakAnswers, speakConfirmations, confirmationSound
+    }
 
     public init(from decoder: any Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        engine = (try c.decodeIfPresent(String.self, forKey: .engine)).flatMap(SpeechEngine.init(rawValue:)) ?? engine
+        let speaker = try c.decodeIfPresent(String.self, forKey: .sileroSpeaker)?.trimmingCharacters(in: .whitespaces)
+        sileroSpeaker = speaker.flatMap { $0.isEmpty ? nil : $0 } ?? sileroSpeaker
+        sileroPython = try c.decodeIfPresent(String.self, forKey: .sileroPython).flatMap { $0.isEmpty ? nil : $0 }
         voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier)
         rate = min(max(try c.decodeIfPresent(Double.self, forKey: .rate) ?? rate, 0.2), 0.7)
         speakAnswers = try c.decodeIfPresent(Bool.self, forKey: .speakAnswers) ?? speakAnswers

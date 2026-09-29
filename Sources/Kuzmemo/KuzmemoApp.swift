@@ -57,6 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The Silero helper is a child process: stop it (briefly) before the app goes away.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task { @MainActor in
+            await AppEnvironment.shared.voice.speech.silero.shutDown()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     @MainActor static func updateActivationPolicy() {
         let hasRealWindow = NSApp.windows.contains {
             $0.isVisible && $0.styleMask.contains(.titled) && ($0.title == "Kuzmemo" || $0.title == "Настройки")

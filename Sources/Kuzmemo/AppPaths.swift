@@ -15,6 +15,8 @@ struct AppPaths {
     /// Recordings waiting to be transcribed (deleted as soon as their text is stored).
     var audioSpool: URL { support.appendingPathComponent("spool", isDirectory: true) }
     var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }
+    /// Phrases made by the Silero voice, deleted as soon as they have been played.
+    var speechCache: URL { support.appendingPathComponent("speech-cache", isDirectory: true) }
 
     static func resolve() -> AppPaths {
         let environment = ProcessInfo.processInfo.environment
