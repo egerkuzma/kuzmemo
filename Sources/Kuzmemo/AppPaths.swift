@@ -1,7 +1,9 @@
 import Foundation
 
-/// Where the app keeps its data. The dev bundle (`app.kuzmemo.dev`) uses its own folder so automated
-/// tests never touch real entries; `KUZMEMO_DATA_DIR` overrides the location entirely.
+/// Where the app keeps its data. There are two bundles with separate folders, so that nothing the scripts do can
+/// touch the person's entries: the daily app (`app.kuzmemo`), and the dev bundle (`app.kuzmemo.dev`), which is the
+/// automation build: control socket on, muted, no reaction to physical keys, never opens the real microphone by
+/// itself. `KUZMEMO_DATA_DIR` overrides the location entirely.
 struct AppPaths {
     let support: URL
     let isDev: Bool
@@ -26,6 +28,13 @@ struct AppPaths {
                 .appendingPathComponent(isDev ? "Kuzmemo-Dev" : "Kuzmemo", isDirectory: true)
         }
         return AppPaths(support: base, isDev: isDev)
+    }
+
+    /// Scripts drive this build (the dev bundle): it must stay silent, must not react to the person's keys and must
+    /// not open the real microphone by itself.
+    static var isAutomation: Bool {
+        if ProcessInfo.processInfo.environment["KUZMEMO_AUTOMATION"] == "1" { return true }
+        return (Bundle.main.object(forInfoDictionaryKey: "KuzmemoAutomation") as? Bool) ?? false
     }
 
     /// The control channel is compiled into every build but only listens when asked (dev bundle or env).

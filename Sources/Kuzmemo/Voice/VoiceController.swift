@@ -106,8 +106,8 @@ final class VoiceController {
     // MARK: - Lifecycle
 
     func start() {
-        // Automation must never make noise: the control channel starts muted and opts in explicitly.
-        if AppPaths.controlEnabled { speech.muted = true; cues.muted = true }
+        // Automation must never make noise: that build starts muted and scripts opt in explicitly.
+        if AppPaths.isAutomation { speech.muted = true; cues.muted = true }
 
         hud.actions = HUDActions(
             cancel: { [weak self] in self?.cancelRecording(note: nil) },
@@ -124,8 +124,11 @@ final class VoiceController {
             choose: { [weak self] option in Task { @MainActor in await self?.choose(option) } }
         )
 
-        startTrigger()
-        registerChord()
+        if !AppPaths.isAutomation {
+            // The automation build never listens to the person's keys: it would fight their own copy of the app.
+            startTrigger()
+            registerChord()
+        }
         observeSystem()
         warmModel()
 
@@ -480,7 +483,7 @@ final class VoiceController {
     /// microphone on its own: it has to arm a scripted input first.
     private func startListening() {
         guard env.pendingQuestion != nil, session == nil else { return }
-        if AppPaths.controlEnabled && scriptedInput == nil { return }
+        if AppPaths.isAutomation && scriptedInput == nil { return }
         perform(policy.beginHandsFree())
     }
 

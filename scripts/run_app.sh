@@ -3,10 +3,13 @@
 # and Input Monitoring grants are bound to the signing certificate), installs it to ~/Applications and
 # launches that copy.
 #
-#   scripts/run_app.sh [--prod] [--no-launch] [--adhoc]
+#   scripts/run_app.sh [--prod] [--no-launch] [--adhoc] [--force]
 #
-# Default is the dev bundle (app.kuzmemo.dev, data in ~/Library/Application Support/Kuzmemo-Dev, control
-# socket enabled). --prod builds app.kuzmemo for daily use (control socket off).
+# Two bundles, each with its own data folder:
+#   default  app.kuzmemo.dev  "Kuzmemo Dev"  Kuzmemo-Dev  the automation build for scripts/e2e: control socket on,
+#                                            muted, ignores Fn and the chord, never opens the real microphone
+#   --prod   app.kuzmemo      "Kuzmemo"      Kuzmemo      the daily app for the person, no control socket
+# Start the dev bundle only when the daily app is not running (the check below stops you; --force overrides).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,19 +18,27 @@ cd "$ROOT"
 FLAVOR=dev
 LAUNCH=1
 ADHOC=0
+FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --prod) FLAVOR=prod ;;
+    --force) FORCE=1 ;;
     --no-launch) LAUNCH=0 ;;
     --adhoc) ADHOC=1 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
 
-if [ "$FLAVOR" = dev ]; then
-  BUNDLE_ID="app.kuzmemo.dev"; APP_NAME="Kuzmemo Dev"; CONTROL=true
-else
-  BUNDLE_ID="app.kuzmemo"; APP_NAME="Kuzmemo"; CONTROL=false
+AUTOMATION=false
+case "$FLAVOR" in
+  dev) BUNDLE_ID="app.kuzmemo.dev"; APP_NAME="Kuzmemo Dev"; CONTROL=true; AUTOMATION=true ;;
+  *)   BUNDLE_ID="app.kuzmemo";     APP_NAME="Kuzmemo";     CONTROL=false ;;
+esac
+
+if [ "$FLAVOR" = dev ] && [ "$FORCE" = 0 ] && [ "$LAUNCH" = 1 ] \
+   && pgrep -f "$HOME/Applications/Kuzmemo.app/Contents/MacOS/Kuzmemo" >/dev/null; then
+  echo "the daily app (Kuzmemo) is running: quit it first (the dev bundle is for scripts) or use --force." >&2
+  exit 3
 fi
 VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)"
 GIT_HASH="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -76,6 +87,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSSupportsSuddenTermination</key><false/>
     <key>NSMicrophoneUsageDescription</key><string>Kuzmemo записывает вашу речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.</string>
     <key>KuzmemoControlEnabled</key><$CONTROL/>
+    <key>KuzmemoAutomation</key><$AUTOMATION/>
     <key>KuzmemoGitCommit</key><string>$GIT_HASH</string>
 </dict>
 </plist>

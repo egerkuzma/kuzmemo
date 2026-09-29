@@ -15,7 +15,7 @@ import sys
 import time
 from urllib.parse import quote
 
-SOCK = os.path.expanduser("~/Library/Application Support/Kuzmemo-Dev/run/control.sock")
+SOCK = os.environ.get("KUZMEMO_SOCK") or os.path.expanduser("~/Library/Application Support/Kuzmemo-Dev/run/control.sock")
 
 
 class Unix(http.client.HTTPConnection):
