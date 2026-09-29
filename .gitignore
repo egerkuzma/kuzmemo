@@ -25,13 +25,10 @@ signing/
 .env
 .env.*
 
-# Spike scratch output (summaries go to docs/spikes/)
-spikes/**/out/
-spikes/**/artifacts/
+# Generated speech fixtures (scripts/fixtures/make_synth.sh)
+scripts/fixtures/out/
 
 # Python
 __pycache__/
 *.pyc
 
-# Throw-away spike lock files
-spikes/*/Package.resolved

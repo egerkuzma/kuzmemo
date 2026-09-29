@@ -16,7 +16,7 @@ private func entry(_ title: String, _ date: String, _ time: String? = nil, kind:
 struct PromptBuilderTests {
     @Test func buildsTheDynamicMessageExactly() {
         let context = ContextPlan(entries: [
-            entry("Созвон с Figma", "2026-09-29", "11:00", kind: .event),
+            entry("Созвон с Acme", "2026-09-29", "11:00", kind: .event),
             entry("Сказать Дмитрию про доступ", "2026-09-30"),
             entry("Планёрка", "2026-10-05", "10:00", kind: .event, recurrence: Recurrence(freq: .weekly, byWeekday: [.mon])),
         ], expanded: false)
@@ -30,7 +30,7 @@ struct PromptBuilderTests {
         <defaults>morning=09:00 day=13:00 evening=19:00 night=23:00; a reminder without a time fires at 09:00</defaults>
         <glossary>Notion (нотион, ношн)</glossary>
         <items>
-        [1] 2026-09-29 11:00 event "Созвон с Figma"
+        [1] 2026-09-29 11:00 event "Созвон с Acme"
         [2] 2026-09-30 reminder "Сказать Дмитрию про доступ"
         [3] 2026-10-05 10:00 event "Планёрка" (repeats weekly on mon)
         </items>

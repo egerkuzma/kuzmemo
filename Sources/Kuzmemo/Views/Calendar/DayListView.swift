@@ -132,7 +132,7 @@ struct DayListView: View {
     private var quickAdd: some View {
         HStack(spacing: 8) {
             Image(systemName: "plus.circle.fill").foregroundStyle(.secondary)
-            TextField("Добавить запись: «завтра в 11 созвон с Figma»", text: $quickText)
+            TextField("Добавить запись: «завтра в 11 созвон с командой»", text: $quickText)
                 .textFieldStyle(.plain)
                 .focused($quickFocused)
                 .onSubmit { submit(asTyped: false) }

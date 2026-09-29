@@ -2,7 +2,7 @@
 """End-to-end checks of the voice path through the dev app's control socket, without a person or a microphone.
 
 Needs: the dev app running (scripts/run_app.sh), the speech model installed, and the synthetic phrases from
-spikes/stt/make_synth.sh (spikes/stt/out/synth). Speech and sounds stay muted; the dev database is erased first.
+scripts/fixtures/make_synth.sh (scripts/fixtures/out/synth). Speech and sounds stay muted; the dev database is erased first.
 It calls the real Claude, so a run costs a few requests and about a minute.
 
     scripts/e2e/voice.py
@@ -15,7 +15,7 @@ import sys
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-SYNTH = os.path.join(ROOT, "spikes", "stt", "out", "synth")
+SYNTH = os.path.join(ROOT, "scripts", "fixtures", "out", "synth")
 SOCK = os.environ.get("KUZMEMO_SOCK") or os.path.expanduser("~/Library/Application Support/Kuzmemo-Dev/run/control.sock")
 
 
@@ -85,7 +85,7 @@ def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
     if not os.path.isdir(SYNTH):
-        sys.exit("synthetic phrases missing: run spikes/stt/make_synth.sh")
+        sys.exit("synthetic phrases missing: run scripts/fixtures/make_synth.sh")
 
     print("setup")
     call("POST", "/db/reset")

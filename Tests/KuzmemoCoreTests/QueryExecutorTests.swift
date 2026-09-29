@@ -13,7 +13,7 @@ private func seeded() async throws -> Store {
     let planning = weekly
     try await store.perform(label: "seed") { m in
         try m.insert(planning)
-        try m.insert(Item(id: "", kind: .event, title: "Созвон с Фигма", date: day("2026-09-28"), time: LocalTime("16:00"), source: .voice))
+        try m.insert(Item(id: "", kind: .event, title: "Созвон с Акме", date: day("2026-09-28"), time: LocalTime("16:00"), source: .voice))
         try m.insert(Item(id: "", kind: .reminder, title: "Оплатить инвойс", date: day("2026-09-30"), source: .voice))
         try m.insert(Item(id: "", kind: .reminder, title: "Просроченное", date: day("2026-09-20"), source: .voice))
         try m.insert(Item(id: "", kind: .note, title: "Идея про пуши", source: .voice))
@@ -27,7 +27,7 @@ struct QueryExecutorTests {
     @Test func aDayShowsOneOffsAndOccurrencesInOrder() async throws {
         let store = try await seeded()
         let result = try await store.run(QueryPlan(target: .days(day("2026-09-28") ... day("2026-09-28"))), now: now)
-        #expect(result.entries.map(\.item.title) == ["Планёрка", "Созвон с Фигма"])
+        #expect(result.entries.map(\.item.title) == ["Планёрка", "Созвон с Акме"])
         #expect(result.title == "сегодня")
     }
 
@@ -41,7 +41,7 @@ struct QueryExecutorTests {
     @Test func upcomingSkipsWhatAlreadyHappenedToday() async throws {
         let store = try await seeded()
         let result = try await store.run(QueryPlan(target: .upcoming(limit: 3)), now: now)
-        #expect(result.entries.map(\.item.title) == ["Созвон с Фигма", "Оплатить инвойс", "Встреча"])
+        #expect(result.entries.map(\.item.title) == ["Созвон с Акме", "Оплатить инвойс", "Встреча"])
         let first = try await store.run(QueryPlan(target: .upcoming(limit: 1), detail: .first), now: now)
         #expect(first.entries.count == 1)
     }
@@ -55,16 +55,16 @@ struct QueryExecutorTests {
 
     @Test func searchFindsEntriesTypedInEitherScriptThroughGlossaryAliases() async throws {
         let store = try await seeded()
-        try await store.save(term: GlossaryTerm(canonical: "Figma", aliases: ["фигма", "фигмы"]))
-        for query in ["Figma", "фигма", "про Figma"] {
+        try await store.save(term: GlossaryTerm(canonical: "Acme", aliases: ["акме", "акме"]))
+        for query in ["Acme", "акме", "про Acme"] {
             let result = try await store.run(QueryPlan(target: .search(query)), now: now)
-            #expect(result.entries.map(\.item.title) == ["Созвон с Фигма"], "query \(query)")
+            #expect(result.entries.map(\.item.title) == ["Созвон с Акме"], "query \(query)")
         }
         try await store.perform(label: "latin") { m in
-            try m.insert(Item(id: "", kind: .reminder, title: "Проверить подписку Figma", date: day("2026-10-02"), source: .voice))
+            try m.insert(Item(id: "", kind: .reminder, title: "Проверить подписку Acme", date: day("2026-10-02"), source: .voice))
         }
-        let both = try await store.run(QueryPlan(target: .search("Figma")), now: now)
-        #expect(Set(both.entries.map(\.item.title)) == ["Созвон с Фигма", "Проверить подписку Figma"])
+        let both = try await store.run(QueryPlan(target: .search("Acme")), now: now)
+        #expect(Set(both.entries.map(\.item.title)) == ["Созвон с Акме", "Проверить подписку Acme"])
         #expect(try await store.run(QueryPlan(target: .search("несуществующее")), now: now).entries.isEmpty)
     }
 

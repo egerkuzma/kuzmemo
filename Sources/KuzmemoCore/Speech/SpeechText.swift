@@ -147,7 +147,7 @@ public enum SpeechText {
         text.replacingMatches(#"[A-Za-z][A-Za-z'’]*"#) { match, source in
             let word = source.group(0, of: match)
             let letters = word.filter(\.isLetter)
-            if letters.count >= 2, letters.count <= 5, letters == letters.uppercased(), letters.count == word.count {
+            if letters.count >= 1, letters.count <= 5, letters == letters.uppercased(), letters.count == word.count {
                 return letters.map { Self.letterNames[$0.lowercased().first ?? " "] ?? String($0) }.joined(separator: " ")
             }
             return transliterate(word.lowercased().replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "’", with: ""))

@@ -6,14 +6,14 @@ import Testing
 private let configuration = WhisperKitConfiguration.standard()
 private let synth = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    .appendingPathComponent("spikes/stt/out/synth")
+    .appendingPathComponent("scripts/fixtures/out/synth")
 
 private var modelsAvailable: Bool {
     FileManager.default.fileExists(atPath: configuration.modelFolder.path)
         && FileManager.default.fileExists(atPath: synth.appendingPathComponent("03.wav").path)
 }
 
-/// Reads a 16-bit PCM mono 16 kHz WAV written by spikes/stt/make_synth.sh.
+/// Reads a 16-bit PCM mono 16 kHz WAV written by scripts/fixtures/make_synth.sh.
 private func readWAV(_ name: String) -> [Float]? {
     guard let data = try? Data(contentsOf: synth.appendingPathComponent("\(name).wav")), data.count > 44 else { return nil }
     var offset = 12
@@ -50,7 +50,7 @@ struct WhisperKitTranscriberTests {
         try await transcriber.prepare()
         #expect(await transcriber.isLoaded)
 
-        let expectations = [("03", "сегодня"), ("14", "завтра"), ("10", "полчаса"), ("13", "инвойс"), ("17", "маме")]
+        let expectations = [("03", "сегодня"), ("14", "завтра"), ("10", "полчаса"), ("13", "напоминани"), ("17", "маме")]
         for (name, word) in expectations {
             let samples = try #require(readWAV(name))
             let result = try await recognizer.recognize(samples)

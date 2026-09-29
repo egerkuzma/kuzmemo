@@ -60,7 +60,7 @@ extension Store {
         }
     }
 
-    /// The query itself plus the glossary spellings of any term it mentions ("Figma" ↔ "фигма"),
+    /// The query itself plus the glossary spellings of any term it mentions ("Acme" ↔ "акме"),
     /// so a search finds entries typed in either script.
     func searchVariants(_ text: String) async throws -> [String] {
         let words = Set(SearchText.tokens(text))

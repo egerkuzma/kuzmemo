@@ -115,11 +115,11 @@ struct MemoProcessorTests {
 
     @Test func aSecondQuestionKeepsBothEarlierAnswersInView() async throws {
         let (processor, _, provider) = try processor([.json(ParserResponseTests.clarify), .json(ParserResponseTests.clarify), .json(createAnswer)])
-        let first = await processor.submit(text: "созвон с Фигма", inputKind: .voice)
+        let first = await processor.submit(text: "созвон с Акме", inputKind: .voice)
         let second = await processor.submit(text: "в пятницу", inputKind: .voice, parentMemoID: first.memo.id, followupQuestion: "Какую пятницу?")
         guard case .clarify = second.kind else { Issue.record("expected another question: \(second.kind)"); return }
         _ = await processor.submit(text: "ближайшую", inputKind: .voice, parentMemoID: second.memo.id, followupQuestion: "Во сколько?")
-        #expect(provider.requests[2].userMessage.contains("<previous>созвон с Фигма. в пятницу</previous>"))
+        #expect(provider.requests[2].userMessage.contains("<previous>созвон с Акме. в пятницу</previous>"))
         #expect(provider.requests[2].userMessage.contains("<question>Во сколько?</question>"))
     }
 
@@ -148,7 +148,7 @@ struct MemoProcessorTests {
     @Test func questionsLeftOpenWhenTheAppQuitBecomeNotes() async throws {
         let (processor, store, _) = try processor([.json(ParserResponseTests.clarify), .json(ParserResponseTests.clarify), .json(createAnswer)])
         let open1 = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
-        let open2 = await processor.submit(text: "созвон с Фигма", inputKind: .text)
+        let open2 = await processor.submit(text: "созвон с Акме", inputKind: .text)
         let done = await processor.submit(text: "напомни", inputKind: .text)
         #expect(try await store.unfinishedMemos().count == 2)
 
@@ -157,7 +157,7 @@ struct MemoProcessorTests {
         #expect(closed.count == 2)
         #expect(try await store.unfinishedMemos().isEmpty)
         let notes = try await store.inbox().map(\.title).sorted()
-        #expect(notes == ["напомни позвонить Дмитрию", "созвон с Фигма"])
+        #expect(notes == ["напомни позвонить Дмитрию", "созвон с Акме"])
         for id in [open1.memo.id, open2.memo.id] { #expect(try await store.memo(id: id)?.status == .applied) }
         #expect(try await store.memo(id: done.memo.id)?.status == .applied)
         #expect(await processor.closeOrphanedQuestions().isEmpty) // nothing left to close

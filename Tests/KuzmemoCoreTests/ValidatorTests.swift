@@ -50,13 +50,13 @@ struct ValidatorCreateTests {
     }
 
     @Test func anEventNeedsADateAndATime() async throws {
-        let ok = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон с Figma","when":{"mode":"days_from_today","days_from_today":1,"time":"11:00","phrase":"завтра в одиннадцать"}}}]}"#)
+        let ok = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон с Acme","when":{"mode":"days_from_today","days_from_today":1,"time":"11:00","phrase":"завтра в одиннадцать"}}}]}"#)
         let new = try #require(created(ok).first)
         #expect(new.date == LocalDate("2026-09-29") && new.time == LocalTime("11:00"))
 
-        let noTime = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Встреча с Figma","when":{"mode":"days_from_today","days_from_today":2,"phrase":"послезавтра"}}}]}"#)
+        let noTime = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Встреча с Acme","when":{"mode":"days_from_today","days_from_today":2,"phrase":"послезавтра"}}}]}"#)
         #expect(clarification(noTime)?.reason == .missingTime)
-        #expect(clarification(noTime)?.question.contains("Встреча с Figma") == true)
+        #expect(clarification(noTime)?.question.contains("Встреча с Acme") == true)
         #expect(clarification(noTime)?.question.contains("послезавтра") == true)
 
         let noDate = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Встреча","when":{"mode":"none","time":"15:00"}}}]}"#)
@@ -214,7 +214,7 @@ struct ValidatorTargetTests {
         let store = try makeStore()
         try await store.perform(label: "seed") { m in
             try m.insert(Item(id: "", kind: .reminder, title: "Оплатить инвойс", date: LocalDate("2026-10-03"), source: .voice))
-            try m.insert(Item(id: "", kind: .event, title: "Созвон с Фигма", date: LocalDate("2026-10-04"), source: .voice))
+            try m.insert(Item(id: "", kind: .event, title: "Созвон с Акме", date: LocalDate("2026-10-04"), source: .voice))
             try m.insert(Item(id: "", kind: .event, title: "Созвон с Клик", date: LocalDate("2026-10-05"), source: .voice))
         }
         let single = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","target_hint":"инвойс"}]}"#, store: store)
@@ -319,7 +319,7 @@ struct ValidatorIntentTests {
         #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"overdue"}}"#) == .query(QueryPlan(target: .overdue)))
         #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"inbox"}}"#) == .query(QueryPlan(target: .inbox)))
         #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"recurring","include_done":true}}"#) == .query(QueryPlan(target: .recurring, includeDone: true)))
-        #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"search","text":"  Фигма "}}"#) == .query(QueryPlan(target: .search("Фигма"))))
+        #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"search","text":"  Акме "}}"#) == .query(QueryPlan(target: .search("Акме"))))
         #expect(clarification(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"search"}}"#))?.reason == .unclearSpeech)
     }
 }

@@ -104,10 +104,10 @@ enum Golden {
 
     static let glossary: [GlossaryTerm] = [
         GlossaryTerm(canonical: "Notion", aliases: ["нотион", "ношн", "нотиона"]),
-        GlossaryTerm(canonical: "GitHub", aliases: ["гитхаб", "гит"]),
-        GlossaryTerm(canonical: "Figma", aliases: ["фигма", "фигмы", "Фигма"]),
-        GlossaryTerm(canonical: "Slack", aliases: ["слак"]),
-        GlossaryTerm(canonical: "Zoom", aliases: ["зум", "клик аду"]),
+        GlossaryTerm(canonical: "GitHub", aliases: ["гитхаб", "гит хаб"]),
+        GlossaryTerm(canonical: "Acme", aliases: ["акме", "акми"]),
+        GlossaryTerm(canonical: "Slack", aliases: ["слак", "слаке"]),
+        GlossaryTerm(canonical: "Zoom", aliases: ["зум", "зуме"]),
         GlossaryTerm(canonical: "Дмитрий", aliases: []),
     ]
 

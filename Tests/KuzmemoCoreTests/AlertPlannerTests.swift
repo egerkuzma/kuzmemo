@@ -27,11 +27,11 @@ private func local(_ alert: PlannedAlert) -> String {
 @Suite("AlertPlanner")
 struct AlertPlannerTests {
     @Test func anEventGetsAWarningAheadAndAnAlertAtTheStart() {
-        let alerts = plan([entry("Созвон с Figma", kind: .event, on: "2026-09-29", at: "11:00")])
+        let alerts = plan([entry("Созвон с Acme", kind: .event, on: "2026-09-29", at: "11:00")])
         #expect(alerts.map(local) == ["2026-09-29 10:55", "2026-09-29 11:00"])
         #expect(alerts.map(\.kind) == [.headsUp, .atTime])
         #expect(alerts.map(\.body) == ["Через 5 минут · 11:00", "Сейчас · 11:00"])
-        #expect(alerts.map(\.subtitle) == ["Событие", "Событие"] && alerts.allSatisfy { $0.title == "Созвон с Figma" })
+        #expect(alerts.map(\.subtitle) == ["Событие", "Событие"] && alerts.allSatisfy { $0.title == "Созвон с Acme" })
         #expect(alerts[0].sound == NotificationSettings().headsUpSound && alerts[1].sound == NotificationSettings().atTimeSound)
     }
 
@@ -126,7 +126,7 @@ struct AlertPlannerTests {
     @Test func identifiersAreStableAndChangeWithWhatTheUserSees() {
         let a = plan([entry("Созвон", kind: .event, on: "2026-09-29", at: "11:00", id: "e1")])
         let same = plan([entry("Созвон", kind: .event, on: "2026-09-29", at: "11:00", id: "e1")])
-        let renamed = plan([entry("Созвон с Figma", kind: .event, on: "2026-09-29", at: "11:00", id: "e1")])
+        let renamed = plan([entry("Созвон с Acme", kind: .event, on: "2026-09-29", at: "11:00", id: "e1")])
         var otherSound = NotificationSettings()
         otherSound.atTimeSound = .system("Submarine")
         let resounded = plan([entry("Созвон", kind: .event, on: "2026-09-29", at: "11:00", id: "e1")], otherSound)

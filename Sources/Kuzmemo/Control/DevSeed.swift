@@ -13,7 +13,7 @@ enum DevSeed {
         let weekdays: [Weekday] = [.mon, .tue, .wed, .thu, .fri]
         _ = try await store.create(ItemDraft(kind: .event, title: "Планёрка", details: "Задачи, сроки, план на день", date: day(0), time: at("10:00"), durationMin: 30,
                                          recurrence: Recurrence(freq: .weekly, byWeekday: weekdays)))
-        _ = try await store.create(ItemDraft(kind: .event, title: "Созвон с Figma", date: day(0), time: at("11:00"), durationMin: 45, remindLeadMin: 15), source: .voice)
+        _ = try await store.create(ItemDraft(kind: .event, title: "Созвон с Acme", date: day(0), time: at("11:00"), durationMin: 45, remindLeadMin: 15), source: .voice)
         let balance = try await store.create(ItemDraft(kind: .reminder, title: "Проверить подписку в Notion", date: day(0), time: at("13:30")), source: .voice).item
         _ = try await store.create(ItemDraft(kind: .task, title: "Ответить клиенту про чеклист", details: "Приложить скриншоты по разделам", date: day(0), time: at("16:00")))
         _ = try await store.create(ItemDraft(kind: .reminder, title: "Оплатить хостинг: 340 долларов", date: day(0)), source: .voice)
@@ -30,7 +30,7 @@ enum DevSeed {
         _ = try await store.create(ItemDraft(kind: .reminder, title: "Сверить отчёт по Slack", date: day(-3)), source: .voice)
         _ = try await store.create(ItemDraft(kind: .task, title: "Отправить счёт", date: day(-1), time: at("12:00")))
 
-        _ = try await store.create(ItemDraft(kind: .note, title: "Идея: пропопробовать новый маршрут для пробежки"), source: .voice)
+        _ = try await store.create(ItemDraft(kind: .note, title: "Идея: попробовать новый маршрут для пробежки"), source: .voice)
         _ = try await store.create(ItemDraft(kind: .task, title: "Разобрать макеты для Q4"))
 
         _ = try await store.perform(.complete(itemID: balance.id, occurrenceDate: nil), label: "seed")

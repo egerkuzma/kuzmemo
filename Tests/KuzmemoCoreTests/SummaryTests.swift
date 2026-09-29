@@ -57,15 +57,15 @@ struct SummaryTests {
 @Suite("Spoken confirmations")
 struct SpokenConfirmationTests {
     private let today = LocalDate("2026-09-28")!
-    private let glossary = [GlossaryTerm(canonical: "Figma", spoken: "Фигма"), GlossaryTerm(canonical: "Notion", spoken: "Нотион")]
+    private let glossary = [GlossaryTerm(canonical: "Acme", spoken: "Акме"), GlossaryTerm(canonical: "Notion", spoken: "Нотион")]
 
     private func change(_ kind: AppliedChange.Kind, _ item: Item, occurrence: String? = nil, newDate: String? = nil, newTime: String? = nil) -> AppliedChange {
         AppliedChange(kind: kind, item: item, occurrenceDate: occurrence.flatMap(LocalDate.init), newDate: newDate.flatMap(LocalDate.init), newTime: newTime.flatMap(LocalTime.init))
     }
 
     @Test func aCreatedEntryIsReadOutWithItsDayAndSpelledOutTime() {
-        let meeting = Item(id: "1", kind: .event, title: "Созвон с Figma", date: LocalDate("2026-09-29"), time: LocalTime("11:00"))
-        #expect(change(.created, meeting).spokenConfirmation(today: today, glossary: glossary) == "Записал: событие на завтра в одиннадцать часов — Созвон с Фигма.")
+        let meeting = Item(id: "1", kind: .event, title: "Созвон с Acme", date: LocalDate("2026-09-29"), time: LocalTime("11:00"))
+        #expect(change(.created, meeting).spokenConfirmation(today: today, glossary: glossary) == "Записал: событие на завтра в одиннадцать часов — Созвон с Акме.")
         let reminder = Item(id: "2", kind: .reminder, title: "Сказать Дмитрию про доступ в Notion", date: LocalDate("2026-09-30"))
         #expect(change(.created, reminder).spokenConfirmation(today: today, glossary: glossary) == "Записал: напоминание на послезавтра — Сказать Дмитрию про доступ в Нотион.")
         let note = Item(id: "3", kind: .note, title: "Идея про пуши")

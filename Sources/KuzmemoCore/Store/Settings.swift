@@ -18,29 +18,4 @@ extension Store {
             }
         }
     }
-
-    /// Fills an empty glossary with the vocabulary of the user's line of work, once. After that the glossary
-    /// belongs to the user: deleting every term does not bring the defaults back.
-    @discardableResult
-    public func seedGlossaryIfNeeded(_ terms: [GlossaryTerm] = Glossary.defaults) async throws -> Bool {
-        let flag = "glossary.seeded.v1"
-        guard try await setting(flag) == nil else { return false }
-        if try await glossary().isEmpty {
-            for term in terms { try await save(term: term) }
-        }
-        try await setSetting("1", for: flag)
-        return true
-    }
-}
-
-extension Glossary {
-    /// Ad networks the user talks about, with the ways a speech recognizer tends to write them and how a voice
-    /// should say them.
-    public static let defaults: [GlossaryTerm] = [
-        GlossaryTerm(canonical: "Notion", kind: "network", aliases: ["нотион", "ношн", "нотиона"], spoken: "Нотион"),
-        GlossaryTerm(canonical: "GitHub", kind: "network", aliases: ["гитхаб", "гит"], spoken: "Гитхаб"),
-        GlossaryTerm(canonical: "Figma", kind: "network", aliases: ["фигма", "фигмы", "Фигма"], spoken: "Фигма"),
-        GlossaryTerm(canonical: "Slack", kind: "network", aliases: ["слак"], spoken: "Слак"),
-        GlossaryTerm(canonical: "Zoom", kind: "network", aliases: ["зум", "клик аду"], spoken: "Зум"),
-    ]
 }

@@ -177,7 +177,7 @@ struct StoreMiscTests {
             let hits = try await store.search(query).map(\.title)
             #expect(hits == ["Позвонить Дмитрию по доступу Notion"], "query \(query)")
         }
-        #expect(try await store.search("Фигма").isEmpty)
+        #expect(try await store.search("Акме").isEmpty)
         #expect(try await store.search("дмитрий доступ").count == 1)
         #expect(try await store.search("дмитрий молоко").isEmpty)
         #expect(try await store.search("").isEmpty)
@@ -213,16 +213,17 @@ struct StoreMiscTests {
 
     @Test func glossaryStoresAliasesAndAppliesThemToWholeWordsOnly() async throws {
         let store = try makeStore()
-        try await store.save(term: GlossaryTerm(canonical: "Notion", kind: "network", aliases: ["нотион", "ношн", "нотиона"], spoken: "Нотион"))
-        try await store.save(term: GlossaryTerm(canonical: "GitHub", aliases: ["гитхаб", "гит"], spoken: "Гитхаб"))
+        try await store.save(term: GlossaryTerm(canonical: "Notion", kind: "app", aliases: ["нотион", "ношн", "нотиона"], spoken: "Нотион"))
+        try await store.save(term: GlossaryTerm(canonical: "GitHub", aliases: ["гит хаб", "гит"], spoken: "Гитхаб"))
         try await store.save(term: GlossaryTerm(canonical: "Slack", aliases: ["слак"], enabled: false))
         let terms = try await store.glossary()
-        #expect(terms.map(\.canonical) == ["Notion", "Slack", "GitHub"])
-        #expect(terms.first?.aliases == ["нотион", "ношн", "нотиона"])
+        #expect(terms.map(\.canonical) == ["GitHub", "Notion", "Slack"]) // by name
+        #expect(terms.first { $0.canonical == "Notion" }?.aliases == ["нотион", "ношн", "нотиона"])
 
-        #expect(Glossary.applyAliases(to: "Сказать про доступ Нотиона и Гит Хаб", terms: terms) == "Сказать про доступ Notion и GitHub")
-        #expect(Glossary.applyAliases(to: "нотионблок и слак", terms: terms) == "нотионблок и слак")
-        #expect(Glossary.promptLine(terms: terms) == "Notion (нотион, ношн, нотиона); GitHub (гитхаб, гит)")
+        // the longer alias wins, so "гит хаб" is one name and not "гит" followed by "хаб"
+        #expect(Glossary.applyAliases(to: "Доступ Нотиона и гит хаб", terms: terms) == "Доступ Notion и GitHub")
+        #expect(Glossary.applyAliases(to: "нотионблок и слак", terms: terms) == "нотионблок и слак") // whole words only; disabled terms are ignored
+        #expect(Glossary.promptLine(terms: terms) == "GitHub (гит хаб, гит); Notion (нотион, ношн, нотиона)")
         #expect(Glossary.spokenForm(of: "Доступ Notion в GitHub", terms: terms) == "Доступ Нотион в Гитхаб")
     }
 
@@ -242,7 +243,7 @@ struct StoreMiscTests {
     }
 }
 
-@Suite("Settings and the seeded glossary")
+@Suite("Settings and the glossary")
 struct SettingsTests {
     @Test func settingsAreStoredReplacedAndRemoved() async throws {
         let store = try makeStore()
@@ -254,24 +255,10 @@ struct SettingsTests {
         #expect(try await store.setting("x") == nil)
     }
 
-    @Test func anEmptyGlossaryIsSeededOnceAndThenBelongsToTheUser() async throws {
+    @Test func aNewGlossaryIsEmptyAndBelongsToThePerson() async throws {
         let store = try makeStore()
-        #expect(try await store.seedGlossaryIfNeeded() == true)
-        let terms = try await store.glossary()
-        #expect(terms.map(\.canonical).contains("Notion") && terms.count == Glossary.defaults.count)
-        #expect(Glossary.spokenForm(of: "Проверить Notion", terms: terms) == "Проверить Нотион")
-        #expect(Glossary.applyAliases(to: "доступ Нотиона", terms: terms) == "доступ Notion")
-
-        #expect(try await store.seedGlossaryIfNeeded() == false)
-        for term in terms { try await store.deleteTerm(id: term.id!) }
-        #expect(try await store.seedGlossaryIfNeeded() == false)
-        #expect(try await store.glossary().isEmpty) // deleting everything is a choice; it stays deleted
-    }
-
-    @Test func aGlossaryTheUserAlreadyHasIsLeftAlone() async throws {
-        let store = try makeStore()
+        #expect(try await store.glossary().isEmpty) // nothing about anybody's work is built in
         try await store.save(term: GlossaryTerm(canonical: "Foo", aliases: ["фу"]))
-        _ = try await store.seedGlossaryIfNeeded()
         #expect(try await store.glossary().map(\.canonical) == ["Foo"])
     }
 }

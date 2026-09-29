@@ -103,13 +103,13 @@ def run():
     check("an empty phrase is refused", status == 400, str(status))
 
     print("the answer path")
-    wav = os.path.join(ROOT, "spikes", "stt", "out", "synth", "03.wav")  # «Скажи что на сегодня»
+    wav = os.path.join(ROOT, "scripts", "fixtures", "out", "synth", "03.wav")  # «Скажи что на сегодня»
     if os.path.exists(wav):
         r = call("POST", "/record/inject-audio", {"path": wav})
         check("an answer goes through the same voice (muted here, so it is only logged)", r.get("answeredLocally") is True and len(r.get("spoken", [])) == 1
               and call("GET", "/speech/log")["muted"] is True, json.dumps(r, ensure_ascii=False)[:300])
     else:
-        print("  skip the answer path (run spikes/stt/make_synth.sh for the fixtures)")
+        print("  skip the answer path (run scripts/fixtures/make_synth.sh for the fixtures)")
     fallback()
 
 

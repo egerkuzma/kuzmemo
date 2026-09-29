@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Kuzmemo (release), assembles the .app, signs it by certificate SHA-1 (never ad-hoc: the microphone
+# Builds Kuzmemo (release), assembles the .app, signs it with a stable certificate (never ad hoc: the microphone
 # and Input Monitoring grants are bound to the signing certificate), installs it to ~/Applications and
 # launches that copy.
 #
@@ -44,9 +44,25 @@ VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)"
 GIT_HASH="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # --- signing identity -------------------------------------------------------------------------------
-# The existing self-signed "Dev Signing" identity is listed twice in the keychain, so select by hash.
-IDENTITY="${KUZMEMO_SIGN_IDENTITY:-<certificate SHA-1>}"
+# Sign with a stable code-signing identity, never ad hoc: the microphone and Input Monitoring grants are bound to the
+# signing certificate, so an ad-hoc build loses them on every rebuild. The identity (a certificate name or SHA-1 hash)
+# comes from $KUZMEMO_SIGN_IDENTITY, else from the first line of the git-ignored file signing/identity, else it is
+# the only code-signing identity in the keychain. To make one: Keychain Access > Certificate Assistant > Create a
+# Certificate (Identity Type: Self Signed Root, Certificate Type: Code Signing). If a certificate is listed twice,
+# select it by hash.
+IDENTITY="${KUZMEMO_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && [ -f "$ROOT/signing/identity" ]; then
+  IDENTITY="$(head -n 1 "$ROOT/signing/identity" | tr -d '[:space:]')"
+fi
 if [ "$ADHOC" = 0 ]; then
+  if [ -z "$IDENTITY" ]; then
+    available="$(security find-identity -v -p codesigning | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) .*/\1/p' | sort -u)"
+    case "$(printf '%s\n' "$available" | grep -c .)" in
+      1) IDENTITY="$available" ;;
+      0) echo "no code-signing identity found: create one (see the comment above) or use --adhoc" >&2; exit 1 ;;
+      *) echo "several code-signing identities found: set KUZMEMO_SIGN_IDENTITY or put one in signing/identity" >&2; exit 1 ;;
+    esac
+  fi
   security find-identity -v -p codesigning | grep -q "$IDENTITY" \
     || { echo "signing identity $IDENTITY not found (use --adhoc to sign ad hoc; permissions will reset on every build)" >&2; exit 1; }
 else

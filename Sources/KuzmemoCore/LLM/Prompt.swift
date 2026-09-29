@@ -23,8 +23,8 @@ public enum Prompt {
     Examples (phrase, then JSON)
     "напомни мне послезавтра сказать Дмитрию про доступ в Нотион"
     {"intent":"create","confidence":0.95,"actions":[{"op":"create","item":{"kind":"reminder","title":"Сказать Дмитрию про доступ в Notion","when":{"mode":"days_from_today","days_from_today":2,"phrase":"послезавтра"}}}]}
-    "завтра в одиннадцать созвон с Фигма"
-    {"intent":"create","confidence":0.95,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон с Figma","when":{"mode":"days_from_today","days_from_today":1,"time":"11:00","phrase":"завтра в одиннадцать"}}}]}
+    "завтра в одиннадцать созвон с Акме"
+    {"intent":"create","confidence":0.95,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон с Acme","when":{"mode":"days_from_today","days_from_today":1,"time":"11:00","phrase":"завтра в одиннадцать"}}}]}
     "каждый понедельник в десять планёрка"
     {"intent":"create","confidence":0.93,"actions":[{"op":"create","item":{"kind":"event","title":"Планёрка","when":{"mode":"weekday","weekday":"mon","week_offset":0,"time":"10:00","phrase":"каждый понедельник в десять"},"recurrence":{"freq":"weekly","interval":1,"by_weekday":["mon"]}}}]}
     "скажи что на сегодня"

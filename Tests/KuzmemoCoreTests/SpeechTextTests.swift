@@ -67,11 +67,11 @@ struct SpeechTextTests {
 
     @Test(arguments: [
         Case(input: "Встреча с Notion", expected: "Встреча с нотион"),
-        Case(input: "Figma", expected: "фигма"),
         Case(input: "Zoom", expected: "зум"),
         Case(input: "Slack", expected: "слак"),
-        Case(input: "GitHub", expected: "гитадс"),
-        Case(input: "Q4", expected: "тир один"),
+        Case(input: "GitHub", expected: "гитхуб"),
+        Case(input: "Q4", expected: "кью четыре"),
+        Case(input: "план B", expected: "план би"),
         Case(input: "API", expected: "эй пи ай"),
         Case(input: "смотри CPM и CTR", expected: "смотри си пи эм и си ти ар"),
         Case(input: "Tom & Jerry", expected: "том и джерри"),
@@ -82,9 +82,9 @@ struct SpeechTextTests {
 
     @Test func aWholePhraseComesOutInCyrillicOnly() {
         #expect(SpeechText.forNeuralVoice("Встреча с Notion в 15:00.") == "Встреча с нотион в пятнадцать часов.")
-        let messy = "Напомнить (срочно!) про **Figma** — 3 раза за 2 дня 🙂 https://example.com/x/y"
+        let messy = "Напомнить (срочно!) про **Notion** — 3 раза за 2 дня 🙂 https://example.com/x/y"
         let spoken = SpeechText.forNeuralVoice(messy)
-        #expect(spoken == "Напомнить, срочно! про фигма — три раза за два дня ссылка")
+        #expect(spoken == "Напомнить, срочно! про нотион — три раза за два дня ссылка")
         #expect(spoken.unicodeScalars.allSatisfy { !($0.properties.isEmoji && $0.value > 0x2000) })
     }
 

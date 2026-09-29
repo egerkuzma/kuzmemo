@@ -92,7 +92,7 @@ struct HallucinationFilterTests {
     @Test(arguments: [
         "Напомни мне послезавтра сказать Дмитрию про доступ в Notion",
         "Напомни сказать спасибо Дмитрию",
-        "Завтра в одиннадцать созвон с Figma",
+        "Завтра в одиннадцать созвон с Acme",
         "Скажи что на сегодня",
         "Позвонить маме",
         "Что у меня завтра?",
@@ -107,7 +107,7 @@ struct HallucinationFilterTests {
     }
 }
 
-/// Reads a 16-bit PCM mono WAV (as written by spikes/stt/make_synth.sh) into floats.
+/// Reads a 16-bit PCM mono WAV (as written by scripts/fixtures/make_synth.sh) into floats.
 func readWAV(_ url: URL) -> [Float]? {
     guard let data = try? Data(contentsOf: url), data.count > 44 else { return nil }
     // find the "data" chunk
@@ -126,7 +126,7 @@ func readWAV(_ url: URL) -> [Float]? {
     return nil
 }
 
-private let synthDirectory = Golden.packageRoot.appendingPathComponent("spikes/stt/out/synth")
+private let synthDirectory = Golden.packageRoot.appendingPathComponent("scripts/fixtures/out/synth")
 
 @Suite("EnergyGate on real fixtures")
 struct EnergyGateFixtureTests {
