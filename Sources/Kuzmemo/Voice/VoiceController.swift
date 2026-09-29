@@ -664,11 +664,9 @@ final class VoiceController {
         }
     }
 
-    /// Long enough to read: 4 s at least, 12 s at most, more for longer texts; an undoable change stays 5 s.
+    /// How long the HUD keeps a result: 2 s for a confirmation with Undo, time to read for anything else (see `ResultDisplay`).
     static func displaySeconds(for toast: AppEnvironment.Toast) -> TimeInterval {
-        let characters = toast.lines.reduce(0) { $0 + $1.count }
-        let reading = min(12, max(4, 2.5 + Double(characters) * 0.06))
-        return toast.undoOpID == nil ? reading : max(5, reading)
+        ResultDisplay.seconds(characters: toast.lines.reduce(0) { $0 + $1.count }, lines: toast.lines.count, undoable: toast.undoOpID != nil)
     }
 
     // MARK: - Model
