@@ -58,7 +58,7 @@ The optional neural voice: `scripts/install_silero.sh` (needs Python 3.10+; it c
 | "Move the meeting with Anna to Thursday" | The matching entry is changed (with Undo) |
 | "Next Friday, sync at three" | "Which Friday?" with two buttons; answer aloud or tap |
 
-The menu-bar popover shows today, the last result with **Undo / Edit**, and a text box that goes through the same pipeline as speech. **⌘,** opens the settings; the **Calendar** window is the full month view.
+The menu-bar popover shows today, the result of the last command with **Undo / Edit** for a few seconds, and a text box that goes through the same pipeline as speech. **⌘,** opens the settings; the **Calendar** window is the full month view.
 
 ## How it works
 
