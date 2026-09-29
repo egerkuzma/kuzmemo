@@ -87,6 +87,10 @@ done
 # by its file name inside the app bundle).
 [ -e "$ROOT/Resources/Sounds/Kuzmemo-bell.wav" ] || python3 "$ROOT/scripts/make_sounds.py" # generated, not committed
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
+# The app icon is drawn by scripts/make_icon.swift (generated, not committed); the automation build gets a grey one
+[ -e "$ROOT/Resources/AppIcon.icns" ] || swift "$ROOT/scripts/make_icon.swift"
+if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; fi
+cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
 # The Silero voice runs in a small Python helper (see scripts/install_silero.sh)
 cp "$ROOT/Resources/Silero/silero_helper.py" "$APP/Contents/Resources/"
 for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
@@ -100,6 +104,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>$APP_NAME</string>
     <key>CFBundleDisplayName</key><string>$APP_NAME</string>
     <key>CFBundleExecutable</key><string>Kuzmemo</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>

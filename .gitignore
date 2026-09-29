@@ -25,6 +25,9 @@ signing/
 .env
 .env.*
 
+# Generated app icons (scripts/make_icon.swift); docs/images/icon.png is the committed picture
+Resources/*.icns
+
 # Generated speech fixtures (scripts/fixtures/make_synth.sh)
 scripts/fixtures/out/
 
