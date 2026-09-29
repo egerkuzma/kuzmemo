@@ -13,6 +13,7 @@ enum ControlRoutes {
         case ("GET", "/agenda"): return await agenda(request, env)
         case ("GET", "/inbox"): return await inbox(env)
         case ("POST", "/dev/seed"): return await seed(env)
+        case ("GET", "/audio"): return audio(env)
         case ("GET", "/glossary"): return await glossary(env)
         case ("POST", "/glossary"): return await replaceGlossary(request, env)
         case ("GET", "/settings"): return await SettingsRoutes.read(env)
@@ -116,6 +117,24 @@ enum ControlRoutes {
         } catch {
             return .error("\(error)", status: 500)
         }
+    }
+
+    /// The audio inputs and the one a recording would use now, without opening any of them.
+    private static func audio(_ env: AppEnvironment) -> HTTPResponse {
+        let devices = InputDevices.all()
+        let pick = MicrophoneChoice.pick(env.settings.recording.microphonePreference, among: devices)
+        let reason: Any
+        switch pick.reason {
+        case let .bluetoothAvoided(name)?: reason = "bluetoothAvoided: \(name)"
+        case .pickedDeviceMissing?: reason = "pickedDeviceMissing"
+        case nil: reason = NSNull()
+        }
+        return .json([
+            "devices": devices.map { ["uid": $0.uid, "name": $0.name, "transport": $0.transport.rawValue, "default": $0.isSystemDefault] as [String: Any] },
+            "preference": env.settings.recording.microphone ?? "automatic",
+            "picked": pick.device?.uid ?? NSNull(), "pickedName": pick.device?.name ?? NSNull(),
+            "pickedTransport": pick.device?.transport.rawValue ?? NSNull(), "reason": reason,
+        ])
     }
 
     /// The glossary as the database holds it.

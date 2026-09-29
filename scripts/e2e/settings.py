@@ -40,7 +40,7 @@ DEFAULT_SETTINGS = {
         "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True,
     },
     "recognition": {"language": "ru", "languageAuto": False, "idleUnloadMinutes": 15, "modelVariant": "openai_whisper-large-v3-v20240930_turbo"},
-    "recording": {"holdThreshold": 0.3, "handsFreeSilence": 2.5, "maxSeconds": 120},
+    "recording": {"holdThreshold": 0.3, "handsFreeSilence": 2.5, "maxSeconds": 120, "microphone": None},
     "notifications": {
         "enabled": True, "eventLeads": [5, 0], "reminderLeads": [0], "allDayTimes": ["09:00"],
         "headsUpSound": {"kind": "system", "name": "Tink"}, "atTimeSound": {"kind": "system", "name": "Hero"},
@@ -109,6 +109,31 @@ def run():
     check("an unknown language is rejected", "error" in call("POST", "/settings", {"interface": {"language": "klingon"}}))
     russian = call("POST", "/settings", {"interface": {"language": "russian"}})["interface"]
     check("and Russian again", russian == {"preference": "russian", "language": "ru"}, str(russian))
+
+    print("the microphone")
+    audio = call("GET", "/audio")  # lists the inputs and the choice; nothing is opened
+    devices = audio["devices"]
+    check("input devices are listed", len(devices) >= 1 and all({"uid", "name", "transport", "default"} <= set(d) for d in devices), json.dumps(devices)[:300])
+    check("at most one is the system default", sum(1 for d in devices if d["default"]) <= 1)
+    check("the choice starts as automatic", audio["preference"] == "automatic", str(audio["preference"]))
+    bluetooth_default = any(d["default"] and d["transport"] == "bluetooth" for d in devices)
+    has_built_in = any(d["transport"] == "builtIn" for d in devices)
+    if bluetooth_default and has_built_in:
+        check("a Bluetooth headset is not used for recording (it needs seconds to start)",
+              audio["pickedTransport"] == "builtIn" and str(audio["reason"]).startswith("bluetoothAvoided"), json.dumps(audio)[:300])
+    else:
+        check("the system input is left alone", audio["picked"] is None, json.dumps(audio)[:300])
+    call("POST", "/settings", {"recording": {"microphone": "system"}})
+    audio = call("GET", "/audio")
+    check("the system input can be chosen", audio["preference"] == "system" and audio["picked"] is None, json.dumps(audio)[:300])
+    call("POST", "/settings", {"recording": {"microphone": devices[0]["uid"]}})
+    audio = call("GET", "/audio")
+    check("one device can be chosen", audio["picked"] == devices[0]["uid"], json.dumps(audio)[:300])
+    call("POST", "/settings", {"recording": {"microphone": "unplugged-device"}})
+    audio = call("GET", "/audio")
+    check("a device that is gone falls back to the automatic choice", audio["reason"] is not None or audio["picked"] is None, json.dumps(audio)[:300])
+    call("POST", "/settings", {"recording": {"microphone": None}})
+    check("and automatic can be put back", call("GET", "/audio")["preference"] == "automatic")
 
     print("the window")
     opened = call("POST", "/window/open?name=settings")

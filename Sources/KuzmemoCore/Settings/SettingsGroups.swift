@@ -118,10 +118,19 @@ public struct RecordingSettings: SettingsGroup {
     public var handsFreeSilence = 2.5
     /// The longest recording, seconds.
     public var maxSeconds = 120
+    /// The microphone: `nil` is automatic (the built-in one when the system input is a Bluetooth headset), "system" is
+    /// whatever macOS has selected, anything else is the UID of one device. See `MicrophonePreference`.
+    public var microphone: String?
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case holdThreshold, handsFreeSilence, maxSeconds }
+    /// The stored choice as a value.
+    public var microphonePreference: MicrophonePreference {
+        get { MicrophonePreference(stored: microphone) }
+        set { microphone = newValue.stored }
+    }
+
+    enum CodingKeys: String, CodingKey { case holdThreshold, handsFreeSilence, maxSeconds, microphone }
 
     public init(from decoder: any Decoder) throws {
         self.init()
@@ -129,5 +138,7 @@ public struct RecordingSettings: SettingsGroup {
         holdThreshold = min(max(try c.decodeIfPresent(Double.self, forKey: .holdThreshold) ?? holdThreshold, 0.15), 0.8)
         handsFreeSilence = min(max(try c.decodeIfPresent(Double.self, forKey: .handsFreeSilence) ?? handsFreeSilence, 1), 8)
         maxSeconds = min(max(try c.decodeIfPresent(Int.self, forKey: .maxSeconds) ?? maxSeconds, 20), 600)
+        let stored = try c.decodeIfPresent(String.self, forKey: .microphone)
+        microphone = stored?.isEmpty == false ? stored : nil
     }
 }

@@ -4,6 +4,7 @@ import KuzmemoCore
 import KeyboardShortcuts
 import KuzmemoSTT
 import Observation
+import os
 
 /// The voice path from key press to spoken answer: trigger events drive `HotkeyPolicy`, a recording session
 /// captures audio, finished recordings go through a serial queue to `UtteranceProcessor`, and the outcome is
@@ -47,6 +48,9 @@ final class VoiceController {
     /// The hard cap on a recording (a warning sounds ten seconds before it).
     var recordingLimit: TimeInterval { TimeInterval(env.settings.recording.maxSeconds) }
 
+    /// Timings of the audio path, to find out why a recording came out short (numbers only, never speech or text).
+    private static let log = Logger(subsystem: "app.kuzmemo", category: "audio")
+
     private unowned let env: AppEnvironment
     private let transcriber: WhisperKitTranscriber
     private let utterances: UtteranceProcessor
@@ -54,11 +58,21 @@ final class VoiceController {
     @ObservationIgnored private var monitor: ModifierKeyMonitor?
     @ObservationIgnored private var session: Session?
     @ObservationIgnored private var scriptedInput: (any AudioInput)?
+    @ObservationIgnored private var lastTiming: Timing?
     @ObservationIgnored private var jobs: AsyncStream<Job>.Continuation
     @ObservationIgnored private var jobStream: AsyncStream<Job>
     @ObservationIgnored private var nextJobID = 0
     @ObservationIgnored private var activeJob: Int?
     @ObservationIgnored private var workers: [Task<Void, Never>] = []
+
+    /// How the last recording went, for the log and for explaining a short one.
+    private struct Timing {
+        /// From the trigger to its release, seconds.
+        var held: TimeInterval
+        /// How long the microphone took to come up.
+        var startSeconds: TimeInterval
+        var source: String
+    }
 
     private struct Job {
         var id: Int
@@ -71,6 +85,8 @@ final class VoiceController {
     private final class Session {
         let input: any AudioInput
         let meter: LevelMeter
+        /// When the trigger asked for the recording; `startedAt` is later, once the microphone was up.
+        let requestedAt: TimeInterval
         let startedAt: TimeInterval
         let spokenAt: LocalDateTime
         /// The question this recording answers, if any.
@@ -81,9 +97,13 @@ final class VoiceController {
         var warnedLimit = false
         var tick: Task<Void, Never>?
 
-        init(input: any AudioInput, meter: LevelMeter, startedAt: TimeInterval, spokenAt: LocalDateTime, question: AppEnvironment.PendingQuestion?) {
+        init(
+            input: any AudioInput, meter: LevelMeter, requestedAt: TimeInterval, startedAt: TimeInterval, spokenAt: LocalDateTime,
+            question: AppEnvironment.PendingQuestion?
+        ) {
             self.input = input
             self.meter = meter
+            self.requestedAt = requestedAt
             self.startedAt = startedAt
             self.spokenAt = spokenAt
             self.question = question
@@ -334,9 +354,19 @@ final class VoiceController {
         EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 30, speechWait: 30))
     }
 
+    /// The microphone for a new recording: what Settings → Recording says, with the built-in one standing in for a
+    /// Bluetooth headset (whose microphone takes seconds to start; see `MicrophoneChoice`).
+    private func makeMicrophone() -> any AudioInput {
+        let pick = MicrophoneChoice.pick(env.settings.recording.microphonePreference, among: InputDevices.all())
+        if let device = pick.device, let captureDevice = AVCaptureDevice(uniqueID: device.uid) {
+            return DeviceMicCapture(device: captureDevice)
+        }
+        return MicCapture()
+    }
+
     private func startRecording() {
         guard session == nil else { return }
-        let input: any AudioInput
+        var input: any AudioInput
         if let scripted = scriptedInput {
             input = scripted
             scriptedInput = nil
@@ -355,7 +385,7 @@ final class VoiceController {
                 hud.showNote(tr("No microphone access. Allow it: System Settings → Privacy & Security → Microphone."), style: .error, seconds: 8)
                 return
             }
-            input = MicCapture()
+            input = makeMicrophone()
         }
         if problem == .microphoneDenied { problem = nil }
 
@@ -367,16 +397,28 @@ final class VoiceController {
         } else {
             hud.show(.recording(handsFree: false))
         }
+        let requestedAt = ProcessInfo.processInfo.systemUptime
         do {
             try input.start()
         } catch {
-            policy.recordingEnded()
-            hud.showNote(tr("Could not turn on the microphone: %1$@", "\(error)"), style: .error, seconds: 6)
-            return
+            // A microphone picked by name may be gone (unplugged, the lid closed): the system's input is the fallback.
+            var failure: (any Error)? = error
+            if input is DeviceMicCapture {
+                Self.log.error("microphone did not start (\(String(describing: error), privacy: .public)); using the system input")
+                let fallback = MicCapture()
+                fallback.onLevel = { level in meter.record(level) }
+                do { try fallback.start(); input = fallback; failure = nil } catch let second { failure = second }
+            }
+            if let failure {
+                policy.recordingEnded()
+                hud.showNote(tr("Could not turn on the microphone: %1$@", "\(failure)"), style: .error, seconds: 6)
+                return
+            }
         }
 
         let session = Session(
-            input: input, meter: meter, startedAt: ProcessInfo.processInfo.systemUptime, spokenAt: env.clock.localNow(), question: question
+            input: input, meter: meter, requestedAt: requestedAt, startedAt: ProcessInfo.processInfo.systemUptime,
+            spokenAt: env.clock.localNow(), question: question
         )
         self.session = session
         phase = .recording(handsFree: question != nil)
@@ -427,6 +469,10 @@ final class VoiceController {
         self.session = nil
         session.tick?.cancel()
         let samples = session.input.stop()
+        lastTiming = Timing(
+            held: ProcessInfo.processInfo.systemUptime - session.requestedAt, startSeconds: session.input.startSeconds,
+            source: session.input.sourceName
+        )
         phase = .idle
         policy.recordingEnded()
         return (samples, session.spokenAt, session.question)
@@ -453,9 +499,24 @@ final class VoiceController {
     private func finishRecording() {
         guard let (samples, spokenAt, question) = endSession() else { return }
         let seconds = Double(samples.count) / 16_000
+        let timing = lastTiming
+        if let timing {
+            Self.log.info("""
+                recording: held \(timing.held, format: .fixed(precision: 2), privacy: .public) s, \
+                microphone up in \(timing.startSeconds, format: .fixed(precision: 2), privacy: .public) s, \
+                captured \(seconds, format: .fixed(precision: 2), privacy: .public) s from \(timing.source, privacy: .private)
+                """)
+        }
         guard seconds >= 0.6 else {
             if question != nil {
                 Task { @MainActor in await closeUnanswered() }
+            } else if let timing, timing.startSeconds >= 0.8 {
+                // Not too short on the person's side: the microphone was slow to come up and ate the beginning.
+                let took = String(format: "%.1f", locale: Localization.current.locale, timing.startSeconds)
+                hud.showNote(
+                    tr("The microphone needed %1$@ s to start, so the beginning was not recorded. Choose the built-in microphone in Settings → Recording.", took),
+                    style: .warning, seconds: 7
+                )
             } else {
                 hud.showNote(tr("Recording too short — skipped."), style: .warning, seconds: 2)
             }

@@ -18,6 +18,8 @@ nonisolated final class MicCapture: @unchecked Sendable {
 
     /// Called from the audio thread with the RMS of each converted chunk.
     var onLevel: (@Sendable (Float) -> Void)?
+    private(set) var startSeconds: TimeInterval = 0
+    let sourceName = "system input"
 
     var isRunning: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -25,6 +27,8 @@ nonisolated final class MicCapture: @unchecked Sendable {
     }
 
     func start() throws {
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { startSeconds = ProcessInfo.processInfo.systemUptime - began }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0, let resampler = AudioResampler16k(inputFormat: format) else {

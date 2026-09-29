@@ -6,12 +6,18 @@ import KuzmemoSTT
 nonisolated protocol AudioInput: AnyObject, Sendable {
     /// Called from a background thread with the RMS of each converted chunk.
     var onLevel: (@Sendable (Float) -> Void)? { get set }
+    /// How long `start()` took, seconds. A Bluetooth headset needs seconds to switch to call mode, and everything the
+    /// person says meanwhile is lost.
+    var startSeconds: TimeInterval { get }
+    /// A short description of the source, for logs ("system input", the name of a device).
+    var sourceName: String { get }
     func start() throws
     /// Stops and returns everything captured as 16 kHz mono Float32.
     func stop() -> [Float]
 }
 
 extension MicCapture: AudioInput {}
+extension DeviceMicCapture: AudioInput {}
 
 /// Plays prepared samples as if they were being spoken now: levels are reported at the pace of real time, and
 /// after the samples run out it "hears" silence for as long as the recording continues.
@@ -22,6 +28,8 @@ nonisolated final class ScriptedAudioInput: AudioInput, @unchecked Sendable {
     private var reported = 0
     private var timer: (any DispatchSourceTimer)?
     var onLevel: (@Sendable (Float) -> Void)?
+    let startSeconds: TimeInterval = 0
+    let sourceName = "scripted"
 
     init(samples: [Float]) {
         self.samples = samples
