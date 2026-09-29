@@ -9,13 +9,13 @@ public struct QueryResult: Equatable, Sendable {
 }
 
 extension Store {
-    /// A stream that yields whenever calendar rows (items or per-occurrence overrides) change, so views can
+    /// A stream that yields whenever calendar rows (items, per-occurrence overrides) or memos change, so views can
     /// reload. The first value arrives immediately.
     public func changes() -> AsyncStream<Void> {
         let writer = self.writer
         return AsyncStream { continuation in
             let observation = ValueObservation.tracking { db -> Int in
-                try Item.fetchCount(db) + ItemException.fetchCount(db)
+                try Item.fetchCount(db) + ItemException.fetchCount(db) + Memo.fetchCount(db)
             }
             let task = Task {
                 do {
