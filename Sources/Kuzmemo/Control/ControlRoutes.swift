@@ -19,6 +19,8 @@ enum ControlRoutes {
         case ("POST", "/notifications/sync"): return await NotificationRoutes.sync(request, env)
         case ("POST", "/ui"): return await ui(request, env)
         case ("GET", "/window"): return WindowRoutes.describe(request.query["name"] ?? "main")
+        case ("GET", "/windows"): return WindowRoutes.list()
+        case ("POST", "/popover/wiring"): return await PopoverRoutes.wiring(env)
         case ("POST", "/window/open"): return await WindowRoutes.open(env, name: request.query["name"] ?? "main")
         case ("POST", "/window/close"): return WindowRoutes.close(request.query["name"] ?? "main")
         case ("POST", "/undo"): return await undo(env)
@@ -203,15 +205,16 @@ enum ControlRoutes {
             data = Snapshot.png(MainWindowView(env: env), width: max(width, 860), height: height, dark: dark)
         case "settings":
             env.settingsTab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
-            data = Snapshot.png(SettingsView(env: env), width: 700, height: 600, dark: dark)
+            data = Snapshot.png(SettingsView(env: env), width: SettingsView.size.width, height: SettingsView.size.height, dark: dark)
         case "settingsTab":
             // One tab on its own, as tall as asked, so the whole form is visible (the window scrolls it).
             let tab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
             let height = CGFloat(Double(request.query["height"] ?? "") ?? 1500)
-            data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.russian), width: 700, height: height, dark: dark)
+            data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.russian), width: SettingsView.size.width, height: height, dark: dark)
         case "live":
             return await WindowRoutes.capture(
-                name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1", scale: 2
+                name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1",
+                chrome: request.query["chrome"] == "1", scale: 2
             )
         case "editor":
             let title = request.query["title"] ?? "new"

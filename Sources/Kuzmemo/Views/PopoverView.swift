@@ -8,7 +8,6 @@ struct PopoverView: View {
     let env: AppEnvironment
     @State private var text = ""
     @FocusState private var focused: Bool
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -22,6 +21,7 @@ struct PopoverView: View {
         }
         .padding(14)
         .frame(width: 380)
+        .background(PopoverWindowReader(env: env))
         .task { await env.reloadToday() }
     }
 
@@ -72,11 +72,7 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Button("Открыть Kuzmemo") {
-                openWindow(id: "main")
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-            }
+            Button("Открыть") { env.showMainWindow() }
             Button("Настройки…") { env.showSettings() }
             Spacer()
             Button("Выйти") { NSApp.terminate(nil) }
@@ -88,4 +84,29 @@ struct PopoverView: View {
 
 extension String {
     var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
+
+/// Tells the environment which window hosts the popover, so that anything that opens another window can close it
+/// (SwiftUI has no call for that). Found through the view itself, so nothing depends on the system's private classes.
+private struct PopoverWindowReader: NSViewRepresentable {
+    let env: AppEnvironment
+
+    func makeNSView(context: Context) -> NSView { Reader(env: env) }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Reader: NSView {
+        let env: AppEnvironment
+
+        init(env: AppEnvironment) {
+            self.env = env
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { fatalError("not used") }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { env.popoverWindow = window }
+        }
+    }
 }

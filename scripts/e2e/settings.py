@@ -111,9 +111,15 @@ def run():
         status, live = call("GET", "/render?view=live&name=settings", raw=True)
         check(f"…and is drawn in the real window ({tab})", status == 200 and len(live) > 30_000, f"{status} {len(live)}")
     call("POST", "/window/close?name=settings")
+
     time.sleep(0.3)
     check("it closes", call("GET", "/window?name=settings").get("open") is False)
     check("an unknown tab is rejected", "error" in call("POST", "/ui", {"settingsTab": "nope"}))
+
+    print("the menu-bar popover")
+    wiring = call("POST", "/popover/wiring")
+    check("a window that hosts the popover is found by the app", wiring.get("registered") is True and wiring.get("visibleBefore") is True, json.dumps(wiring))
+    check("…and «Открыть» / «Настройки…» can close it", wiring.get("visibleAfterClose") is False, json.dumps(wiring))
 
 
 main()

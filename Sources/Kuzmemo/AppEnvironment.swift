@@ -88,6 +88,8 @@ final class AppEnvironment {
     /// Registered by a SwiftUI view that is always alive (the menu-bar label): opens the main window's scene.
     @ObservationIgnored var openWindowAction: (() -> Void)?
     @ObservationIgnored var openSettingsAction: (() -> Void)?
+    /// The window that hosts the menu-bar popover, reported by the popover's own view.
+    @ObservationIgnored weak var popoverWindow: NSWindow?
 
     /// What the menu-bar icon shows: recording and pending voice work take precedence over the last outcome.
     var status: Status {
@@ -275,9 +277,17 @@ final class AppEnvironment {
         showMainWindow()
     }
 
+    /// Closes the menu-bar popover if it is open. SwiftUI leaves the window of a `.window`-style menu bar extra on the
+    /// screen until the person clicks somewhere else, which is wrong after choosing "Открыть" or "Настройки…".
+    func closePopover() {
+        guard let window = popoverWindow, window.isVisible else { return }
+        MenuBarPopover.hide(window)
+    }
+
     /// The window is a regular app window while it is open (Dock icon, menu), and the app returns to the menu bar
     /// when it closes (see `AppDelegate`).
     func showMainWindow() {
+        closePopover()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.title == "Kuzmemo" && $0.styleMask.contains(.titled) }) {
@@ -289,6 +299,7 @@ final class AppEnvironment {
 
     /// Opens the settings window in front of everything else.
     func showSettings(tab: SettingsView.Tab? = nil) {
+        closePopover()
         if let tab { settingsTab = tab }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
