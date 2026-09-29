@@ -249,6 +249,29 @@ struct MaintenanceTests {
         #expect(try await store.integrityCheck().searchIndexRebuilt == false) // consistent now: nothing more to do
     }
 
+    /// SQLite's own check, run on a reader connection that searched earlier and was left open, cries "fts5: checksum mismatch"
+    /// after the writer has rewritten the index a few times, although nothing is wrong (a fresh connection and the writer
+    /// both say "ok", and searching through that reader still gives the right rows). The app's pool keeps its readers
+    /// open for its whole life, so the check must not run on one.
+    @Test func aReaderThatSearchedEarlierDoesNotRaiseAFalseAlarm() async throws {
+        let shop = try Workshop()
+        defer { shop.remove() }
+        try await shop.store.perform(label: "seed") { m in
+            for n in 0 ..< 5 { try m.insert(reminder("Запись номер \(n) про хостинг", on: "2026-09-30")) }
+        }
+        #expect(try await shop.store.search("хостинг").count == 5) // the pool's reader now has the index structure cached
+        for round in 0 ..< 30 { // what the demo data and the E2E scripts do: erase everything and write it again
+            try await shop.store.eraseAllData()
+            for n in 0 ..< 12 {
+                try await shop.store.perform(label: "again") { try $0.insert(reminder("Запись \(n) круг \(round) доступ", on: "2026-09-30")) }
+            }
+        }
+        let report = try await shop.store.integrityCheck() // no search in between: the reader's cache is still the old one
+        #expect(report.problems == [], "\(report.problems)")
+        #expect(report.isHealthy)
+        #expect(try await shop.store.search("доступ").count == 12) // and searching was right all along
+    }
+
     @Test func aDamagedFileIsReportedAndNothingIsRepairedBehindThePersonsBack() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("kuzmemo-damaged-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

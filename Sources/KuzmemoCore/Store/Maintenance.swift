@@ -50,26 +50,31 @@ extension Store {
 
     /// Runs SQLite's own consistency check, then compares the search index with the entries and rebuilds the index when
     /// they disagree (it is derived data, so that loses nothing). A damaged file is reported, never "repaired".
+    ///
+    /// The check runs on the writer connection on purpose. SQLite's check of an FTS5 table, run on a reader connection that
+    /// searched earlier and has been open since, cries "fts5: checksum mismatch" after the index has been rewritten a few
+    /// times, although nothing is wrong (a fresh connection and the writer say "ok", and searching through that reader
+    /// still finds the right rows). The pool keeps its readers open for the life of the app, so a check there would raise
+    /// a false alarm at every launch. The writer always has the current index structure.
     public func integrityCheck() async throws -> IntegrityReport {
         let checkedAt = clock.now()
-        let problems: [String]
+        let outcome: (problems: [String], indexConsistent: Bool)
         do {
-            problems = try await writer.read { db in
+            outcome = try await writer.writeWithoutTransaction { db in
                 var found = try String.fetchAll(db, sql: "PRAGMA integrity_check(20)")
                 if found == ["ok"] { found = [] }
                 for row in try Row.fetchAll(db, sql: "PRAGMA foreign_key_check").prefix(5) {
                     let table: String = row[0]
                     found.append("foreign key violation in \(table)")
                 }
-                return found
+                return (found, found.isEmpty ? try SearchIndex.isConsistent(db) : true)
             }
         } catch let error as DatabaseError {
             return IntegrityReport(checkedAt: checkedAt, problems: [error.description])
         }
-        guard problems.isEmpty else { return IntegrityReport(checkedAt: checkedAt, problems: problems) }
-        let consistent = try await writer.read { db in try SearchIndex.isConsistent(db) }
-        if !consistent { try await rebuildSearchIndex() }
-        return IntegrityReport(checkedAt: checkedAt, problems: [], searchIndexRebuilt: !consistent)
+        guard outcome.problems.isEmpty else { return IntegrityReport(checkedAt: checkedAt, problems: outcome.problems) }
+        if !outcome.indexConsistent { try await rebuildSearchIndex() }
+        return IntegrityReport(checkedAt: checkedAt, problems: [], searchIndexRebuilt: !outcome.indexConsistent)
     }
 
     public func rebuildSearchIndex() async throws {
