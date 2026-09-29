@@ -21,20 +21,22 @@ struct NotificationsSettingsTab: View {
                 permissionHint
             }
             Group {
-                Section("События со временем") {
-                    Hint("Встречи и звонки. Можно получить несколько уведомлений: заранее и в сам момент.")
+                Section("Встречи и звонки") {
+                    Hint("Записи типа «событие»: «созвон с Figma завтра в 11», «планёрка в понедельник в 10». Тип Kuzmemo определяет по вашей фразе; он виден в календаре и меняется в редакторе записи. О встрече можно предупредить заранее и ещё раз в момент начала.")
                     LeadChips(choices: Self.choices(settings.notifications.eventLeads), selection: $settings.notifications.eventLeads)
                     Hint(Self.summary(settings.notifications.eventLeads, what: "событии"))
                 }
-                Section("Напоминания и задачи со временем") {
+                Section("Напоминания и задачи") {
+                    Hint("С точным временем: «напомни позвонить в банк в 16:00», «ответить саппорту в 17:30». Обычно хватает сигнала в нужный момент.")
                     LeadChips(choices: Self.choices(settings.notifications.reminderLeads), selection: $settings.notifications.reminderLeads)
                     Hint(Self.summary(settings.notifications.reminderLeads, what: "напоминании"))
                     Hint("У отдельной записи в редакторе можно добавить ещё один ранний сигнал.")
                 }
                 Section("Дела на весь день") {
-                    Hint("Напоминания и задачи с датой, но без времени. Пока дело не выполнено, Kuzmemo напомнит о нём в эти часы:")
+                    Hint("Напоминания и задачи с датой, но без времени: «напомни послезавтра сказать Дмитрию». Пока дело не выполнено, Kuzmemo напомнит о нём в эти часы:")
                     TimeList(times: $settings.notifications.allDayTimes, limit: 6)
                     Hint(Self.allDaySummary(settings.notifications.allDayTimes))
+                    Hint("Заметки и события без времени уведомлений не дают.")
                 }
                 Section("Звуки") {
                     SoundRow(title: "Заранее", detail: "как «встреча через 5 минут» в Zoom", sound: $settings.notifications.headsUpSound)
