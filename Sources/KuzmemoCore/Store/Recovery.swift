@@ -63,3 +63,13 @@ public enum DatabaseRecovery {
         for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix)) }
     }
 }
+
+extension Store {
+    /// Opens the database at launch, coping with a file too damaged to open (see `DatabaseRecovery`).
+    public static func openRecovering(
+        at url: URL, backups: URL, clock: any NowProvider
+    ) throws -> (store: Store, outcome: DatabaseRecovery.Outcome) {
+        let (pool, outcome) = try DatabaseRecovery.open(at: url, backups: backups, now: clock.now(), zone: clock.timeZone)
+        return (Store(writer: pool, clock: clock), outcome)
+    }
+}

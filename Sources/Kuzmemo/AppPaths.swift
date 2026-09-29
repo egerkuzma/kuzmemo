@@ -9,6 +9,8 @@ struct AppPaths {
     let isDev: Bool
 
     var database: URL { support.appendingPathComponent("kuzmemo.sqlite") }
+    /// Copies of the database (see `BackupService`).
+    var backups: URL { support.appendingPathComponent("backups", isDirectory: true) }
     var claudeWorkingDirectory: URL { support.appendingPathComponent("claude-cwd", isDirectory: true) }
     var runDirectory: URL { support.appendingPathComponent("run", isDirectory: true) }
     var controlSocket: URL { runDirectory.appendingPathComponent("control.sock") }

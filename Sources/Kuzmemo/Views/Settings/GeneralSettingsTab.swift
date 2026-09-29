@@ -53,15 +53,6 @@ struct GeneralSettingsTab: View {
                 PermissionRow(title: tr("Notifications"), state: env.notifications.permissionState, action: env.notifications.permissionAction)
                 Hint(tr("Reminders arrive as system notifications. How they look and sound is set in the Notifications tab."))
             }
-            Section(tr("Data")) {
-                LabeledContent(tr("Database")) {
-                    HStack {
-                        Text(verbatim: env.paths.database.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        Button(tr("Show")) { NSWorkspace.shared.activateFileViewerSelecting([env.paths.database]) }
-                    }
-                }
-                Hint(tr("Entries, the glossary and settings are stored on this Mac only. Audio is deleted right after transcription; only the text of the phrase is sent to Anthropic."))
-            }
             Section(tr("About")) {
                 LabeledContent(tr("Version")) { Text(verbatim: env.version).foregroundStyle(.secondary) }
                 if let commit = Bundle.main.object(forInfoDictionaryKey: "KuzmemoGitCommit") as? String {

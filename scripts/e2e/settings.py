@@ -142,7 +142,7 @@ def run():
         call("POST", "/settings", {"interface": {"language": language}})
         time.sleep(0.4)
         check(f"the window title follows the language ({language})", call("GET", "/window?name=settings").get("title") == title, str(call("GET", "/window?name=settings")))
-        for tab in ("general", "recording", "recognition", "speech", "notifications", "glossary"):
+        for tab in ("general", "recording", "recognition", "speech", "notifications", "glossary", "data"):
             call("POST", "/ui", {"settingsTab": tab})
             time.sleep(0.3)
             status, data = call("GET", f"/render?view=settings&tab={tab}", raw=True)

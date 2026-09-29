@@ -6,7 +6,7 @@ import SwiftUI
 /// "»" menu that nobody finds.
 struct SettingsView: View {
     enum Tab: String, CaseIterable, Identifiable {
-        case general, recording, recognition, speech, notifications, glossary
+        case general, recording, recognition, speech, notifications, glossary, data
         var id: String { rawValue }
 
         var title: String {
@@ -17,6 +17,7 @@ struct SettingsView: View {
             case .speech: tr("Speech")
             case .notifications: tr("Notifications")
             case .glossary: tr("Glossary")
+            case .data: tr("Data")
             }
         }
 
@@ -28,6 +29,7 @@ struct SettingsView: View {
             case .speech: "speaker.wave.2"
             case .notifications: "bell"
             case .glossary: "character.book.closed"
+            case .data: "externaldrive"
             }
         }
     }
@@ -56,6 +58,7 @@ struct SettingsView: View {
         case .speech: SpeechSettingsTab(env: env)
         case .notifications: NotificationsSettingsTab(env: env)
         case .glossary: GlossarySettingsTab(env: env)
+        case .data: DataSettingsTab(env: env)
         }
     }
 }

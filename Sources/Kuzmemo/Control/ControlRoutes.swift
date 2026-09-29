@@ -29,6 +29,11 @@ enum ControlRoutes {
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
         case ("POST", "/db/reset"): return await reset(env)
+        case ("GET", "/data"): return await DataRoutes.read(env)
+        case ("POST", "/data/check"): return await DataRoutes.check(env)
+        case ("POST", "/data/backup"): return await DataRoutes.backup(request, env)
+        case ("POST", "/data/daily"): return await DataRoutes.daily(env)
+        case ("POST", "/data/erase"): return await DataRoutes.erase(request, env)
         case ("GET", "/render"): return await render(request, env)
         case ("GET", "/voice"): return VoiceRoutes.state(env)
         case ("POST", "/hotkey/down"), ("POST", "/hotkey/up"), ("POST", "/hotkey/other"), ("POST", "/hotkey/escape"):
@@ -261,6 +266,7 @@ enum ControlRoutes {
         case "settingsTab":
             // One tab on its own, as tall as asked, so the whole form is visible (the window scrolls it).
             let tab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
+            if tab == .data { await env.data.refresh() }
             let height = CGFloat(Double(request.query["height"] ?? "") ?? 1500)
             data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.locale), width: SettingsView.size.width, height: height, dark: dark)
         case "live":

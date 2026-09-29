@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
             await AppEnvironment.shared.voice.speech.silero.shutDown()
+            try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

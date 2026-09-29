@@ -73,6 +73,7 @@ The interface, the spoken answers and the recognition are available in **English
 **Trust**
 - **Nothing is lost.** The recording is stored before recognition and the text before it is sent; if `claude` is unavailable, the phrase waits in the Inbox and is retried.
 - **Everything is undoable.** Deletes are soft and every change goes through an undo journal that survives restarts.
+- **Backed up.** A copy of the database is saved every day (the last 14 are kept), the database is checked at every launch, and an erase saves a copy first. Settings → Data shows all of it.
 - **Private by design.** Audio never leaves the Mac and is deleted after transcription. See [Privacy](#privacy).
 
 ## Quick start
@@ -126,7 +127,7 @@ Three SwiftPM targets: `KuzmemoCore` (UI-free logic and storage on GRDB, fully u
 
 ## Privacy
 
-Everything lives in `~/Library/Application Support/Kuzmemo` (database, models). Audio is a temporary file, removed as soon as the text is stored. Only the recognized text of a phrase, your glossary terms and the titles of a few nearby calendar entries go to Anthropic, through Claude Code; nothing else leaves the Mac.
+Everything lives in `~/Library/Application Support/Kuzmemo` (the database and its daily copies, models). Audio is a temporary file, removed as soon as the text is stored. Only the recognized text of a phrase, your glossary terms and the titles of a few nearby calendar entries go to Anthropic, through Claude Code; nothing else leaves the Mac.
 
 ## Development
 
@@ -137,7 +138,7 @@ python3 scripts/check_localization.py        # translation tables against the co
 scripts/run_app.sh                           # the automation build, then scripts/e2e/*.py drive the real app
 ```
 
-The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
+The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
 
 Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 

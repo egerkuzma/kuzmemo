@@ -25,7 +25,7 @@ from urllib.parse import quote
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SOCK = os.environ.get("KUZMEMO_SOCK") or os.path.expanduser("~/Library/Application Support/Kuzmemo-Dev/run/control.sock")
-TABS = ("general", "recording", "recognition", "speech", "notifications", "glossary")
+TABS = ("general", "recording", "recognition", "speech", "notifications", "glossary", "data")
 HUD_STATES = ("recording", "handsfree", "transcribing", "interpreting", "result", "question", "listening", "note")
 GLOSSARY = [
     {"canonical": "Notion", "kind": "product", "aliases": ["нотион", "ношн", "notion"], "spoken": "Ношн"},

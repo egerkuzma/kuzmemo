@@ -61,6 +61,7 @@ final class AppEnvironment {
     let paths: AppPaths
     let clock = AdjustableNow()
     let store: Store
+    let data: DataMaintenance
     let processor: MemoProcessor
     let provider: ClaudeCLIProvider
     let calendar: CalendarModel
@@ -102,6 +103,7 @@ final class AppEnvironment {
     var status: Status {
         if voice?.isRecording == true { return .recording }
         if voice?.isBusy == true || baseStatus == .thinking { return .thinking }
+        if data.hasProblem { return .error } // the menu-bar icon stays a warning until the database is sound again
         return baseStatus
     }
 
@@ -113,11 +115,14 @@ final class AppEnvironment {
         Localization.set(resolved)
         paths = AppPaths.resolve()
         version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
+        let opened: (store: Store, outcome: DatabaseRecovery.Outcome)
         do {
-            store = try Store(databaseAt: paths.database, clock: clock)
+            opened = try Store.openRecovering(at: paths.database, backups: paths.backups, clock: clock)
         } catch {
             fatalError("Cannot open the database at \(paths.database.path): \(error)")
         }
+        store = opened.store
+        data = DataMaintenance(store: opened.store, paths: paths, clock: clock, recovery: opened.outcome)
         provider = ClaudeCLIProvider(configuration: ClaudeCLIConfiguration(workingDirectory: paths.claudeWorkingDirectory))
         processor = MemoProcessor(store: store, interpreter: Interpreter(store: store, provider: provider), clock: clock)
         calendar = CalendarModel(store: store, clock: clock)
@@ -144,12 +149,34 @@ final class AppEnvironment {
         notifications = NotificationScheduler(env: self)
         settings.observe { [weak self] group in if group == .notifications { self?.notifications.requestSync(after: .milliseconds(300)) } }
         notifications.start()
+        data.onProblem = { [weak self] in self?.warnAboutDatabase() }
+        data.start()
+        if data.hasProblem { warnAboutDatabase() }
         if AppPaths.controlEnabled {
             let server = ControlServer(socketPath: paths.controlSocket.path) { request in
                 await ControlRoutes.handle(request)
             }
             do { try server.start(); controlServer = server } catch { NSLog("Kuzmemo: control server failed: \(error)") }
         }
+    }
+
+    // MARK: - Data
+
+    private func warnAboutDatabase() {
+        toast = Toast(style: .error, lines: [tr("There is a problem with the database. Details: Settings → Data.")])
+    }
+
+    /// The Data page's "Erase all entries and history…": a copy is saved first, then the entries, saved phrases and the
+    /// undo history go. Refused while a phrase is being recorded or processed.
+    @discardableResult
+    func eraseEntriesAndHistory() async -> EraseSummary? {
+        guard voice?.isRecording != true, voice?.isBusy != true, baseStatus != .thinking else { return nil }
+        guard let summary = await data.erase() else { return nil }
+        queryResult = nil
+        _ = takeQuestion()
+        toast = nil
+        await reloadToday()
+        return summary
     }
 
     // MARK: - Language
