@@ -241,3 +241,37 @@ struct StoreMiscTests {
         #expect(try await reopened.items(on: LocalDate("2026-10-01")!).map(\.title) == ["Сохранится"])
     }
 }
+
+@Suite("Settings and the seeded glossary")
+struct SettingsTests {
+    @Test func settingsAreStoredReplacedAndRemoved() async throws {
+        let store = try makeStore()
+        #expect(try await store.setting("x") == nil)
+        try await store.setSetting("1", for: "x")
+        try await store.setSetting("2", for: "x")
+        #expect(try await store.setting("x") == "2")
+        try await store.setSetting(nil, for: "x")
+        #expect(try await store.setting("x") == nil)
+    }
+
+    @Test func anEmptyGlossaryIsSeededOnceAndThenBelongsToTheUser() async throws {
+        let store = try makeStore()
+        #expect(try await store.seedGlossaryIfNeeded() == true)
+        let terms = try await store.glossary()
+        #expect(terms.map(\.canonical).contains("Notion") && terms.count == Glossary.defaults.count)
+        #expect(Glossary.spokenForm(of: "Проверить Notion", terms: terms) == "Проверить Нотион")
+        #expect(Glossary.applyAliases(to: "доступ Нотиона", terms: terms) == "доступ Notion")
+
+        #expect(try await store.seedGlossaryIfNeeded() == false)
+        for term in terms { try await store.deleteTerm(id: term.id!) }
+        #expect(try await store.seedGlossaryIfNeeded() == false)
+        #expect(try await store.glossary().isEmpty) // deleting everything is a choice; it stays deleted
+    }
+
+    @Test func aGlossaryTheUserAlreadyHasIsLeftAlone() async throws {
+        let store = try makeStore()
+        try await store.save(term: GlossaryTerm(canonical: "Foo", aliases: ["фу"]))
+        _ = try await store.seedGlossaryIfNeeded()
+        #expect(try await store.glossary().map(\.canonical) == ["Foo"])
+    }
+}

@@ -145,6 +145,24 @@ struct MemoProcessorTests {
         #expect(item.title.count == 78 && item.title.hasSuffix("…") && item.details == long)
     }
 
+    @Test func questionsLeftOpenWhenTheAppQuitBecomeNotes() async throws {
+        let (processor, store, _) = try processor([.json(ParserResponseTests.clarify), .json(ParserResponseTests.clarify), .json(createAnswer)])
+        let open1 = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        let open2 = await processor.submit(text: "созвон с Фигма", inputKind: .text)
+        let done = await processor.submit(text: "напомни", inputKind: .text)
+        #expect(try await store.unfinishedMemos().count == 2)
+
+        // a new run of the app: nobody can answer these any more
+        let closed = await processor.closeOrphanedQuestions()
+        #expect(closed.count == 2)
+        #expect(try await store.unfinishedMemos().isEmpty)
+        let notes = try await store.inbox().map(\.title).sorted()
+        #expect(notes == ["напомни позвонить Дмитрию", "созвон с Фигма"])
+        for id in [open1.memo.id, open2.memo.id] { #expect(try await store.memo(id: id)?.status == .applied) }
+        #expect(try await store.memo(id: done.memo.id)?.status == .applied)
+        #expect(await processor.closeOrphanedQuestions().isEmpty) // nothing left to close
+    }
+
     @Test func discardingAQuestionLeavesNothingBehind() async throws {
         let (processor, store, _) = try processor([.json(ParserResponseTests.clarify), .json(createAnswer)])
         let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)

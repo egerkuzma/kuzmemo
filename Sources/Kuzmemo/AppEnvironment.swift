@@ -80,6 +80,8 @@ final class AppEnvironment {
         }
         Task { [weak self] in
             guard let self else { return }
+            _ = try? await store.seedGlossaryIfNeeded()
+            await processor.closeOrphanedQuestions()
             for outcome in await processor.recoverUnfinished() { await present(outcome, announce: false) }
         }
         voice = VoiceController(env: self)

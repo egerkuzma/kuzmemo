@@ -130,6 +130,22 @@ public actor MemoProcessor {
         }
     }
 
+    /// Questions that were still open when the app quit can no longer be answered (the conversation lives in
+    /// memory), so the words are kept as notes. Call once at launch, before anything new starts.
+    @discardableResult
+    public func closeOrphanedQuestions() async -> [ProcessOutcome] {
+        guard let memos = try? await store.unfinishedMemos() else { return [] }
+        var outcomes: [ProcessOutcome] = []
+        for memo in memos where memo.status == .clarifying && !inFlight.contains(memo.id) {
+            if let outcome = await keepAsNote(memoID: memo.id) {
+                outcomes.append(outcome)
+            } else {
+                await discard(memoID: memo.id, reason: "the question was left open when the app quit")
+            }
+        }
+        return outcomes
+    }
+
     /// Transcripts along the chain of questions and answers ending at `memo`, oldest first.
     private func chainTranscripts(endingAt memo: Memo) async -> [String] {
         var parts: [String] = []
