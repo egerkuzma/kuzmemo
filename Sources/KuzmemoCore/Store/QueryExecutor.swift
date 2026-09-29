@@ -119,9 +119,7 @@ extension Store {
     /// Removes every item, memo and journal entry (the glossary stays). For the dev bundle's test resets only.
     public func eraseAllData() async throws {
         try await writer.write { db in
-            for table in ["items_fts", "op_changes", "ops", "item_exceptions", "items", "memos", "notification_state"] {
-                try db.execute(sql: "DELETE FROM \(table)")
-            }
+            for table in Store.contentTables { try db.execute(sql: "DELETE FROM \(table)") }
         }
     }
 }

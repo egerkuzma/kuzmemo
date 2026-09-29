@@ -40,6 +40,10 @@ enum SearchIndex {
     static func upsert(_ db: Database, item: Item) throws {
         try db.execute(sql: "DELETE FROM items_fts WHERE item_id = ?", arguments: [item.id])
         guard item.deletedAt == nil else { return }
+        try insert(db, item: item)
+    }
+
+    private static func insert(_ db: Database, item: Item) throws {
         try db.execute(
             sql: "INSERT INTO items_fts(item_id, title, details, keywords) VALUES (?, ?, ?, ?)",
             arguments: [
@@ -49,6 +53,23 @@ enum SearchIndex {
                 SearchText.normalize(item.keywords),
             ]
         )
+    }
+
+    /// Throws the index away and builds it again from the entries (it is derived data, so nothing is lost).
+    static func rebuild(_ db: Database) throws {
+        try db.execute(sql: "DELETE FROM items_fts")
+        for item in try Item.filter(Column("deleted_at") == nil).fetchAll(db) { try insert(db, item: item) }
+    }
+
+    /// True when the index has exactly one row for each entry that should be in it and nothing else.
+    static func isConsistent(_ db: Database) throws -> Bool {
+        let live = try Int.fetchOne(db, sql: "SELECT count(*) FROM items WHERE deleted_at IS NULL") ?? 0
+        let indexed = try Int.fetchOne(db, sql: "SELECT count(*) FROM items_fts") ?? 0
+        let missing = try Int.fetchOne(
+            db, sql: "SELECT count(*) FROM items WHERE deleted_at IS NULL AND id NOT IN (SELECT item_id FROM items_fts)"
+        ) ?? 0
+        // Every live entry present and as many rows as entries: no strays, no duplicates.
+        return live == indexed && missing == 0
     }
 
     static func remove(_ db: Database, id: String) throws {
