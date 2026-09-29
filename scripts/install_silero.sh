@@ -4,7 +4,8 @@
 #
 #   scripts/install_silero.sh
 #
-# Needs Python 3.10 or newer (for example: brew install python@3.13) and a network connection (torch is about 80 MB).
+# Needs Python 3.10 or newer (for example: brew install python@3.13) and a network connection (about 100 MB to download,
+# about 750 MB on disk afterwards).
 # Kuzmemo also finds the environment of ~/Projects/another project by itself, so this is only needed without it.
 # The Silero models are licensed CC BY-NC-SA 4.0: fine for personal use.
 set -euo pipefail
@@ -47,7 +48,7 @@ if [ ! -x "$DIR/venv/bin/python" ]; then
 fi
 echo "torch: installing (a few minutes the first time)"
 "$DIR/venv/bin/pip" install --quiet --upgrade pip
-"$DIR/venv/bin/pip" install --quiet torch
+"$DIR/venv/bin/pip" install --quiet torch numpy # numpy is optional for torch, but without it torch warns on every start
 
 # 3. Check that the model loads and has its voices.
 "$DIR/venv/bin/python" - "$MODEL" <<'PY'

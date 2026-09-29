@@ -21,6 +21,10 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
     /// The voices the loaded model offers (empty until it has been loaded once).
     private(set) var speakers: [String] = []
     private(set) var isLoading = false
+    /// How long the model took to load the last time (the helper reports it), for the status line.
+    private(set) var loadMilliseconds: Int?
+    /// Phrases being made ready or played right now (the settings screen shows a spinner while there are any).
+    private(set) var activePhrases = 0
 
     var speaker = SileroVoice.defaultSpeaker
     var rate = 0.5
@@ -44,6 +48,7 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
     var isSpeaking: Bool { current != nil }
 
     var isReady: Bool { if case .ready = status { true } else { false } }
+    var isBusy: Bool { activePhrases > 0 }
 
     // MARK: - Finding Silero
 
@@ -96,6 +101,7 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
         do {
             try await helper.prepare()
             speakers = await helper.speakers
+            loadMilliseconds = await helper.loadMilliseconds
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -116,6 +122,8 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
         let prepared = SpeechText.forNeuralVoice(text)
         guard !prepared.isEmpty else { return }
         stop()
+        activePhrases += 1
+        defer { activePhrases -= 1 }
         let voice = speaker, speed = SileroVoice.Rate(speechRate: rate)
         let task = Task { @MainActor in
             let phrase = try await helper.synthesize(text: prepared, speaker: voice, rate: speed)

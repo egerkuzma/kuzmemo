@@ -66,6 +66,7 @@ struct SpeechSettingsTab: View {
                 HStack {
                     Button { preview() } label: { Label("Прослушать", systemImage: "play.fill") }
                     Button { env.voice.speech.stop() } label: { Label("Стоп", systemImage: "stop.fill") }
+                    if silero.isBusy || silero.isLoading { ProgressView().controlSize(.small) }
                     Spacer()
                     if env.voice.speech.muted { Hint("В этой сборке звук выключен (для автоматических проверок).") }
                 }
@@ -111,7 +112,8 @@ struct SpeechSettingsTab: View {
         case .unknown:
             Label("Проверяю…", systemImage: "hourglass").foregroundStyle(.secondary)
         case let .ready(found):
-            Label("Готов · \(found.source)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Label("Готов · \(found.source)" + (silero.loadMilliseconds.map { " · модель загружена за \(Self.seconds($0))" } ?? ""), systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
             Hint("Python: \(found.python.path)\nМодель: \(found.model.path)")
             Hint("Нейросеть загружается в память при записи и выгружается через 10 минут простоя. Если она не готова, фраза прозвучит системным голосом.")
         case let .unavailable(problem):
@@ -139,6 +141,10 @@ struct SpeechSettingsTab: View {
             }
             .disabled(!silero.isReady || silero.isLoading)
         }
+    }
+
+    private static func seconds(_ milliseconds: Int) -> String {
+        String(format: "%.1f с", Double(milliseconds) / 1000).replacingOccurrences(of: ".", with: ",")
     }
 
     /// What to run in the Terminal to set Silero up (the project folder is known from the build).
