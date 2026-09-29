@@ -4,16 +4,22 @@ make README pictures). Needs the dev app running (scripts/run_app.sh). It erases
 2026-09-28 14:30, seeds the demo week and the glossary, and leaves the interface in Russian.
 
     scripts/screenshots.py [output-folder] [--live]
+    scripts/screenshots.py --readme            the pictures of the README, English only, into docs/images
 
 The default folder is scripts/out/screenshots (git-ignored). Renders are drawn offscreen and never show a window;
 --live also opens the real settings window (behind other windows, without activating the app) and captures it with
-its title bar.
+its title bar. --readme takes the curated set (the calendar and a few settings pages as real windows at 2x, the cards
+drawn offscreen; all dark, and macOS has to be in dark mode while it runs), and
+finishes them with scripts/frame_screenshots.swift (rounded corners and a shadow). The real windows come to the front
+for a moment while they are captured.
 """
 import http.client
 import json
 import os
 import socket
+import subprocess
 import sys
+import tempfile
 import time
 from urllib.parse import quote
 
@@ -27,7 +33,14 @@ GLOSSARY = [
     {"canonical": "Slack", "kind": "product", "aliases": ["слэк", "слак"], "spoken": "Слэк"},
     {"canonical": "Acme", "kind": "company", "aliases": ["акме"], "spoken": "Акме"},
 ]
-SERIES_TITLE = {"english": "Team standup", "russian": "Планёрка"}
+# The words of the README's glossary picture: names that speech recognition tends to get wrong in English.
+GLOSSARY_EN = [
+    {"canonical": "GitHub", "kind": "product", "aliases": ["git hub", "get hub"], "spoken": "Git Hub"},
+    {"canonical": "Kubernetes", "kind": "product", "aliases": ["cooper netties", "kuber netties"], "spoken": "Koo-ber-net-eez"},
+    {"canonical": "Notion", "kind": "product", "aliases": ["notion", "no shun"]},
+    {"canonical": "Slack", "kind": "product", "aliases": ["slak"]},
+]
+SERIES_TITLE ={"english": "Team standup", "russian": "Планёрка"}
 
 
 class Unix(http.client.HTTPConnection):
@@ -63,7 +76,60 @@ def capture(folder, name, path):
     print(f"  {os.path.relpath(target, ROOT)}  ({len(data) // 1024} KB)")
 
 
+def readme():
+    """The README pictures: English interface, the demo week, framed like macOS shows windows."""
+    out = os.path.join(ROOT, "docs", "images")
+    raw = tempfile.mkdtemp(prefix="kuzmemo-shots-")
+    jobs = []
+
+    def grab(name, path, radius, margin=64):
+        before = len(saved)
+        capture(raw, name, path)
+        if len(saved) > before:
+            jobs.append({"input": os.path.join(raw, f"{name}.png"), "output": os.path.join(out, f"{name}.png"), "radius": radius, "margin": margin})
+
+    call("POST", "/clock", {"local": "2026-09-28 14:30"})
+    call("POST", "/settings", {"interface": {"language": "english"}})
+    call("POST", "/glossary", {"terms": GLOSSARY_EN})
+    call("POST", "/settings", {"recognition": {"language": "en"}})
+    call("POST", "/db/reset")
+    call("POST", "/dev/seed")
+    try:
+        # The real windows are captured as they are, in the appearance macOS is in now, which has to be dark (forcing
+        # another appearance on a window draws a mixture of both). The cards are drawn offscreen, dark as well.
+        call("POST", "/ui", {"mode": "day", "date": "2026-09-28"})
+        call("POST", "/window/open?name=main")
+        time.sleep(1.0)
+        grab("calendar", "/render?view=live&name=main&chrome=1&front=1&scale=2", radius=48)
+        call("POST", "/window/close?name=main")
+        # a few settings pages (the General and Recording tabs show a file path and a device name: left out)
+        call("POST", "/window/open?name=settings")
+        time.sleep(1.0)
+        for tab in ("notifications", "glossary"):
+            call("POST", "/ui", {"settingsTab": tab})
+            time.sleep(0.6)
+            grab(f"settings-{tab}", "/render?view=live&name=settings&chrome=1&front=1&scale=2", radius=48)
+        call("POST", "/window/close?name=settings")
+        # the cards that appear while talking, the menu-bar popover and the entry editor (drawn offscreen)
+        for state in ("recording", "result", "question"):
+            grab(f"hud-{state}", f"/render?view=hud&state={state}&scheme=dark", radius=40, margin=48)
+        grab("popover", "/render?view=popover&scheme=dark", radius=36)
+        grab("editor", "/render?view=editor&title=Team standup&scheme=dark", radius=36)
+    finally:
+        call("POST", "/settings", {"interface": {"language": "russian"}, "recognition": {"language": "ru"}})
+    spec =os.path.join(raw, "jobs.json")
+    with open(spec, "w") as handle:
+        json.dump(jobs, handle)
+    subprocess.run(["swift", os.path.join(ROOT, "scripts", "frame_screenshots.swift"), spec], check=True, cwd=ROOT)
+    print(f"\n{len(jobs)} pictures in {os.path.relpath(out, ROOT)}")
+
+
 def main():
+    if "--readme" in sys.argv:
+        if not os.path.exists(SOCK):
+            sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
+        readme()
+        return
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     live = "--live" in sys.argv
     out = os.path.abspath(args[0]) if args else os.path.join(ROOT, "scripts", "out", "screenshots")
