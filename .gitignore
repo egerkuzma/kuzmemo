@@ -32,3 +32,6 @@ scripts/fixtures/out/
 __pycache__/
 *.pyc
 
+
+# Screenshots and other generated output of scripts
+scripts/out/

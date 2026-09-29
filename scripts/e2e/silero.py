@@ -60,6 +60,7 @@ def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
     call("POST", "/settings", {"speech": DEFAULT_SPEECH})
+    call("POST", "/settings", {"interface": {"language": "russian"}})  # the checks read Russian texts and the fixtures speak Russian
     try:
         run()
     finally:
@@ -103,7 +104,7 @@ def run():
     check("an empty phrase is refused", status == 400, str(status))
 
     print("the answer path")
-    wav = os.path.join(ROOT, "scripts", "fixtures", "out", "synth", "03.wav")  # «Скажи что на сегодня»
+    wav = os.path.join(ROOT, "scripts", "fixtures", "out", "synth", "03.wav")  # "Скажи что на сегодня" ("tell me what is on today")
     if os.path.exists(wav):
         r = call("POST", "/record/inject-audio", {"path": wav})
         check("an answer goes through the same voice (muted here, so it is only logged)", r.get("answeredLocally") is True and len(r.get("spoken", [])) == 1

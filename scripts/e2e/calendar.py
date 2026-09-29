@@ -75,6 +75,7 @@ def main():
     print("demo data")
     call("POST", "/db/reset")
     call("POST", "/settings", DEFAULT_SETTINGS)
+    call("POST", "/settings", {"interface": {"language": "russian"}})  # the checks read Russian texts and the fixtures speak Russian
     call("POST", "/clock", {"local": "2026-09-28 14:30"})
     check("seeding works in the dev bundle", call("POST", "/dev/seed").get("seeded") is True)
 
@@ -118,6 +119,24 @@ def main():
     closed = call("POST", "/window/close")
     time.sleep(0.3)
     check("it closes", call("GET", "/window").get("open") is False, str(closed))
+
+    print("the same week in English")
+    english = call("POST", "/settings", {"interface": {"language": "english"}})["interface"]
+    check("the interface can be switched", english["language"] == "en", str(english))
+    call("POST", "/db/reset")
+    call("POST", "/dev/seed")
+    state = call("POST", "/ui", {"mode": "day", "date": "2026-09-28"})
+    check("the demo week has the same shape", state["dayEntries"] == 6 and state["overdue"] == 2 and state["inbox"] == 4, str(state))
+    check("search finds word forms in English too", call("POST", "/ui", {"search": "Dmitry"})["search"] == 2)
+    call("POST", "/ui", {"search": "", "mode": "day", "date": "2026-09-28"})
+    for name, query in [
+        ("the month and day", "view=main&width=1000&height=660"),
+        ("the editor for a series", "view=editor&title=Team standup"),
+        ("the HUD with a result", "view=hud&state=result"),
+    ]:
+        ok, size = png(f"/render?{query}")
+        check(f"{name} renders in English", ok and size > 10_000, f"{size} bytes")  # a HUD card is a small picture
+    call("POST", "/settings", {"interface": {"language": "russian"}})
 
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)

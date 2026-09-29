@@ -50,6 +50,14 @@ DEFAULT_SETTINGS = {
     },
 }
 
+# A new install starts with an empty glossary, so the run brings the words it needs.
+GLOSSARY = [
+    {"canonical": "Notion", "kind": "product", "aliases": ["нотион", "ношн"], "spoken": "Ношн"},
+    {"canonical": "GitHub", "kind": "product", "aliases": ["гит хаб", "гитхаб"], "spoken": "Гит хаб"},
+    {"canonical": "Slack", "kind": "product", "aliases": ["слэк", "слак"], "spoken": "Слэк"},
+    {"canonical": "Acme", "kind": "company", "aliases": ["акме"], "spoken": "Акме"},
+]
+
 passed = failed = 0
 
 
@@ -90,6 +98,8 @@ def main():
     print("setup")
     call("POST", "/db/reset")
     call("POST", "/settings", DEFAULT_SETTINGS)
+    call("POST", "/settings", {"interface": {"language": "russian"}})  # the checks read Russian texts and the fixtures speak Russian
+    call("POST", "/glossary", {"terms": GLOSSARY})
     call("POST", "/clock", {"local": "2026-09-28 14:30"})
     call("POST", "/speech/mute", {"muted": True})
     deadline = time.time() + 240
@@ -107,7 +117,7 @@ def main():
     check("recognition is not stuck (the first one after a launch may take a few seconds)", r["sttMs"] < 10000, f"sttMs={r['sttMs']}")
 
     r = call("POST", "/record/inject-audio", {"path": wav("03")})
-    check("«скажи что на сегодня» is answered locally, without Claude", r["answeredLocally"] and r["outcome"]["kind"] == "answered" and "llm" not in r["outcome"])
+    check("\"tell me what is on today\" is answered locally, without Claude", r["answeredLocally"] and r["outcome"]["kind"] == "answered" and "llm" not in r["outcome"])
     check("…and read aloud (muted, but logged)", len(r["spoken"]) == 1 and "сегодня" in r["spoken"][0], str(r["spoken"]))
 
     r = call("POST", "/record/inject-audio", {"path": wav("04")})
@@ -129,7 +139,7 @@ def main():
     wait_idle()
     check("it stops by itself after the silence that follows the phrase", time.time() - started > 4.5, f"{time.time() - started:.1f}s")
     agenda = call("GET", "/agenda?from=2026-09-29&to=2026-09-29")["entries"]
-    check("«завтра в одиннадцать созвон» lands at 11:00", any(e["time"] == "11:00" and e["kind"] == "event" for e in agenda), str(agenda))
+    check("\"tomorrow at eleven, a call\" lands at 11:00", any(e["time"] == "11:00" and e["kind"] == "event" for e in agenda), str(agenda))
 
     call("POST", "/voice/input", {"path": wav("10")})
     call("POST", "/hotkey/down"); time.sleep(3.6)
@@ -139,7 +149,7 @@ def main():
     wait_idle()
     check("push-to-talk stops on release and is processed", time.time() - released < 12, f"{time.time() - released:.1f}s")
     agenda = call("GET", "/agenda?from=2026-09-28&to=2026-09-28")["entries"]
-    check("«через полчаса» becomes today at 15:00", any(e["time"] == "15:00" for e in agenda), str(agenda))
+    check("\"in half an hour\" becomes today at 15:00", any(e["time"] == "15:00" for e in agenda), str(agenda))
 
     n = counts()["memos"]
     call("POST", "/voice/input", {"path": wav("14")})
@@ -169,14 +179,14 @@ def main():
     ask()
     wait_idle()
     agenda = call("GET", "/agenda?from=2026-10-02&to=2026-10-02")["entries"]
-    check("«эту пятницу, второго октября» completes the phrase (event at 15:00 on 2 Oct)",
+    check("\"this Friday, the second of October\" completes the phrase (event at 15:00 on 2 Oct)",
           any(e["time"] == "15:00" and e["date"] == "2026-10-02" for e in agenda), str(agenda))
     check("…and the question is closed", "question" not in call("GET", "/voice"))
 
     # an option tapped in the HUD
     q = ask()
     r = call("POST", "/answer", {"option": q["options"][1]})
-    check("choosing «пятница следующей недели» books 9 Oct", r["kind"] == "applied" and r["changes"][0]["date"] == "2026-10-09", json.dumps(r, ensure_ascii=False)[:300])
+    check("choosing \"Friday of next week\" books 9 Oct", r["kind"] == "applied" and r["changes"][0]["date"] == "2026-10-09", json.dumps(r, ensure_ascii=False)[:300])
 
     # a typed answer
     ask()
@@ -188,7 +198,7 @@ def main():
     call("POST", "/voice/input", {"path": wav("a3")})
     ask()
     wait_idle()
-    check("«нет, не надо, отмена» saves nothing", counts()["items"] == items and "question" not in call("GET", "/voice"))
+    check("\"no, never mind, cancel\" saves nothing", counts()["items"] == items and "question" not in call("GET", "/voice"))
 
     # no answer at all: the words are kept as a note
     call("POST", "/voice/input", {"path": wav("silence3")})

@@ -82,6 +82,7 @@ def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
     call("POST", "/settings", DEFAULT_SETTINGS)
+    call("POST", "/settings", {"interface": {"language": "russian"}})  # the checks read Russian texts and the fixtures speak Russian
     try:
         run()
     finally:
@@ -105,7 +106,7 @@ def run():
           of(state, "Встреча с Дмитрием") == [("2026-09-30 14:55", "headsUp", 5), ("2026-09-30 15:00", "atTime", 0)], str(of(state, "Встреча с Дмитрием")))
     check("a timed task alerts once, at its time", of(state, "Ответить клиенту") == [("2026-09-29 16:00", "atTime", 0)], str(of(state, "Ответить клиенту")))
     check("an entry with a day but no time is announced at 09:00", of(state, "Сказать Дмитрию") == [("2026-10-01 09:00", "allDay", 0)], str(of(state, "Сказать Дмитрию")))
-    check("a finished entry is not announced", of(state, "Проверить баланс") == [])
+    check("a finished entry is not announced", of(state, "Проверить подписку") == [])
     check("an overdue entry is not announced", of(state, "Отправить счёт") == [])
     check("a repeating entry is announced on each day", len(of(state, "Проверить статистику")) >= 7, str(of(state, "Проверить статистику")))
     times = [a["fireAt"] for a in state["alerts"]]
@@ -114,6 +115,10 @@ def run():
     check("a request is built for each alert", first["trigger"] == first["fireAt"] + ":00" and first["category"] == "kuzmemo.entry"
           and first["soundFile"] == "System-Hero.aiff", json.dumps(first, ensure_ascii=False))
     check("its text reads well", first["kindText"] == "В назначенное время" and first["when"] == "Сегодня, 16:00", json.dumps(first, ensure_ascii=False))
+    call("POST", "/settings", {"interface": {"language": "english"}})
+    english = call("POST", "/notifications/sync?limit=60")["alerts"][0]
+    check("…and in English", english["kindText"] == "At the scheduled time" and english["when"] == "Today, 16:00", json.dumps(english, ensure_ascii=False))
+    call("POST", "/settings", {"interface": {"language": "russian"}})
 
     print("how early")
     state = plan(eventLeads=[15, 5, 0])

@@ -83,7 +83,7 @@ public func tr(_ key: String, _ arguments: String...) -> String {
 }
 
 /// The same for placeholders that hold whole numbers (`%1$lld`, `%2$lld` …). At least one number is required, which is
-/// what keeps `tr("text")` from being ambiguous between the two forms.
+/// what keeps a plain call with only a key from being ambiguous between the two forms.
 public func tr(_ key: String, numbers first: Int, _ more: Int...) -> String {
     let language = Localization.current
     let format = Localization.text(key, in: language)

@@ -103,13 +103,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleDevelopmentRegion</key><string>ru</string>
-    <key>CFBundleLocalizations</key><array><string>ru</string><string>en</string></array>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>ru</string></array>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
     <key>LSMultipleInstancesProhibited</key><true/>
     <key>NSSupportsSuddenTermination</key><false/>
-    <key>NSMicrophoneUsageDescription</key><string>Kuzmemo записывает вашу речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Kuzmemo records your speech to turn it into calendar entries. The audio is processed on this Mac and deleted as soon as it has been recognized.</string>
     <key>KuzmemoControlEnabled</key><$CONTROL/>
     <key>KuzmemoAutomation</key><$AUTOMATION/>
     <key>KuzmemoGitCommit</key><string>$GIT_HASH</string>
@@ -117,6 +117,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# The system permission prompt follows the language of macOS, so the usage text is translated here.
+mkdir -p "$APP/Contents/Resources/en.lproj" "$APP/Contents/Resources/ru.lproj"
+cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<'STR'
+"NSMicrophoneUsageDescription" = "Kuzmemo records your speech to turn it into calendar entries. The audio is processed on this Mac and deleted as soon as it has been recognized.";
+STR
+cat > "$APP/Contents/Resources/ru.lproj/InfoPlist.strings" <<'STR'
+"NSMicrophoneUsageDescription" = "Kuzmemo записывает вашу речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.";
+STR
 
 cat > "$ROOT/.build/app/Kuzmemo.entitlements" <<ENT
 <?xml version="1.0" encoding="UTF-8"?>

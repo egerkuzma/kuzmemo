@@ -47,4 +47,4 @@ import sys, torch
 model = torch.package.PackageImporter(sys.argv[1]).load_pickle("tts_models", "model")
 print("ok: torch", torch.__version__, "voices", [name for name in model.speakers if name != "random"])
 PY
-echo "done: choose Silero in Kuzmemo → Настройки → Озвучка"
+echo "done: choose Silero in Kuzmemo → Settings → Speech (Silero speaks Russian only)"

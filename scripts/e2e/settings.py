@@ -66,10 +66,12 @@ def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
     call("POST", "/settings", DEFAULT_SETTINGS)
+    call("POST", "/settings", {"interface": {"language": "russian"}})
     try:
         run()
     finally:
         call("POST", "/settings", DEFAULT_SETTINGS)  # never leave odd values behind for the next run
+        call("POST", "/settings", {"interface": {"language": "russian"}})
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
@@ -100,16 +102,29 @@ def run():
     check("they can be put back", restored["stored"]["speech"]["rate"] == 0.5 and restored["stored"]["recognition"]["language"] == "ru"
           and restored["stored"]["recording"]["maxSeconds"] == 120)
 
+    print("the interface language")
+    check("the preference and the language in use are reported", set(before["interface"]) == {"preference", "language"}, json.dumps(before["interface"]))
+    english = call("POST", "/settings", {"interface": {"language": "english"}})["interface"]
+    check("English can be chosen", english == {"preference": "english", "language": "en"}, str(english))
+    check("an unknown language is rejected", "error" in call("POST", "/settings", {"interface": {"language": "klingon"}}))
+    russian = call("POST", "/settings", {"interface": {"language": "russian"}})["interface"]
+    check("and Russian again", russian == {"preference": "russian", "language": "ru"}, str(russian))
+
     print("the window")
     opened = call("POST", "/window/open?name=settings")
     check("it opens without taking the screen", opened.get("open") is True and opened.get("active") is False and opened.get("key") is False, str(opened))
-    for tab in ("general", "recording", "recognition", "speech", "notifications", "glossary"):
-        call("POST", "/ui", {"settingsTab": tab})
-        time.sleep(0.3)
-        status, data = call("GET", f"/render?view=settings&tab={tab}", raw=True)
-        check(f"the {tab} tab renders", status == 200 and data[:4] == b"\x89PNG" and len(data) > 30_000, f"{status} {len(data)}")
-        status, live = call("GET", "/render?view=live&name=settings", raw=True)
-        check(f"…and is drawn in the real window ({tab})", status == 200 and len(live) > 30_000, f"{status} {len(live)}")
+    for language, title in (("russian", "Настройки"), ("english", "Settings")):
+        call("POST", "/settings", {"interface": {"language": language}})
+        time.sleep(0.4)
+        check(f"the window title follows the language ({language})", call("GET", "/window?name=settings").get("title") == title, str(call("GET", "/window?name=settings")))
+        for tab in ("general", "recording", "recognition", "speech", "notifications", "glossary"):
+            call("POST", "/ui", {"settingsTab": tab})
+            time.sleep(0.3)
+            status, data = call("GET", f"/render?view=settings&tab={tab}", raw=True)
+            check(f"the {tab} tab renders ({language})", status == 200 and data[:4] == b"\x89PNG" and len(data) > 30_000, f"{status} {len(data)}")
+            status, live = call("GET", "/render?view=live&name=settings", raw=True)
+            check(f"…and is drawn in the real window ({tab}, {language})", status == 200 and len(live) > 30_000, f"{status} {len(live)}")
+    call("POST", "/settings", {"interface": {"language": "russian"}})
     call("POST", "/window/close?name=settings")
 
     time.sleep(0.3)
@@ -119,7 +134,7 @@ def run():
     print("the menu-bar popover")
     wiring = call("POST", "/popover/wiring")
     check("a window that hosts the popover is found by the app", wiring.get("registered") is True and wiring.get("visibleBefore") is True, json.dumps(wiring))
-    check("…and «Открыть» / «Настройки…» can close it", wiring.get("visibleAfterClose") is False, json.dumps(wiring))
+    check("…and “Open” / “Settings…” can close it", wiring.get("visibleAfterClose") is False, json.dumps(wiring))
 
 
 main()
