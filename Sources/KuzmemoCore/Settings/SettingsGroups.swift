@@ -36,13 +36,15 @@ public struct SpeechSettings: SettingsGroup {
     public var sileroSpeaker = SileroVoice.defaultSpeaker
     /// A Python interpreter with torch chosen by hand; `nil` looks in the usual places.
     public var sileroPython: String?
-    /// An `AVSpeechSynthesisVoice` identifier; `nil` picks the best installed Russian voice.
+    /// An `AVSpeechSynthesisVoice` identifier for Russian speech; `nil` picks the best installed Russian voice.
     public var voiceIdentifier: String?
+    /// The same for English speech.
+    public var englishVoiceIdentifier: String?
     /// The speaking rate, shared by both engines; 0.5 is the system default.
     public var rate = 0.5
     /// Read answers and questions aloud.
     public var speakAnswers = true
-    /// Also say what was saved ("Записал: …").
+    /// Also say what was saved ("Saved: …").
     public var speakConfirmations = false
     /// A short sound when something was saved.
     public var confirmationSound = true
@@ -50,7 +52,7 @@ public struct SpeechSettings: SettingsGroup {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case engine, sileroSpeaker, sileroPython, voiceIdentifier, rate, speakAnswers, speakConfirmations, confirmationSound
+        case engine, sileroSpeaker, sileroPython, voiceIdentifier, englishVoiceIdentifier, rate, speakAnswers, speakConfirmations, confirmationSound
     }
 
     public init(from decoder: any Decoder) throws {
@@ -61,6 +63,7 @@ public struct SpeechSettings: SettingsGroup {
         sileroSpeaker = speaker.flatMap { $0.isEmpty ? nil : $0 } ?? sileroSpeaker
         sileroPython = try c.decodeIfPresent(String.self, forKey: .sileroPython).flatMap { $0.isEmpty ? nil : $0 }
         voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier)
+        englishVoiceIdentifier = try c.decodeIfPresent(String.self, forKey: .englishVoiceIdentifier)
         rate = min(max(try c.decodeIfPresent(Double.self, forKey: .rate) ?? rate, 0.2), 0.7)
         speakAnswers = try c.decodeIfPresent(Bool.self, forKey: .speakAnswers) ?? speakAnswers
         speakConfirmations = try c.decodeIfPresent(Bool.self, forKey: .speakConfirmations) ?? speakConfirmations

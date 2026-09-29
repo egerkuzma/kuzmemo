@@ -28,10 +28,10 @@ public enum SileroLocator {
         /// What to tell the person.
         public var message: String {
             switch self {
-            case .noPython: "Не найден Python с torch."
-            case let .pythonMissing(path): "Указанный Python не найден: \(path)"
-            case let .noTorch(python): "В этом окружении нет torch: \(python.path)"
-            case .noModel: "Не найден файл модели \(SileroLocator.modelFileName) (около 40 МБ)."
+            case .noPython: tr("No Python with torch was found.")
+            case let .pythonMissing(path): tr("The chosen Python was not found: %1$@", path)
+            case let .noTorch(python): tr("This environment has no torch: %1$@", python.path)
+            case .noModel: tr("The model file %1$@ (about 40 MB) was not found.", SileroLocator.modelFileName)
             }
         }
     }
@@ -51,9 +51,9 @@ public enum SileroLocator {
         if let override, !override.trimmingCharacters(in: .whitespaces).isEmpty {
             let url = URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
             guard fileManager.isExecutableFile(atPath: url.path) else { return .failure(.pythonMissing(override)) }
-            candidates = [(url, "указан вручную")]
+            candidates = [(url, tr("chosen by hand"))]
         } else {
-            candidates = [(ownDirectory(home: home).appendingPathComponent("venv/bin/python"), "окружение Kuzmemo")]
+            candidates = [(ownDirectory(home: home).appendingPathComponent("venv/bin/python"), tr("Kuzmemo’s own environment"))]
         }
         var withoutTorch: URL?
         for candidate in candidates where fileManager.isExecutableFile(atPath: candidate.python.path) {

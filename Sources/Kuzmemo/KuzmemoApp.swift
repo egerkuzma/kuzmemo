@@ -8,38 +8,39 @@ struct KuzmemoApp: App {
     @State private var env = AppEnvironment.shared
 
     var body: some Scene {
+        let _ = env.language // the scene's texts (menu titles, window titles) are built again when the language changes
         MenuBarExtra {
-            PopoverView(env: env)
+            PopoverView(env: env).id(env.language)
         } label: {
             MenuBarLabel(env: env)
         }
         .menuBarExtraStyle(.window)
 
         Window("Kuzmemo", id: "main") {
-            MainWindowView(env: env)
+            MainWindowView(env: env).id(env.language)
         }
         .defaultSize(width: 1000, height: 660)
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("Настройки…") { env.showSettings() }.keyboardShortcut(",", modifiers: .command)
+                Button(tr("Settings…")) { env.showSettings() }.keyboardShortcut(",", modifiers: .command)
             }
-            CommandMenu("Календарь") {
-                Button("Сегодня") { env.calendar.goToToday() }.keyboardShortcut("t", modifiers: .command)
-                Button("Предыдущий месяц") { env.calendar.moveMonth(by: -1) }.keyboardShortcut(.leftArrow, modifiers: .command)
-                Button("Следующий месяц") { env.calendar.moveMonth(by: 1) }.keyboardShortcut(.rightArrow, modifiers: .command)
+            CommandMenu(tr("Calendar")) {
+                Button(tr("Today")) { env.calendar.goToToday() }.keyboardShortcut("t", modifiers: .command)
+                Button(tr("Previous month")) { env.calendar.moveMonth(by: -1) }.keyboardShortcut(.leftArrow, modifiers: .command)
+                Button(tr("Next month")) { env.calendar.moveMonth(by: 1) }.keyboardShortcut(.rightArrow, modifiers: .command)
                 Divider()
-                Button("Новая запись…") { env.newItem(on: env.calendar.mode == .day ? env.calendar.selectedDate : nil) }
+                Button(tr("New entry…")) { env.newItem(on: env.calendar.mode == .day ? env.calendar.selectedDate : nil) }
                     .keyboardShortcut("n", modifiers: .command)
-                Button("Найти") { env.focusSearch() }.keyboardShortcut("f", modifiers: .command)
+                Button(tr("Find")) { env.focusSearch() }.keyboardShortcut("f", modifiers: .command)
                 Divider()
-                Button("Входящие") { env.calendar.show(.inbox) }.keyboardShortcut("1", modifiers: .command)
-                Button("Повторяющиеся") { env.calendar.show(.recurring) }.keyboardShortcut("2", modifiers: .command)
+                Button(tr("Inbox")) { env.calendar.show(.inbox) }.keyboardShortcut("1", modifiers: .command)
+                Button(tr("Repeating")) { env.calendar.show(.recurring) }.keyboardShortcut("2", modifiers: .command)
             }
         }
 
         // A Window scene rather than the Settings scene: it can be opened from anywhere, including a toast.
-        Window("Настройки", id: "settings") {
-            SettingsView(env: env)
+        Window(tr("Settings"), id: "settings") {
+            SettingsView(env: env).id(env.language)
         }
         .windowResizability(.contentSize)
     }
@@ -68,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor static func updateActivationPolicy() {
         let hasRealWindow = NSApp.windows.contains {
-            $0.isVisible && $0.styleMask.contains(.titled) && ($0.title == "Kuzmemo" || $0.title == "Настройки")
+            $0.isVisible && AppWindow.isAppWindow($0)
         }
         NSApp.setActivationPolicy(hasRealWindow ? .regular : .accessory)
     }

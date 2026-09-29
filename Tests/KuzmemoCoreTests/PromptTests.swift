@@ -27,6 +27,7 @@ struct PromptBuilderTests {
         )
         let expected = """
         <now>Monday 2026-09-28 14:30 (Europe/Moscow, UTC+03:00)</now>
+        <language>Russian</language>
         <defaults>morning=09:00 day=13:00 evening=19:00 night=23:00; a reminder without a time fires at 09:00</defaults>
         <glossary>Notion (нотион, ношн)</glossary>
         <items>

@@ -1,4 +1,6 @@
 import Foundation
+import KuzmemoCore
+import WhisperKit
 
 /// A WhisperKit model the app can use, with the words the settings window shows for it.
 public struct ModelVariant: Identifiable, Equatable, Sendable {
@@ -11,27 +13,29 @@ public struct ModelVariant: Identifiable, Equatable, Sendable {
     public var tokenizerRepo: String
 }
 
-/// Which models exist, which are installed in the app's own folder, and how to install one from a copy that another
-/// app already downloaded (an APFS clone, so it takes no extra disk space).
+/// Which models exist, which are installed in the app's own folder, and how to install one: download it from Hugging
+/// Face, or, when another app already downloaded the same model, copy it (an APFS clone, so it takes no extra disk
+/// space).
 public enum ModelCatalog {
-    public static let variants: [ModelVariant] = [
+    public static var variants: [ModelVariant] { [
         ModelVariant(
             id: "openai_whisper-large-v3-v20240930_turbo", title: "Large v3 Turbo",
-            detail: "Быстрая и точная. Рекомендуется.", sizeMB: 1500, tokenizerRepo: "openai/whisper-large-v3"
+            detail: tr("Fast and accurate. Recommended."), sizeMB: 1500, tokenizerRepo: "openai/whisper-large-v3"
         ),
         ModelVariant(
             id: "openai_whisper-large-v3-v20240930", title: "Large v3",
-            detail: "Полная модель: максимум точности, но заметно медленнее.", sizeMB: 1500, tokenizerRepo: "openai/whisper-large-v3"
+            detail: tr("The full model: the most accurate, but noticeably slower."), sizeMB: 1500, tokenizerRepo: "openai/whisper-large-v3"
         ),
         ModelVariant(
             id: "openai_whisper-small", title: "Small",
-            detail: "Лёгкая и быстрая, но ошибается чаще.", sizeMB: 460, tokenizerRepo: "openai/whisper-small"
+            detail: tr("Light and fast, but makes more mistakes."), sizeMB: 460, tokenizerRepo: "openai/whisper-small"
         ),
-    ]
+    ] }
 
     public static func variant(id: String) -> ModelVariant? { variants.first { $0.id == id } }
 
-    /// `~/Documents/huggingface`, where other apps keep the models they downloaded. Read-only for us.
+    /// `~/Documents/huggingface`, where other apps keep the models they downloaded. Read-only for us; reading it makes
+    /// macOS ask for access to Documents the first time.
     public static var externalSource: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/huggingface", isDirectory: true)
     }
@@ -46,10 +50,17 @@ public enum ModelCatalog {
 
     private static let tokenizerFiles = ["config.json", "tokenizer.json", "tokenizer_config.json"]
 
-    /// Installed means the model folder and its tokenizer files are both in place.
+    /// The Core ML parts a model folder must hold (a download that stopped halfway lacks some of them).
+    private static let modelParts = ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "TextDecoder.mlmodelc"]
+
+    private static func isComplete(_ folder: URL) -> Bool {
+        modelParts.allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+    }
+
+    /// Installed means the model folder is complete and its tokenizer files are in place.
     public static func isInstalled(_ variant: ModelVariant, in root: URL = WhisperKitConfiguration.defaultModelsRoot) -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: modelFolder(variant, in: root).path) else { return false }
+        guard isComplete(modelFolder(variant, in: root)) else { return false }
         let tokenizer = tokenizerFolder(variant, in: root)
         return tokenizerFiles.allSatisfy { fm.fileExists(atPath: tokenizer.appendingPathComponent($0).path) }
     }
@@ -57,7 +68,7 @@ public enum ModelCatalog {
     /// Whether another app's copy of this model is there to install from.
     public static func canInstall(_ variant: ModelVariant, from source: URL = externalSource) -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: modelFolder(variant, in: source).path) else { return false }
+        guard isComplete(modelFolder(variant, in: source)) else { return false }
         let tokenizer = tokenizerFolder(variant, in: source)
         return tokenizerFiles.allSatisfy { fm.fileExists(atPath: tokenizer.appendingPathComponent($0).path) }
     }
@@ -65,6 +76,38 @@ public enum ModelCatalog {
     public enum InstallError: Error, Equatable {
         case sourceMissing(String)
         case copyFailed(String)
+        case downloadFailed(String)
+    }
+
+    /// Downloads the model and its tokenizer files from Hugging Face into `root`. `progress` receives 0...1. Safe to
+    /// repeat after a failure: what was fetched is kept and only the rest is downloaded.
+    public static func download(
+        _ variant: ModelVariant, into root: URL = WhisperKitConfiguration.defaultModelsRoot, progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            if !isComplete(modelFolder(variant, in: root)) {
+                _ = try await WhisperKit.download(variant: variant.id, downloadBase: root, progressCallback: { fetched in
+                    progress?(min(fetched.fractionCompleted, 1) * 0.98)
+                })
+            }
+            let tokenizerTarget = tokenizerFolder(variant, in: root)
+            try fm.createDirectory(at: tokenizerTarget, withIntermediateDirectories: true)
+            for name in tokenizerFiles where !fm.fileExists(atPath: tokenizerTarget.appendingPathComponent(name).path) {
+                guard let url = URL(string: "https://huggingface.co/\(variant.tokenizerRepo)/resolve/main/\(name)") else { continue }
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw InstallError.downloadFailed("\(url.lastPathComponent): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                }
+                try data.write(to: tokenizerTarget.appendingPathComponent(name), options: .atomic)
+            }
+            progress?(1)
+        } catch let error as InstallError {
+            throw error
+        } catch {
+            throw InstallError.downloadFailed(error.localizedDescription)
+        }
     }
 
     /// Clones the model and its tokenizer into `root` (like `cp -c -R`). Blocking: call it off the main thread.

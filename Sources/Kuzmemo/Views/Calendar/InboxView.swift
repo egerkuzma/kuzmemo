@@ -11,8 +11,8 @@ struct InboxView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Входящие").font(.title2.weight(.semibold))
-                Text("Записи без даты и фразы, которые не удалось обработать").font(.callout).foregroundStyle(.secondary)
+                Text(tr("Inbox")).font(.title2.weight(.semibold))
+                Text(tr("Undated entries and phrases that could not be processed")).font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
@@ -21,12 +21,12 @@ struct InboxView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if !calendar.failedMemos.isEmpty {
-                        title("Не обработано")
+                        title(tr("Not processed"))
                         ForEach(calendar.failedMemos) { MemoCard(memo: $0, env: env).padding(.horizontal, 16) }
                     }
-                    title("Без даты")
+                    title(tr("No date"))
                     if calendar.inboxItems.isEmpty {
-                        Text("Записей без даты нет").foregroundStyle(.secondary).padding(.horizontal, 16).padding(.bottom, 8)
+                        Text(tr("No undated entries")).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.bottom, 8)
                     } else {
                         ForEach(calendar.inboxItems) { item in
                             EntryRow(entry: AgendaEntry(item: item, date: calendar.today, time: nil, isDone: false, occurrenceDate: nil, wasMoved: false), env: env)
@@ -38,7 +38,7 @@ struct InboxView: View {
             Divider()
             HStack(spacing: 8) {
                 Image(systemName: "plus.circle.fill").foregroundStyle(.secondary)
-                TextField("Добавить запись без даты", text: $quickText).textFieldStyle(.plain).onSubmit {
+                TextField(tr("Add an undated entry"), text: $quickText).textFieldStyle(.plain).onSubmit {
                     let text = quickText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
                     quickText = ""
@@ -67,19 +67,19 @@ private struct MemoCard: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: memo.inputKind == .voice ? "mic.fill" : "keyboard").foregroundStyle(.orange).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: memo.transcriptRaw.map { "«\($0)»" } ?? "Запись без текста").font(.callout)
+                    Text(verbatim: memo.transcriptRaw.map { "«\($0)»" } ?? tr("Recording without text")).font(.callout)
                     Text(verbatim: MemoFailure.explanation(for: memo)).font(.caption).foregroundStyle(.secondary)
                     if let retry = retryText { Text(verbatim: retry).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer(minLength: 0)
             }
             if editing {
-                TextField("Исправьте текст", text: $text, axis: .vertical)
+                TextField(tr("Correct the text"), text: $text, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1 ... 4)
                 HStack {
-                    Button("Отмена") { editing = false }
-                    Button("Повторить с этим текстом") {
+                    Button(tr("Cancel")) { editing = false }
+                    Button(tr("Retry with this text")) {
                         editing = false
                         env.editAndRetry(memo: memo, text: text)
                     }
@@ -88,16 +88,16 @@ private struct MemoCard: View {
                 }
             } else {
                 HStack {
-                    Button("Повторить") { env.retry(memo: memo) }
+                    Button(tr("Retry")) { env.retry(memo: memo) }
                     if memo.transcriptRaw != nil {
-                        Button("Править текст…") {
+                        Button(tr("Edit text…")) {
                             text = memo.transcriptRaw ?? ""
                             editing = true
                         }
-                        Button("Сохранить как заметку") { env.keepAsNote(memo: memo) }
+                        Button(tr("Save as a note")) { env.keepAsNote(memo: memo) }
                     }
                     Spacer()
-                    Button("Отбросить", role: .destructive) { env.discard(memo: memo) }
+                    Button(tr("Discard"), role: .destructive) { env.discard(memo: memo) }
                 }
             }
         }
@@ -110,7 +110,7 @@ private struct MemoCard: View {
     private var retryText: String? {
         guard let next = memo.nextRetryAt else { return nil }
         let date = Date(timeIntervalSince1970: Double(next) / 1000)
-        let time = date.formatted(.dateTime.hour().minute().locale(DateBridge.russian))
-        return date > Date() ? "Повторю автоматически в \(time)" : "Скоро повторю автоматически"
+        let time = date.formatted(.dateTime.hour().minute().locale(DateBridge.locale))
+        return date > Date() ? tr("Will retry automatically at %1$@", "\(time)") : tr("Will retry automatically soon")
     }
 }

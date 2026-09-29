@@ -7,7 +7,7 @@ enum DateBridge {
     static var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
-        calendar.locale = Locale(identifier: "ru_RU")
+        calendar.locale = locale
         calendar.firstWeekday = 2
         return calendar
     }
@@ -31,5 +31,12 @@ enum DateBridge {
         return LocalTime(hour: parts.hour ?? 0, minute: parts.minute ?? 0) ?? LocalTime(hour: 0, minute: 0)!
     }
 
-    static let russian = Locale(identifier: "ru_RU")
+    /// The locale that pickers and formatted times use: the interface language's, with a Monday-first week and 24-hour
+    /// times like the rest of the app (which is why English is British English here).
+    static var locale: Locale {
+        switch Localization.current {
+        case .russian: Locale(identifier: "ru_RU")
+        case .english: Locale(identifier: "en_GB")
+        }
+    }
 }

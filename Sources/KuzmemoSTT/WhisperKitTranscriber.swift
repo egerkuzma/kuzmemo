@@ -29,7 +29,7 @@ public struct WhisperKitConfiguration: Sendable {
 
     public static let defaultVariant = "openai_whisper-large-v3-v20240930_turbo"
 
-    /// `~/Library/Application Support/Kuzmemo/huggingface`, the folder `scripts/install_models.sh` fills.
+    /// `~/Library/Application Support/Kuzmemo/huggingface`, the folder the model installer (Settings → Recognition) fills.
     public static var defaultModelsRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Kuzmemo/huggingface", isDirectory: true)

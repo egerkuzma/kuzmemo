@@ -1,15 +1,17 @@
 import Foundation
 
 /// Text made ready for a neural voice. Silero reads Cyrillic words only: digits, Latin letters and most symbols are
-/// silently skipped ("Встреча с Notion в 15:00." would come out as "Встреча с в"). So numbers, times, percentages,
-/// currencies and dates are spelled out, Latin words are transliterated (acronyms are spelled letter by letter) and
-/// symbols that nobody pronounces are dropped. The system voice reads all of this by itself and does not need it.
+/// silently skipped (the Russian "Встреча с Notion в 15:00." would come out as "Встреча с в", "Meeting with at"). So
+/// numbers, times, percentages, currencies and dates are spelled out, Latin words are transliterated (acronyms are
+/// spelled letter by letter) and symbols that nobody pronounces are dropped. The system voice reads all of this by
+/// itself and does not need it.
 public enum SpeechText {
     public static func forNeuralVoice(_ text: String) -> String {
         var result = text
         result = result.replacingMatches(#"https?://\S+|www\.\S+"#) { _, _ in "ссылка" }
         result = result.replacingMatches(#"\bт\.\s?е\."#) { _, _ in "то есть" }
         result = result.replacingMatches(#"\bт\.\s?д\."#) { _, _ in "и так далее" }
+        result = separateLatinFromDigits(result)
         result = spellTimes(result)
         result = spellMoneyAndPercent(result)
         result = spellDates(result)
@@ -26,14 +28,20 @@ public enum SpeechText {
         result = result.replacingMatches(#"[ \t\x{00A0}]+"#) { _, _ in " " }
         result = result.replacingMatches(#"\s+([,.!?;:…])"#) { m, s in s.group(1, of: m) }
         result = result.replacingMatches(#",\s*,"#) { _, _ in "," }
-        // a bracket that ends right before, or right after, a full stop leaves no stray comma: "(срочно!)", "(в банк)."
+        // a bracket that ends right before, or right after, a full stop leaves no stray comma: "(срочно!)" ("(urgent!)"), "(в банк)." ("(to the bank).")
         result = result.replacingMatches(#"([.!?…;:]),"#) { match, source in source.group(1, of: match) }
         result = result.replacingMatches(#",\s*([.!?…;:])"#) { match, source in source.group(1, of: match) }
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         return result.replacingMatches(#"[,;:]+$"#) { _, _ in "" }
     }
 
-    // MARK: - Times: 15:30 → "пятнадцать тридцать", 10:00 → "десять часов"
+    /// "Q4" and "3D" are two words to a voice: a space goes where a Latin letter touches a digit, so the number and the
+    /// letter name do not run together ("кьючетыре").
+    static func separateLatinFromDigits(_ text: String) -> String {
+        text.replacingMatches(#"(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])"#) { _, _ in " " }
+    }
+
+    // MARK: - Times: 15:30 → "пятнадцать тридцать" (fifteen thirty), 10:00 → "десять часов" (ten o'clock)
 
     static func spellTimes(_ text: String) -> String {
         text.replacingMatches(#"(?<![\d:.,])(\d{1,2}):(\d{2})(?![\d:])"#) { match, source in
@@ -80,7 +88,8 @@ public enum SpeechText {
         ("млрд", ("миллиард", "миллиарда", "миллиардов")), ("шт", ("штука", "штуки", "штук")),
     ]
 
-    /// "340" + dollars → "триста сорок долларов"; "3,5" + percent → "три запятая пять процента".
+    /// "340" + dollars → "триста сорок долларов" (three hundred forty dollars); "3,5" + percent → "три запятая пять
+    /// процента" (three point five percent).
     private static func words(_ number: String, unit: (String, String, String)) -> String {
         let parts = number.replacingOccurrences(of: ",", with: ".").split(separator: ".", omittingEmptySubsequences: false).map(String.init)
         guard let whole = Int(parts[0]) else { return number }
@@ -98,7 +107,7 @@ public enum SpeechText {
         return (zeros + [RussianNumberWords.cardinal(value)]).joined(separator: " ")
     }
 
-    // MARK: - Dates: "25 сентября" → "двадцать пятого сентября", "25 числа", "25-го"
+    // MARK: - Dates: "25 сентября" → "двадцать пятого сентября" (the twenty-fifth of September), "25 числа", "25-го"
 
     private static let monthsGenitive = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря"
 
@@ -130,7 +139,8 @@ public enum SpeechText {
         }
     }
 
-    /// "1 минута" → одна, "2 недели" → две, "1 окно" → одно: read from the ending of the word that follows.
+    /// The Russian numerals one and two have genders: "1 минута" → одна, "2 недели" → две, "1 окно" → одно. The gender is
+    /// read from the ending of the word that follows.
     private static func gender(for value: Int, following word: String) -> RussianNumberWords.Gender {
         guard let last = word.lowercased().last else { return .masculine }
         if value % 10 == 1, value % 100 != 11 {
@@ -160,7 +170,7 @@ public enum SpeechText {
         "u": "ю", "v": "ви", "w": "дабл ю", "x": "экс", "y": "уай", "z": "зед",
     ]
 
-    /// A rough English-to-Russian reading: good enough to be understood, not to be correct ("figma" → "фигма").
+    /// A rough English-to-Russian reading: good enough to be understood, not to be correct ("notion" → "нотион").
     /// Brand names should have a spoken form in the glossary; this is the fallback for everything else.
     static func transliterate(_ word: String) -> String {
         let pairs: [(String, String)] = [

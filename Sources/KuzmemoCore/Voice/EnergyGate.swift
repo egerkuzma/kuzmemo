@@ -1,7 +1,7 @@
 import Foundation
 
 /// Decides whether a recording contains speech at all, and trims the silence around it, before any audio
-/// reaches the recognizer. Whisper hallucinates confident phrases ("Продолжение следует…") on silence and
+/// reaches the recognizer. Whisper hallucinates confident phrases ("Продолжение следует…", "To be continued…") on silence and
 /// noise and its own no-speech probability does not help, so this gate runs first.
 public struct EnergyGate: Sendable {
     public struct Analysis: Equatable, Sendable {

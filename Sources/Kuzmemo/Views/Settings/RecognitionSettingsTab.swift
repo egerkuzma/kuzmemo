@@ -7,54 +7,58 @@ struct RecognitionSettingsTab: View {
     let env: AppEnvironment
     @State private var installed = RecognitionSettingsTab.installedNow()
     @State private var installing: String?
+    /// How far a download has got (0...1); `nil` while a copy is made or before the first bytes arrive.
+    @State private var progress: Double?
+    @State private var copying = false
     @State private var installError: String?
     @State private var tester = RecognitionTester()
 
     var body: some View {
         @Bindable var settings = env.settings
         Form {
-            Section("Модель распознавания речи") {
+            Section(tr("Speech recognition model")) {
                 ForEach(ModelCatalog.variants) { variant in
                     ModelRow(
                         variant: variant, selected: settings.recognition.modelVariant == variant.id,
-                        installed: installed.contains(variant.id), canInstall: ModelCatalog.canInstall(variant),
-                        installing: installing == variant.id,
+                        installed: installed.contains(variant.id), canCopy: ModelCatalog.canInstall(variant),
+                        installing: installing == variant.id, copying: copying, progress: progress,
                         select: { settings.recognition.modelVariant = variant.id },
                         install: { install(variant) }
                     )
                 }
-                LabeledContent("Сейчас") { Text(verbatim: env.voice.modelSummary).foregroundStyle(.secondary) }
+                LabeledContent(tr("Current")) { Text(verbatim: env.voice.modelSummary).foregroundStyle(.secondary) }
                 if let installError { Text(verbatim: installError).font(.caption).foregroundStyle(.red) }
-                Hint("Первая загрузка новой модели на этом Mac занимает до пары минут (Core ML готовит её один раз), потом около секунды. Устанавливается копированием из папки «Документы/huggingface»: macOS один раз спросит доступ к «Документам».")
+                Hint(tr("A model is downloaded from Hugging Face the first time (or copied, when another app already has it in Documents/huggingface). The first load of a new model on this Mac takes up to a couple of minutes (Core ML prepares it once), then about a second."))
             }
-            Section("Проверка") {
+            Section(tr("Try it")) {
                 HStack {
-                    Button { Task { await tester.run(env: env) } } label: { Label("Проверить микрофон и распознавание", systemImage: "mic.fill") }
+                    Button { Task { await tester.run(env: env) } } label: { Label(tr("Test the microphone and recognition"), systemImage: "mic.fill") }
                         .disabled(tester.isBusy)
                     Spacer()
-                    Text("5 секунд").font(.caption).foregroundStyle(.secondary)
+                    Text(tr("5 seconds")).font(.caption).foregroundStyle(.secondary)
                 }
                 testOutput
             }
-            Section("Язык") {
-                Picker("Язык речи", selection: Binding(
+            Section(tr("Language")) {
+                Picker(tr("Speech language"), selection: Binding(
                     get: { settings.recognition.language ?? "auto" },
                     set: { settings.recognition.language = $0 == "auto" ? nil : $0 }
                 )) {
-                    Text("Русский").tag("ru")
-                    Text("Определять автоматически").tag("auto")
+                    Text(tr("Russian")).tag("ru")
+                    Text(tr("English")).tag("en")
+                    Text(tr("Detect automatically")).tag("auto")
                 }
-                Hint("Русский надёжнее: при автоопределении короткие фразы иногда принимаются за английские.")
+                Hint(tr("A fixed language is more reliable: with automatic detection short phrases are sometimes mistaken for another language."))
             }
-            Section("Память") {
-                Picker("Выгружать модель после простоя", selection: $settings.recognition.idleUnloadMinutes) {
-                    Text("5 минут").tag(5)
-                    Text("15 минут").tag(15)
-                    Text("30 минут").tag(30)
-                    Text("1 час").tag(60)
-                    Text("Никогда").tag(0)
+            Section(tr("Memory")) {
+                Picker(tr("Unload the model after being idle"), selection: $settings.recognition.idleUnloadMinutes) {
+                    Text(tr("5 minutes")).tag(5)
+                    Text(tr("15 minutes")).tag(15)
+                    Text(tr("30 minutes")).tag(30)
+                    Text(tr("1 hour")).tag(60)
+                    Text(tr("Never")).tag(0)
                 }
-                Hint("Загруженная модель занимает около 1,5 ГБ памяти. Следующая запись после выгрузки начнётся как обычно: модель загрузится, пока вы говорите.")
+                Hint(tr("A loaded model takes about 1.5 GB of memory. After it is unloaded the next recording starts as usual: the model loads while you speak."))
             }
         }
         .formStyle(.grouped)
@@ -64,24 +68,24 @@ struct RecognitionSettingsTab: View {
     @ViewBuilder private var testOutput: some View {
         switch tester.state {
         case .idle:
-            Hint("Скажите что-нибудь после нажатия: покажу, что услышала модель и сколько это заняло.")
+            Hint(tr("Say something after pressing: it shows what the model heard and how long it took."))
         case let .recording(elapsed, total):
             VStack(alignment: .leading, spacing: 6) {
                 ProgressView(value: elapsed, total: total)
                 ProgressView(value: Double(min(1, tester.level * 10)), total: 1).tint(.red)
-                Hint("Говорите…")
+                Hint(tr("Speak…"))
             }
         case .recognizing:
-            HStack { ProgressView().controlSize(.small); Text("Распознаю…") }
+            HStack { ProgressView().controlSize(.small); Text(tr("Recognizing…")) }
         case let .done(text, audioSeconds, milliseconds):
             VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "«\(text)»").textSelection(.enabled)
-                Hint("Запись \(Self.seconds(audioSeconds)), распознано за \(Self.seconds(Double(milliseconds) / 1000)).")
+                Text(verbatim: Wording.quoted(text)).textSelection(.enabled)
+                Hint(tr("Recorded %1$@, recognized in %2$@.", "\(Self.seconds(audioSeconds))", "\(Self.seconds(Double(milliseconds) / 1000))"))
             }
         case let .nothingHeard(reason):
             VStack(alignment: .leading, spacing: 4) {
-                Label("Речь не услышана", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
-                Hint("Проверьте, какой микрофон выбран в Системных настройках → Звук → Ввод. (\(reason))")
+                Label(tr("No speech heard"), systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                Hint(tr("Check which microphone is selected in System Settings → Sound → Input. (%1$@)", "\(reason)"))
             }
         case let .failed(message):
             Text(verbatim: message).font(.callout).foregroundStyle(.red)
@@ -89,7 +93,7 @@ struct RecognitionSettingsTab: View {
     }
 
     private static func seconds(_ value: Double) -> String {
-        String(format: "%.1f с", value).replacingOccurrences(of: ".", with: ",")
+        String(format: tr("%.1f s"), locale: Localization.current.locale, value)
     }
 
     private static func installedNow() -> Set<String> {
@@ -103,13 +107,26 @@ struct RecognitionSettingsTab: View {
     private func install(_ variant: ModelVariant) {
         installing = variant.id
         installError = nil
+        progress = nil
+        copying = ModelCatalog.canInstall(variant)
+        let copy = copying
         Task {
-            let failure = await Task.detached { () -> String? in
-                do { try ModelCatalog.install(variant); return nil } catch { return "\(error)" }
-            }.value
+            var failure: String?
+            if copy {
+                failure = await Task.detached { () -> String? in
+                    do { try ModelCatalog.install(variant); return nil } catch { return "\(error)" }
+                }.value
+            } else {
+                do {
+                    try await ModelCatalog.download(variant) { fraction in Task { @MainActor in progress = fraction } }
+                } catch {
+                    failure = "\(error)"
+                }
+            }
             installing = nil
+            progress = nil
             refresh()
-            if let failure { installError = "Не удалось установить модель: \(failure)" }
+            if let failure { installError = tr("Could not install the model: %1$@", "\(failure)") }
         }
     }
 }
@@ -118,8 +135,10 @@ private struct ModelRow: View {
     let variant: ModelVariant
     let selected: Bool
     let installed: Bool
-    let canInstall: Bool
+    let canCopy: Bool
     let installing: Bool
+    let copying: Bool
+    let progress: Double?
     let select: () -> Void
     let install: () -> Void
 
@@ -132,21 +151,24 @@ private struct ModelRow: View {
             }
             .buttonStyle(.plain)
             .disabled(!installed)
-            .accessibilityLabel(selected ? "Выбрана" : "Выбрать")
+            .accessibilityLabel(selected ? tr("Selected") : tr("Select"))
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: "\(variant.title) · \(Self.size(variant.sizeMB))").fontWeight(selected ? .semibold : .regular)
                 Text(verbatim: variant.detail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if installing {
-                ProgressView().controlSize(.small)
-                Text("Копирую…").font(.caption).foregroundStyle(.secondary)
+                if let progress, !copying {
+                    ProgressView(value: progress).frame(width: 90)
+                    Text(verbatim: "\(Int(progress * 100)) %").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                } else {
+                    ProgressView().controlSize(.small)
+                    Text(copying ? tr("Copying…") : tr("Downloading…")).font(.caption).foregroundStyle(.secondary)
+                }
             } else if installed {
-                Text(selected ? "Используется" : "Установлена").font(.caption).foregroundStyle(.secondary)
-            } else if canInstall {
-                Button("Установить", action: install)
+                Text(selected ? tr("In use") : tr("Installed")).font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("нет копии для установки").font(.caption).foregroundStyle(.secondary)
+                Button(canCopy ? tr("Install") : tr("Download"), action: install)
             }
         }
         .contentShape(Rectangle())
@@ -154,6 +176,6 @@ private struct ModelRow: View {
     }
 
     private static func size(_ megabytes: Int) -> String {
-        megabytes >= 1000 ? String(format: "%.1f ГБ", Double(megabytes) / 1000).replacingOccurrences(of: ".", with: ",") : "\(megabytes) МБ"
+        megabytes >= 1000 ? String(format: tr("%.1f GB"), locale: Localization.current.locale, Double(megabytes) / 1000) : tr("%1$lld MB", numbers: megabytes)
     }
 }

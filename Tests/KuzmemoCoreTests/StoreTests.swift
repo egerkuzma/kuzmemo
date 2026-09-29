@@ -220,7 +220,7 @@ struct StoreMiscTests {
         #expect(terms.map(\.canonical) == ["GitHub", "Notion", "Slack"]) // by name
         #expect(terms.first { $0.canonical == "Notion" }?.aliases == ["нотион", "ношн", "нотиона"])
 
-        // the longer alias wins, so "гит хаб" is one name and not "гит" followed by "хаб"
+        // the longer alias wins, so "гит хаб" ("git hub") is one name and not "гит" ("git") followed by "хаб" ("hub")
         #expect(Glossary.applyAliases(to: "Доступ Нотиона и гит хаб", terms: terms) == "Доступ Notion и GitHub")
         #expect(Glossary.applyAliases(to: "нотионблок и слак", terms: terms) == "нотионблок и слак") // whole words only; disabled terms are ignored
         #expect(Glossary.promptLine(terms: terms) == "GitHub (гит хаб, гит); Notion (нотион, ношн, нотиона)")

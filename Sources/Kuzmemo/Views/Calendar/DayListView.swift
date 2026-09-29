@@ -20,9 +20,9 @@ struct DayListView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !calendar.overdueEntries.isEmpty {
-                        sectionTitle("Просрочено", tint: .red)
+                        sectionTitle(tr("Overdue"), tint: .red)
                         ForEach(calendar.overdueEntries) { row($0, showsDate: true) }
-                        if !calendar.dayEntries.isEmpty { sectionTitle("Сегодня", tint: .secondary) }
+                        if !calendar.dayEntries.isEmpty { sectionTitle(tr("Today"), tint: .secondary) }
                     }
                     if calendar.dayEntries.isEmpty && calendar.overdueEntries.isEmpty {
                         empty
@@ -88,22 +88,22 @@ struct DayListView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: RussianFormat.dayTitle(calendar.selectedDate)).font(.title2.weight(.semibold))
+                Text(verbatim: Wording.dayTitle(calendar.selectedDate)).font(.title2.weight(.semibold))
                 Text(verbatim: subtitle).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { env.newItem(on: calendar.selectedDate) } label: { Label("Новая запись", systemImage: "plus") }
-                .help("Новая запись (⌘N)")
+            Button { env.newItem(on: calendar.selectedDate) } label: { Label(tr("New entry"), systemImage: "plus") }
+                .help(tr("New entry (⌘N)"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
 
     private var subtitle: String {
-        let relative = RussianFormat.relativeDay(calendar.selectedDate, today: calendar.today)
-        let count = RussianFormat.entryCount(calendar.dayEntries.count)
+        let relative = Wording.relativeDay(calendar.selectedDate, today: calendar.today)
+        let count = Wording.entryCount(calendar.dayEntries.count)
         switch calendar.today.days(until: calendar.selectedDate) {
-        case 0 ... 6 where calendar.selectedDate >= calendar.today && relative != RussianFormat.date(calendar.selectedDate):
+        case 0 ... 6 where calendar.selectedDate >= calendar.today && relative != Wording.date(calendar.selectedDate):
             return "\(relative.capitalizedFirst) · \(count)"
         default:
             return count.capitalizedFirst
@@ -122,8 +122,8 @@ struct DayListView: View {
     private var empty: some View {
         VStack(spacing: 6) {
             Image(systemName: "calendar").font(.largeTitle).foregroundStyle(.tertiary)
-            Text("На этот день ничего нет").foregroundStyle(.secondary)
-            Text("Скажите «напомни…» или добавьте запись ниже").font(.caption).foregroundStyle(.tertiary)
+            Text(tr("Nothing on this day")).foregroundStyle(.secondary)
+            Text(tr("Say “remind me…” or add an entry below")).font(.caption).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -132,7 +132,7 @@ struct DayListView: View {
     private var quickAdd: some View {
         HStack(spacing: 8) {
             Image(systemName: "plus.circle.fill").foregroundStyle(.secondary)
-            TextField("Добавить запись: «завтра в 11 созвон с командой»", text: $quickText)
+            TextField(tr("Add an entry: “team sync tomorrow at 11”"), text: $quickText)
                 .textFieldStyle(.plain)
                 .focused($quickFocused)
                 .onSubmit { submit(asTyped: false) }
@@ -144,7 +144,7 @@ struct DayListView: View {
                 }
                 .disabled(env.status == .thinking)
             if env.status == .thinking { ProgressView().controlSize(.small) }
-            Text("⏎ — Claude · ⌥⏎ — как есть").font(.caption2).foregroundStyle(.tertiary)
+            Text(tr("⏎ — ask Claude · ⌥⏎ — add as is")).font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

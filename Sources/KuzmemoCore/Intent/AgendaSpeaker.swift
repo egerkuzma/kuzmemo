@@ -1,11 +1,11 @@
 import Foundation
 
-/// Composes what the app says aloud, from real data only: nothing is invented. Times and numbers are
+/// Composes what the app says aloud, from real data only: nothing is invented. In Russian, times and numbers are
 /// spelled out because system voices read "11:00" badly; brand names are swapped for the spoken form the
-/// user gave in the glossary.
+/// person gave in the glossary. The wording follows the interface language.
 public struct AgendaSpeaker: Sendable {
     public var glossary: [GlossaryTerm]
-    /// How many entries are read before "и ещё N".
+    /// How many entries are read before "and N more".
     public var maxEntries = 6
 
     public init(glossary: [GlossaryTerm] = []) {
@@ -19,33 +19,32 @@ public struct AgendaSpeaker: Sendable {
         let label = Self.label(for: result, today: today)
 
         if case .days = result.plan.target, result.plan.detail == .count {
-            return entries.isEmpty ? "\(label) ничего нет." : "\(label) \(Self.countPhrase(entries.count))."
+            return entries.isEmpty ? tr("%1$@ nothing.", label) : tr("%1$@ %2$@.", label, Self.countPhrase(entries.count))
         }
         if entries.isEmpty { return Self.emptyPhrase(for: result, label: label) }
 
         if result.plan.detail == .first, let first = entries.first {
-            return "Ближайшее: \(describe(first, today: today, withDay: true))."
+            return tr("Next: %1$@.", describe(first, today: today, withDay: true))
         }
 
-        var sentences = ["\(label) \(Self.countPhrase(entries.count)):"]
+        var sentences = [Self.intro(for: result, today: today, count: Self.countPhrase(entries.count))]
         for entry in entries.prefix(maxEntries) {
             sentences.append(describe(entry, today: today, withDay: Self.needsDay(result.plan.target)) + ".")
         }
         if entries.count > maxEntries {
-            let rest = entries.count - maxEntries
-            sentences.append("И ещё \(Self.number(rest)) \(RussianFormat.plural(rest, ("запись", "записи", "записей"))).")
+            sentences.append(tr("And %1$@.", Self.moreEntries(entries.count - maxEntries)))
         }
         return sentences.joined(separator: " ")
     }
 
-    /// One entry as a phrase: "в одиннадцать часов созвон с Фигма", "в среду, без времени, оплатить инвойс".
+    /// One entry as a phrase: "at 11 AM, Team sync", "on Wednesday, no time, Pay the invoice".
     public func describe(_ entry: AgendaEntry, today: LocalDate, withDay: Bool) -> String {
         var parts: [String] = []
-        if withDay { parts.append(RussianFormat.relativeDay(entry.date, today: today)) }
+        if withDay { parts.append(Wording.relativeDay(entry.date, today: today)) }
         if let time = entry.time {
             parts.append(Self.spokenTime(time))
         } else if entry.item.date != nil, !withDay {
-            parts.append("без времени")
+            parts.append(tr("no time"))
         }
         parts.append(Glossary.spokenForm(of: entry.item.title, terms: glossary))
         return parts.joined(separator: ", ")
@@ -60,43 +59,66 @@ public struct AgendaSpeaker: Sendable {
         }
     }
 
+    /// The lead of a spoken answer about days: "Today you have" in English, "На сегодня у вас" in Russian.
     static func label(for result: QueryResult, today: LocalDate) -> String {
+        guard case let .days(range) = result.plan.target else { return "" }
+        if range.lowerBound == range.upperBound {
+            return Localization.current == .russian
+                ? RussianFormat.onDay(range.lowerBound, today: today).capitalizedFirstLetter + " у вас"
+                : tr("%1$@ you have", EnglishFormat.dayHeading(range.lowerBound, today: today))
+        }
+        return tr("From %1$@ to %2$@ you have", Wording.date(range.lowerBound), Wording.date(range.upperBound))
+    }
+
+    /// The first sentence of a spoken list: "Today you have 3 items:", "You have 2 items overdue:".
+    static func intro(for result: QueryResult, today: LocalDate, count: String) -> String {
         switch result.plan.target {
-        case let .days(range):
-            if range.lowerBound == range.upperBound {
-                return RussianFormat.onDay(range.lowerBound, today: today).capitalizedFirstLetter + " у вас"
-            }
-            return "С \(RussianFormat.date(range.lowerBound)) по \(RussianFormat.date(range.upperBound)) у вас"
-        case .upcoming: return "Дальше в планах"
-        case .overdue: return "Просрочено"
-        case .inbox: return "Без даты у вас"
-        case .recurring: return "Повторяющихся"
-        case .search: return "Нашёл"
+        case .days: tr("%1$@ %2$@:", label(for: result, today: today), count)
+        case .upcoming: tr("Next up you have %1$@:", count)
+        case .overdue: tr("You have %1$@ overdue:", count)
+        case .inbox: tr("Without a date you have %1$@:", count)
+        case .recurring: tr("You have %1$@ repeating:", count)
+        case .search: tr("I found %1$@:", count)
         }
     }
 
     static func emptyPhrase(for result: QueryResult, label: String) -> String {
         switch result.plan.target {
-        case .days: "\(label) ничего не запланировано."
-        case .upcoming: "Ближайших дел нет."
-        case .overdue: "Просроченных дел нет."
-        case .inbox: "Записей без даты нет."
-        case .recurring: "Повторяющихся записей нет."
-        case .search: "Ничего не нашёл."
+        case .days: tr("%1$@ nothing planned.", label)
+        case .upcoming: tr("There is nothing coming up.")
+        case .overdue: tr("Nothing is overdue.")
+        case .inbox: tr("There are no undated entries.")
+        case .recurring: tr("There are no repeating entries.")
+        case .search: tr("I found nothing.")
         }
     }
 
-    /// "три дела", "одно дело", "пять дел"
+    /// A count of entries read aloud: "3 items", "1 item" in English; "три дела", "одно дело", "пять дел" in Russian.
     static func countPhrase(_ count: Int) -> String {
-        "\(number(count, feminine: false, neuter: true)) \(RussianFormat.plural(count, ("дело", "дела", "дел")))"
+        if Localization.current == .russian {
+            return "\(number(count, feminine: false, neuter: true)) \(RussianFormat.plural(count, ("дело", "дела", "дел")))"
+        }
+        return trCount("%lld items", count)
+    }
+
+    /// The remainder after the first few are read: "3 more entries" in English, "три записи" in Russian.
+    static func moreEntries(_ count: Int) -> String {
+        if Localization.current == .russian {
+            return "ещё \(number(count)) \(RussianFormat.plural(count, ("запись", "записи", "записей")))"
+        }
+        return trCount("%lld more entries", count)
     }
 
     static func number(_ n: Int, feminine: Bool = true, neuter: Bool = false) -> String {
         NumberWords.say(n, feminine: feminine, neuter: neuter)
     }
 
-    /// "в девять часов", "в один час", "в шестнадцать тридцать", "в девять ноль пять"
-    public static func spokenTime(_ time: LocalTime) -> String {
+    /// A time as it is said aloud in the current language.
+    public static func spokenTime(_ time: LocalTime) -> String { Wording.spokenTime(time) }
+
+    /// A Russian time in words: "в девять часов", "в один час", "в шестнадцать тридцать", "в девять ноль пять"
+/// (at nine o'clock, at one o'clock, at sixteen thirty, at nine oh five).
+    static func russianSpokenTime(_ time: LocalTime) -> String {
         let hour = time.hour
         let minute = time.minute
         if hour == 0 && minute == 0 { return "в полночь" }

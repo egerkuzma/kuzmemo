@@ -25,8 +25,8 @@ struct ToastView: View {
                 }
                 if toast.undoOpID != nil || toast.editItemID != nil {
                     HStack(spacing: 14) {
-                        if let opID = toast.undoOpID { Button("Отменить") { Task { await env.undo(opID: opID) } } }
-                        if let itemID = toast.editItemID { Button("Изменить") { env.openEditor(itemID: itemID) } }
+                        if let opID = toast.undoOpID { Button(tr("Undo")) { Task { await env.undo(opID: opID) } } }
+                        if let itemID = toast.editItemID { Button(tr("Edit")) { env.openEditor(itemID: itemID) } }
                     }
                     .buttonStyle(.link).font(.callout)
                 }
@@ -34,7 +34,7 @@ struct ToastView: View {
             Spacer(minLength: 0)
             Button { env.dismissToast() } label: { Image(systemName: "xmark").font(.caption2) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .accessibilityLabel("Закрыть")
+                .accessibilityLabel(tr("Dismiss"))
         }
         .padding(10)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))

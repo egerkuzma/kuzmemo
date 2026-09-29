@@ -1,3 +1,4 @@
+import KuzmemoCore
 import SwiftUI
 
 /// The voice controls in the popover: a record button that works like a tap on the trigger key, and cards for
@@ -9,14 +10,14 @@ struct VoiceStatusView: View {
         var keys: [String] = []
         if voice.triggerRunning { keys.append("Fn") }
         if let chord = voice.chordDescription { keys.append(chord) }
-        return keys.isEmpty ? "" : "или " + keys.joined(separator: " / ")
+        return keys.isEmpty ? "" : tr("or %1$@", keys.joined(separator: " / "))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Button(action: voice.toggleFromUI) {
-                    Label(voice.isRecording ? "Закончить запись" : "Записать голосом",
+                    Label(voice.isRecording ? tr("Finish recording") : tr("Record by voice"),
                           systemImage: voice.isRecording ? "stop.circle.fill" : "mic.fill")
                 }
                 .buttonStyle(.borderedProminent)
@@ -26,7 +27,7 @@ struct VoiceStatusView: View {
                 Spacer()
                 if voice.modelState == .loading {
                     ProgressView().controlSize(.small)
-                        .help("Подготовка распознавания речи. Первый раз это занимает до пары минут.")
+                        .help(tr("Preparing speech recognition. The first time this takes up to a couple of minutes."))
                 }
             }
             if let problem = voice.problem { ProblemCard(problem: problem, voice: voice) }
@@ -54,20 +55,20 @@ private struct ProblemCard: View {
     private var message: String {
         switch problem {
         case .inputMonitoringMissing:
-            "Чтобы работала клавиша Fn, разрешите Kuzmemo «Мониторинг ввода». Пока можно записывать кнопкой выше."
+            tr("To make the Fn key work, allow Kuzmemo “Input Monitoring”. Meanwhile you can record with the button above.")
         case .triggerUnavailable:
-            "Не удалось включить клавишу Fn. Разрешение выдано — перезапустите приложение."
+            tr("Could not enable the Fn key. The permission is granted — restart the app.")
         case .microphoneDenied:
-            "Нет доступа к микрофону. Без него голосовые команды не работают."
+            tr("No microphone access. Voice commands do not work without it.")
         case .modelMissing:
-            "Не найдена модель распознавания речи. Выполните scripts/install_models.sh."
+            tr("The speech recognition model was not found. Download it in Settings → Recognition.")
         }
     }
 
     private var action: (title: String, run: () -> Void)? {
         switch problem {
-        case .inputMonitoringMissing: ("Разрешить…", voice.requestInputMonitoring)
-        case .microphoneDenied: ("Открыть настройки микрофона", { PermissionsModel.openSettings(.microphone) })
+        case .inputMonitoringMissing: (tr("Allow…"), voice.requestInputMonitoring)
+        case .microphoneDenied: (tr("Open microphone settings"), { PermissionsModel.openSettings(.microphone) })
         case .triggerUnavailable, .modelMissing: nil
         }
     }

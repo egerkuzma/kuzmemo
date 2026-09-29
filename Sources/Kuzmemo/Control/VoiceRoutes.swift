@@ -116,31 +116,32 @@ enum VoiceRoutes {
         return .json(["muted": muted])
     }
 
-    /// A HUD in a given state, for `/render?view=hud&state=…`.
+    /// A HUD in a given state, for `/render?view=hud&state=…`. The sample texts follow the interface language.
     static func hudState(_ name: String) -> HUDModel? {
+        let russian = Localization.current == .russian
+        let phrase = russian ? "напомни мне послезавтра сказать Дмитрию про доступ в Notion" : "remind me the day after tomorrow to tell Dmitry about access to Notion"
+        let question = russian ? "Какую пятницу имеете в виду?" : "Which Friday do you mean?"
+        let options = russian
+            ? ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
+            : ["This coming Friday, October 2", "Friday of next week, October 9"]
         let model = HUDModel()
         switch name {
         case "preparing": model.state = .preparingModel
         case "recording": model.state = .recording(handsFree: false); model.level = 0.09; model.elapsed = 7
         case "handsfree": model.state = .recording(handsFree: true); model.level = 0.05; model.elapsed = 12
         case "transcribing": model.state = .transcribing
-        case "interpreting": model.state = .interpreting("напомни мне послезавтра сказать Дмитрию про доступ в Notion")
+        case "interpreting": model.state = .interpreting(phrase)
         case "result":
-            model.state = .result(.init(
-                style: .success, lines: ["Напоминание «Сказать Дмитрию про доступ в Notion» — 30 сентября, весь день."], undoOpID: "op"
-            ))
+            let saved = russian
+                ? "Напоминание «Сказать Дмитрию про доступ в Notion» — 30 сентября, весь день."
+                : "Reminder “Tell Dmitry about access to Notion” — September 30, all day."
+            model.state = .result(.init(style: .success, lines: [saved], undoOpID: "op"))
         case "question":
-            model.state = .result(.init(
-                style: .question, lines: ["Какую пятницу имеете в виду?"],
-                options: ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
-            ))
+            model.state = .result(.init(style: .question, lines: [question], options: options))
         case "listening":
-            model.state = .listening(.init(
-                style: .question, lines: ["Какую пятницу имеете в виду?"],
-                options: ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
-            ))
+            model.state = .listening(.init(style: .question, lines: [question], options: options))
             model.level = 0.06
-        case "note": model.state = .note("Речи не слышно — ничего не записал.", .warning)
+        case "note": model.state = .note(tr("No speech heard — nothing was saved."), .warning)
         default: return nil
         }
         return model

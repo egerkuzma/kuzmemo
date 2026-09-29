@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Kuzmemo",
+    defaultLocalization: "en",
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "KuzmemoCore", targets: ["KuzmemoCore"]),
@@ -19,6 +20,8 @@ let package = Package(
         .target(
             name: "KuzmemoCore",
             dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
+            // Translation tables (English source keys, Russian translations): see Localization/.
+            resources: [.process("Resources")],
             swiftSettings: [
                 .enableUpcomingFeature("ExistentialAny"),
                 .treatAllWarnings(as: .error),

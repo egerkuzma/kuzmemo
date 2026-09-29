@@ -10,11 +10,13 @@ struct ModelCatalogTests {
         return url
     }
 
-    /// A fake external copy of a model: a folder with a couple of files plus the tokenizer.
-    private func populate(_ root: URL, _ variant: ModelVariant, tokenizer: Bool = true) throws {
+    /// A fake external copy of a model: the Core ML parts with a file each, a config, plus the tokenizer.
+    private func populate(_ root: URL, _ variant: ModelVariant, tokenizer: Bool = true, parts: [String] = ["AudioEncoder", "MelSpectrogram", "TextDecoder"]) throws {
         let model = ModelCatalog.modelFolder(variant, in: root)
-        try FileManager.default.createDirectory(at: model.appendingPathComponent("AudioEncoder.mlmodelc"), withIntermediateDirectories: true)
-        try Data("weights".utf8).write(to: model.appendingPathComponent("AudioEncoder.mlmodelc/weight.bin"))
+        for part in parts {
+            try FileManager.default.createDirectory(at: model.appendingPathComponent("\(part).mlmodelc"), withIntermediateDirectories: true)
+            try Data("weights".utf8).write(to: model.appendingPathComponent("\(part).mlmodelc/weight.bin"))
+        }
         try Data("{}".utf8).write(to: model.appendingPathComponent("config.json"))
         guard tokenizer else { return }
         let tok = ModelCatalog.tokenizerFolder(variant, in: root)
@@ -35,6 +37,16 @@ struct ModelCatalogTests {
         #expect(!ModelCatalog.isInstalled(small, in: root))
         try populate(root, small, tokenizer: false)
         #expect(!ModelCatalog.isInstalled(small, in: root))
+        try populate(root, small)
+        #expect(ModelCatalog.isInstalled(small, in: root))
+    }
+
+    @Test func aDownloadThatStoppedHalfwayIsNotInstalled() throws {
+        let root = try makeRoot("partial"); defer { try? FileManager.default.removeItem(at: root) }
+        let small = try #require(ModelCatalog.variant(id: "openai_whisper-small"))
+        try populate(root, small, parts: ["AudioEncoder", "MelSpectrogram"]) // the text decoder never arrived
+        #expect(!ModelCatalog.isInstalled(small, in: root))
+        #expect(!ModelCatalog.canInstall(small, from: root))
         try populate(root, small)
         #expect(ModelCatalog.isInstalled(small, in: root))
     }

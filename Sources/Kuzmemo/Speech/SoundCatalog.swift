@@ -14,9 +14,9 @@ enum SoundCatalog {
     }
 
     static let chimes: [Chime] = [
-        Chime(id: "bell", title: "Колокольчик"), Chime(id: "drop", title: "Капля"), Chime(id: "gong", title: "Мягкий гонг"),
-        Chime(id: "marimba", title: "Маримба"), Chime(id: "sonar", title: "Сонар"), Chime(id: "glass", title: "Стеклянный звон"),
-        Chime(id: "melody", title: "Восходящая мелодия"), Chime(id: "soft", title: "Мягкий сигнал"),
+        Chime(id: "bell", title: tr("Bell")), Chime(id: "drop", title: tr("Drop")), Chime(id: "gong", title: tr("Soft gong")),
+        Chime(id: "marimba", title: tr("Marimba")), Chime(id: "sonar", title: tr("Sonar")), Chime(id: "glass", title: tr("Glass chime")),
+        Chime(id: "melody", title: tr("Rising melody")), Chime(id: "soft", title: tr("Soft signal")),
     ]
 
     static let systemDirectory = URL(fileURLWithPath: "/System/Library/Sounds", isDirectory: true)
@@ -32,10 +32,10 @@ enum SoundCatalog {
 
     static func title(for sound: AlertSound) -> String {
         switch sound.kind {
-        case .none: "Без звука"
+        case .none: tr("No sound")
         case .chime: chimes.first { $0.id == sound.name }?.title ?? sound.name
-        case .system: "Системный: \(sound.name)"
-        case .file: "Свой: \(URL(fileURLWithPath: sound.name).deletingPathExtension().lastPathComponent)"
+        case .system: tr("System: %1$@", "\(sound.name)")
+        case .file: tr("Custom: %1$@", "\(URL(fileURLWithPath: sound.name).deletingPathExtension().lastPathComponent)")
         }
     }
 
@@ -87,8 +87,8 @@ enum SoundCatalog {
         case unreadable, tooLong(Int)
         var errorDescription: String? {
             switch self {
-            case .unreadable: "Не удалось прочитать звуковой файл."
-            case let .tooLong(seconds): "Мелодия длиннее 30 секунд (\(seconds) с): система не проигрывает такие звуки в уведомлениях."
+            case .unreadable: tr("Could not read the sound file.")
+            case let .tooLong(seconds): tr("The sound is longer than 30 seconds (%1$lld s): the system does not play such sounds in notifications.", numbers: seconds)
             }
         }
     }

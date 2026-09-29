@@ -30,7 +30,7 @@ enum NotificationRequestBuilder {
         let again = UNMutableNotificationContent()
         again.title = title
         again.subtitle = subtitle
-        again.body = "Отложено · " + RussianFormat.leadPhrase(minutes).replacingOccurrences(of: "Через ", with: "на ")
+        again.body = tr("Snoozed · for %1$@", Wording.duration(minutes: minutes))
         again.threadIdentifier = thread
         again.categoryIdentifier = category
         again.userInfo = info

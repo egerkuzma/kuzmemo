@@ -113,14 +113,15 @@ struct ValidatorCreateTests {
         let night = try await validate(json, at: "2026-09-29 00:40")
         let c = try #require(clarification(night))
         #expect(c.reason == .ambiguousDate && c.options == ["вт, 29 сентября", "ср, 30 сентября"])
-        // the same phrase in the afternoon is fine, and non-"завтра" phrases are fine at night
+        // the same phrase in the afternoon is fine, and phrases without "завтра" ("tomorrow") are fine at night
         #expect(created(try await validate(json)).count == 1)
         let relative = try await validate(#"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"reminder","title":"Позвонить","when":{"mode":"minutes_from_now","minutes_from_now":120,"phrase":"через два часа"}}}]}"#, at: "2026-09-29 00:40")
         #expect(created(relative).count == 1)
     }
 
     @Test func anAnswerToAQuestionIsNotAskedAboutAgain() async throws {
-        // "Пятница следующей недели, 9 октября" was picked from the offered options; the guard must not fire again.
+        // "Пятница следующей недели, 9 октября" (Friday of next week, October 9) was picked from the offered options; the
+        // guard must not fire again.
         let nextFriday = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Созвон","when":{"mode":"weekday","weekday":"fri","week_offset":1,"time":"15:00","phrase":"в следующую пятницу"}}}]}"#
         #expect(clarification(try await validate(nextFriday)) != nil)
         let answered = try await validate(nextFriday, followUp: true)

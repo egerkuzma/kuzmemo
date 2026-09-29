@@ -146,17 +146,17 @@ struct AlertPlannerTests {
     }
 
     @Test func leadsAreWordedInRussian() {
-        #expect(RussianFormat.leadPhrase(0) == "Сейчас" && RussianFormat.leadPhrase(1) == "Через 1 минуту")
-        #expect(RussianFormat.leadPhrase(5) == "Через 5 минут" && RussianFormat.leadPhrase(22) == "Через 22 минуты")
-        #expect(RussianFormat.leadPhrase(60) == "Через 1 час" && RussianFormat.leadPhrase(120) == "Через 2 часа" && RussianFormat.leadPhrase(300) == "Через 5 часов")
-        #expect(RussianFormat.leadPhrase(1440) == "Через 1 день" && RussianFormat.leadPhrase(2880) == "Через 2 дня" && RussianFormat.leadPhrase(90) == "Через 90 минут")
+        #expect(Wording.leadPhrase(0) == "Сейчас" && Wording.leadPhrase(1) == "Через 1 минуту")
+        #expect(Wording.leadPhrase(5) == "Через 5 минут" && Wording.leadPhrase(22) == "Через 22 минуты")
+        #expect(Wording.leadPhrase(60) == "Через 1 час" && Wording.leadPhrase(120) == "Через 2 часа" && Wording.leadPhrase(300) == "Через 5 часов")
+        #expect(Wording.leadPhrase(1440) == "Через 1 день" && Wording.leadPhrase(2880) == "Через 2 дня" && Wording.leadPhrase(90) == "Через 90 минут")
     }
 
     @Test func chosenLeadsReadAsAList() {
-        #expect(RussianFormat.leadBefore(0) == "в момент начала" && RussianFormat.leadBefore(1) == "за 1 минуту")
-        #expect(RussianFormat.leadBefore(5) == "за 5 минут" && RussianFormat.leadBefore(60) == "за 1 час" && RussianFormat.leadBefore(1440) == "за 1 день")
-        #expect(RussianFormat.leadChip(0) == "В момент" && RussianFormat.leadChip(5) == "5 мин" && RussianFormat.leadChip(90) == "90 мин")
-        #expect(RussianFormat.leadChip(60) == "1 час" && RussianFormat.leadChip(120) == "2 часа" && RussianFormat.leadChip(1440) == "1 день")
+        #expect(Wording.leadBefore(0) == "в момент начала" && Wording.leadBefore(1) == "за 1 минуту")
+        #expect(Wording.leadBefore(5) == "за 5 минут" && Wording.leadBefore(60) == "за 1 час" && Wording.leadBefore(1440) == "за 1 день")
+        #expect(Wording.leadChip(0) == "В момент" && Wording.leadChip(5) == "5 мин" && Wording.leadChip(90) == "90 мин")
+        #expect(Wording.leadChip(60) == "1 час" && Wording.leadChip(120) == "2 часа" && Wording.leadChip(1440) == "1 день")
     }
 
     @Test func alertsAreDescribedForTheUpcomingList() {

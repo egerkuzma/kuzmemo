@@ -12,7 +12,7 @@ public struct ActionOutcome: Equatable, Sendable {
     }
 }
 
-/// A repeating item with its next occurrence, for the "Повторяющиеся" list.
+/// A repeating item with its next occurrence, for the "Repeating" list.
 public struct RecurringSeries: Identifiable, Equatable, Sendable {
     public var item: Item
     /// The next open occurrence within a year, if any.
@@ -210,7 +210,7 @@ public final class CalendarModel {
         let action: PlannedAction = entry.isDone
             ? .reopen(itemID: entry.item.id, occurrenceDate: entry.occurrenceDate)
             : .complete(itemID: entry.item.id, occurrenceDate: entry.occurrenceDate)
-        return try await run(action, label: entry.isDone ? "Возврат записи" : "Запись выполнена")
+        return try await run(action, label: entry.isDone ? "Reopen entry" : "Complete entry")
     }
 
     /// Moves an entry to another day; for a repeating item only that occurrence (the series stays).
@@ -219,12 +219,12 @@ public final class CalendarModel {
         if let occurrence = entry.occurrenceDate {
             return try await run(
                 .moveOccurrence(itemID: entry.item.id, occurrenceDate: occurrence, newDate: date, newTime: entry.time),
-                label: "Перенос повторения"
+                label: "Move occurrence"
             )
         }
         var changes = ItemChanges()
         changes.date = date
-        return try await run(.update(itemID: entry.item.id, changes: changes), label: "Перенос записи")
+        return try await run(.update(itemID: entry.item.id, changes: changes), label: "Move entry")
     }
 
     @discardableResult
@@ -236,25 +236,25 @@ public final class CalendarModel {
     @discardableResult
     public func skip(_ entry: AgendaEntry) async throws -> ActionOutcome {
         guard let occurrence = entry.occurrenceDate else { return ActionOutcome(op: nil, lines: []) }
-        return try await run(.skipOccurrence(itemID: entry.item.id, occurrenceDate: occurrence), label: "Пропуск повторения")
+        return try await run(.skipOccurrence(itemID: entry.item.id, occurrenceDate: occurrence), label: "Skip occurrence")
     }
 
     /// Deletes the item (all of a series).
     @discardableResult
     public func delete(_ item: Item) async throws -> ActionOutcome {
-        try await run(.delete(itemID: item.id), label: "Удаление записи")
+        try await run(.delete(itemID: item.id), label: "Delete entry")
     }
 
     @discardableResult
     public func create(_ draft: ItemDraft) async throws -> ActionOutcome {
         let made = try await store.create(draft)
-        return ActionOutcome(op: made.op, lines: ["Создано · «\(made.item.title)»"])
+        return ActionOutcome(op: made.op, lines: [tr("Created · %1$@", Wording.quoted(made.item.title))])
     }
 
     @discardableResult
     public func save(_ draft: ItemDraft, as itemID: String) async throws -> ActionOutcome {
         let op = try await store.save(draft, as: itemID)
-        return ActionOutcome(op: op, lines: ["Сохранено · «\(draft.title.trimmingCharacters(in: .whitespacesAndNewlines))»"])
+        return ActionOutcome(op: op, lines: [tr("Saved · %1$@", Wording.quoted(draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))])
     }
 
     /// The quick-add field without Claude: a task on the selected day, or in the Inbox when that is shown.

@@ -74,11 +74,15 @@ struct QueryExecutorTests {
         let observer = Task {
             for await _ in store.changes() { count.withLock { $0 += 1 } }
         }
-        try await Task.sleep(for: .milliseconds(200))
+        // polled rather than slept: a loaded machine can take a while to deliver the first value
+        func wait(until condition: () -> Bool) async throws {
+            for _ in 0 ..< 100 where !condition() { try await Task.sleep(for: .milliseconds(30)) }
+        }
+        try await wait { count.withLock { $0 } >= 1 }
         let initial = count.withLock { $0 }
         #expect(initial >= 1)
         try await store.perform(label: "add") { try $0.insert(Item(id: "", kind: .task, title: "Дело", source: .manual)) }
-        try await Task.sleep(for: .milliseconds(300))
+        try await wait { count.withLock { $0 } > initial }
         #expect(count.withLock { $0 } > initial)
         observer.cancel()
     }

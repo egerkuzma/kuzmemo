@@ -11,12 +11,12 @@ struct SettingsView: View {
 
         var title: String {
             switch self {
-            case .general: "Общие"
-            case .recording: "Запись"
-            case .recognition: "Распознавание"
-            case .speech: "Озвучка"
-            case .notifications: "Уведомления"
-            case .glossary: "Глоссарий"
+            case .general: tr("General")
+            case .recording: tr("Recording")
+            case .recognition: tr("Recognition")
+            case .speech: tr("Speech")
+            case .notifications: tr("Notifications")
+            case .glossary: tr("Glossary")
             }
         }
 
@@ -44,7 +44,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .environment(\.locale, DateBridge.russian)
+        .environment(\.locale, DateBridge.locale)
     }
 
     /// The content of one tab (also rendered on its own, taller than the window, by the control channel).

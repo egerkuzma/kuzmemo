@@ -29,9 +29,9 @@ struct PopoverView: View {
         let today = env.clock.localNow().date
         return HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: env.queryResult.map { $0.title.capitalizedFirst } ?? "Сегодня")
+                Text(verbatim: env.queryResult.map { $0.title.capitalizedFirst } ?? tr("Today"))
                     .font(.headline)
-                Text(verbatim: "\(RussianFormat.weekdayName(today.weekday).capitalizedFirst), \(RussianFormat.date(today))")
+                Text(verbatim: "\(Wording.weekdayName(today.weekday).capitalizedFirst), \(Wording.date(today))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -42,7 +42,7 @@ struct PopoverView: View {
     @ViewBuilder private var agenda: some View {
         let entries = env.queryResult?.entries ?? env.todayEntries
         if entries.isEmpty {
-            Text(env.queryResult == nil ? "На сегодня ничего не запланировано." : "Ничего не найдено.")
+            Text(env.queryResult == nil ? tr("Nothing planned for today.") : tr("Nothing found."))
                 .font(.callout).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
@@ -58,7 +58,7 @@ struct PopoverView: View {
     }
 
     private var input: some View {
-        TextField("Что записать? Например: завтра в 11 созвон", text: $text)
+        TextField(tr("What to note? For example: team sync tomorrow at 11"), text: $text)
             .textFieldStyle(.roundedBorder)
             .focused($focused)
             .disabled(env.status == .thinking)
@@ -72,10 +72,10 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Button("Открыть") { env.showMainWindow() }
-            Button("Настройки…") { env.showSettings() }
+            Button(tr("Open")) { env.showMainWindow() }
+            Button(tr("Settings…")) { env.showSettings() }
             Spacer()
-            Button("Выйти") { NSApp.terminate(nil) }
+            Button(tr("Quit")) { NSApp.terminate(nil) }
         }
         .buttonStyle(.link)
         .font(.callout)

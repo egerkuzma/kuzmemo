@@ -118,7 +118,7 @@ public actor MemoProcessor {
         let title = text.count <= 80 ? text : String(text.prefix(77)) + "…"
         let plan = MutationPlan(actions: [.create(NewItem(kind: .note, title: title, details: title == text ? nil : text))])
         do {
-            let applied = try await store.apply(plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: "Заметка из реплики")
+            let applied = try await store.apply(plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: "Note from a phrase")
             memo.status = .applied
             memo.opID = applied.op?.id
             memo.failReason = nil
@@ -194,7 +194,7 @@ public actor MemoProcessor {
         return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: nil)
     }
 
-    /// Runs a saved memo again (manual "Повторить" or the automatic retry).
+    /// Runs a saved memo again (manual "Retry" or the automatic retry).
     public func retry(memoID: String) async -> ProcessOutcome? {
         guard !inFlight.contains(memoID), let memo = try? await store.memo(id: memoID) else { return nil }
         return await process(memo)
@@ -339,8 +339,8 @@ public actor MemoProcessor {
 
     static func label(for plan: MutationPlan) -> String {
         let created = plan.actions.filter { if case .create = $0 { true } else { false } }.count
-        if created == plan.actions.count { return created == 1 ? "Создание записи" : "Создание записей (\(created))" }
-        return "Изменение календаря"
+        if created == plan.actions.count { return created == 1 ? "Create entry" : "Create entries (\(created))" }
+        return "Change calendar"
     }
 }
 

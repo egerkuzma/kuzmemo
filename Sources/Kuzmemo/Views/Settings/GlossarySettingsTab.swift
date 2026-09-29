@@ -9,7 +9,7 @@ struct GlossarySettingsTab: View {
     let env: AppEnvironment
     @State private var terms: [GlossaryTerm] = []
     @State private var editing: TermEditorRequest?
-    @State private var probe = "проверить доступ Нотиона и фигмы"
+    @State private var probe = tr("check the notion access")
     @State private var message: String?
 
     struct TermEditorRequest: Identifiable {
@@ -21,15 +21,15 @@ struct GlossarySettingsTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Слова, которые часто искажаются").font(.headline)
-                Hint("Распознавание слышит «нотиона», а нужно «Notion». Каждое слово здесь исправляется в вашей фразе до того, как её увидит Claude, а голос произносит его так, как вы указали.")
+                Text(tr("Words that are often misheard")).font(.headline)
+                Hint(tr("Speech recognition may write “git hub” where you need “GitHub”. Each word listed here is corrected in your phrase before Claude sees it, and the voice says it the way you specify."))
             }
             .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
             Divider()
             if terms.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "character.book.closed").font(.largeTitle).foregroundStyle(.tertiary)
-                    Text("Глоссарий пуст").foregroundStyle(.secondary)
+                    Text(tr("The glossary is empty")).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -64,14 +64,14 @@ struct GlossarySettingsTab: View {
 
     private var probeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Проверка").font(.subheadline.weight(.semibold))
-            TextField("Фраза, как её услышало распознавание", text: $probe)
+            Text(tr("Try it")).font(.subheadline.weight(.semibold))
+            TextField(tr("A phrase as speech recognition heard it"), text: $probe)
             let fixed = Glossary.applyAliases(to: probe, terms: terms)
             HStack(alignment: .firstTextBaseline) {
-                Text("Станет:").foregroundStyle(.secondary)
+                Text(tr("Becomes:")).foregroundStyle(.secondary)
                 Text(verbatim: fixed).textSelection(.enabled)
                 Spacer()
-                Button { env.voice.previewSpeech(Glossary.spokenForm(of: fixed, terms: terms)) } label: { Label("Как прозвучит", systemImage: "play.fill") }
+                Button { env.voice.previewSpeech(Glossary.spokenForm(of: fixed, terms: terms)) } label: { Label(tr("How it will sound"), systemImage: "play.fill") }
                     .controlSize(.small)
             }
         }
@@ -81,15 +81,15 @@ struct GlossarySettingsTab: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button { editing = TermEditorRequest(term: GlossaryTerm(canonical: ""), isNew: true) } label: { Label("Добавить слово", systemImage: "plus") }
-                Button("Экспорт…", action: exportTerms)
-                Button("Импорт…", action: importTerms)
+                Button { editing = TermEditorRequest(term: GlossaryTerm(canonical: ""), isNew: true) } label: { Label(tr("Add a word"), systemImage: "plus") }
+                Button(tr("Export…"), action: exportTerms)
+                Button(tr("Import…"), action: importTerms)
                 Spacer()
                 if let message { Text(verbatim: message).font(.caption).foregroundStyle(.secondary) }
             }
             HStack(spacing: 4) {
-                Hint("Хранится в базе данных приложения, не в файле:")
-                Button("показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([env.paths.database]) }
+                Hint(tr("Stored in the app’s database, not in a file:"))
+                Button(tr("show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([env.paths.database]) }
                     .buttonStyle(.link).font(.caption)
             }
         }
@@ -135,9 +135,9 @@ struct GlossarySettingsTab: View {
         let items = terms.map { ExportedTerm(canonical: $0.canonical, kind: $0.kind, aliases: $0.aliases, spoken: $0.spoken, enabled: $0.enabled) }
         do {
             try encoder.encode(items).write(to: url, options: .atomic)
-            message = "Сохранено: \(items.count)"
+            message = tr("Saved: %1$lld", numbers: items.count)
         } catch {
-            message = "Не удалось сохранить: \(error.localizedDescription)"
+            message = tr("Could not save: %1$@", "\(error.localizedDescription)")
         }
     }
 
@@ -159,10 +159,10 @@ struct GlossarySettingsTab: View {
                     if let term { _ = try? await env.store.save(term: term) }
                 }
                 await reload()
-                message = "Добавлено: \(added), обновлено: \(updated)"
+                message = tr("Added: %1$lld, updated: %2$lld", numbers: added, updated)
             }
         } catch {
-            message = "Не удалось прочитать файл: \(error.localizedDescription)"
+            message = tr("Could not read the file: %1$@", "\(error.localizedDescription)")
         }
     }
 }
@@ -180,22 +180,22 @@ private struct TermRow: View {
             Toggle("", isOn: Binding(get: { term.enabled }, set: { toggle($0) })).labelsHidden().toggleStyle(.switch).controlSize(.small)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: term.canonical).fontWeight(.medium).foregroundStyle(term.enabled ? .primary : .secondary)
-                Text(verbatim: term.aliases.isEmpty ? "нет вариантов написания" : "слышится как: " + term.aliases.joined(separator: ", "))
+                Text(verbatim: term.aliases.isEmpty ? tr("no spelling variants") : tr("heard as: %1$@", term.aliases.joined(separator: ", ")))
                     .font(.caption).foregroundStyle(.secondary)
                 if let spoken = term.spoken, !spoken.isEmpty {
-                    Text(verbatim: "читается: \(spoken)").font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: tr("spoken as: %1$@", "\(spoken)")).font(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            Button(action: speak) { Image(systemName: "speaker.wave.2") }.buttonStyle(.borderless).help("Как звучит")
-            Button("Изменить…", action: edit).controlSize(.small)
+            Button(action: speak) { Image(systemName: "speaker.wave.2") }.buttonStyle(.borderless).help(tr("How it sounds"))
+            Button(tr("Edit…"), action: edit).controlSize(.small)
             Button(role: .destructive) { confirmDelete = true } label: { Image(systemName: "trash") }
-                .buttonStyle(.borderless).help("Удалить")
+                .buttonStyle(.borderless).help(tr("Delete"))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .confirmationDialog("Удалить «\(term.canonical)» из глоссария?", isPresented: $confirmDelete) {
-            Button("Удалить", role: .destructive, action: delete)
+        .confirmationDialog(tr("Delete “%1$@” from the glossary?", "\(term.canonical)"), isPresented: $confirmDelete) {
+            Button(tr("Delete"), role: .destructive, action: delete)
         }
     }
 }
@@ -221,33 +221,33 @@ private struct GlossaryTermEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(request.isNew ? "Новое слово" : "Изменить слово").font(.headline)
+            Text(request.isNew ? tr("New word") : tr("Edit word")).font(.headline)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Как писать").font(.subheadline.weight(.semibold))
-                TextField("Например: Notion", text: $canonical)
+                Text(tr("Spelling")).font(.subheadline.weight(.semibold))
+                TextField(tr("For example: GitHub"), text: $canonical)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Как это слышит распознавание").font(.subheadline.weight(.semibold))
+                Text(tr("How recognition hears it")).font(.subheadline.weight(.semibold))
                 TextEditor(text: $aliasesText)
                     .font(.body)
                     .frame(height: 78)
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.primary.opacity(0.15)))
-                Hint("Каждый вариант с новой строки или через запятую: «нотион», «ношн», «нотиона».")
+                Hint(tr("Put each variant on a new line or separate them with commas: “git hub”, “gethub”."))
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Как произносить голосом").font(.subheadline.weight(.semibold))
+                Text(tr("How the voice says it")).font(.subheadline.weight(.semibold))
                 HStack {
-                    TextField("Например: Нотион", text: $spoken)
+                    TextField(tr("For example: Git Hub"), text: $spoken)
                     Button { env.voice.previewSpeech(spoken.isEmpty ? canonical : spoken) } label: { Image(systemName: "speaker.wave.2") }
-                        .help("Прослушать")
+                        .help(tr("Listen"))
                 }
-                Hint("Оставьте пустым, если голос и так читает слово правильно.")
+                Hint(tr("Leave empty if the voice already reads the word correctly."))
             }
             if let problem { Text(verbatim: problem).font(.callout).foregroundStyle(.red) }
             HStack {
                 Spacer()
-                Button("Отмена") { done(false) }.keyboardShortcut(.cancelAction)
-                Button("Сохранить", action: save).keyboardShortcut(.defaultAction)
+                Button(tr("Cancel")) { done(false) }.keyboardShortcut(.cancelAction)
+                Button(tr("Save"), action: save).keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -256,7 +256,7 @@ private struct GlossaryTermEditor: View {
 
     private func save() {
         let name = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { problem = "Напишите слово."; return }
+        guard !name.isEmpty else { problem = tr("Type the word."); return }
         let aliases = aliasesText
             .components(separatedBy: CharacterSet(charactersIn: ",\n"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -271,7 +271,7 @@ private struct GlossaryTermEditor: View {
                 _ = try await env.store.save(term: term)
                 done(true)
             } catch {
-                problem = "Такое слово уже есть в глоссарии."
+                problem = tr("This word is already in the glossary.")
             }
         }
     }

@@ -30,7 +30,7 @@ final class SpeechRouter: SpeechOutput {
         if log.count > 100 { log.removeFirst(log.count - 100) }
         guard !muted, !text.isEmpty else { return }
         stop()
-        if engine == .silero {
+        if engine == .silero, Localization.current == .russian { // the neural voice speaks Russian only
             do {
                 try await silero.speak(text)
                 lastEngine = .silero
@@ -53,6 +53,6 @@ final class SpeechRouter: SpeechOutput {
 
     /// Loads the neural voice ahead of time (the start of a recording), so that the answer does not wait for it.
     func prewarm() {
-        if engine == .silero, !muted { silero.prewarm() } // the muted automation build never starts torch on its own
+        if engine == .silero, Localization.current == .russian, !muted { silero.prewarm() } // the muted automation build never starts torch on its own
     }
 }

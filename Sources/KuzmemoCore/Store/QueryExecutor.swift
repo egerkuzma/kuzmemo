@@ -4,7 +4,7 @@ import GRDB
 public struct QueryResult: Equatable, Sendable {
     public var plan: QueryPlan
     public var entries: [AgendaEntry]
-    /// Russian label for headings, for example "сегодня" or "с 28 сентября по 4 октября".
+    /// A label for headings in the current language, for example "today" or "from September 28 to October 4".
     public var title: String
 }
 
@@ -38,17 +38,17 @@ extension Store {
         case let .upcoming(limit):
             let entries = try await agenda(in: today ... today.adding(days: 60), includeDone: false)
                 .filter { $0.date > today || ($0.date == today && ($0.time.map { $0 >= now.time } ?? true)) }
-            return QueryResult(plan: plan, entries: Array(entries.prefix(limit)), title: "ближайшее")
+            return QueryResult(plan: plan, entries: Array(entries.prefix(limit)), title: tr("upcoming"))
 
         case .overdue:
             let items = try await overdue(before: today, limit: 20)
-            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: "просрочено")
+            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: tr("overdue"))
 
         case .inbox:
-            return QueryResult(plan: plan, entries: try await inbox().map { Self.entry($0, today: today) }, title: "без даты")
+            return QueryResult(plan: plan, entries: try await inbox().map { Self.entry($0, today: today) }, title: tr("no date"))
 
         case .recurring:
-            return QueryResult(plan: plan, entries: try await recurringSeries().map { Self.entry($0, today: today) }, title: "повторяющиеся")
+            return QueryResult(plan: plan, entries: try await recurringSeries().map { Self.entry($0, today: today) }, title: tr("repeating"))
 
         case let .search(text):
             var seen = Set<String>()
@@ -56,7 +56,7 @@ extension Store {
             for variant in try await searchVariants(text) {
                 for item in try await search(variant, limit: 20) where seen.insert(item.id).inserted { items.append(item) }
             }
-            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: "«\(text)»")
+            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: Wording.quoted(text))
         }
     }
 
@@ -83,8 +83,8 @@ extension Store {
     }
 
     static func title(for range: ClosedRange<LocalDate>, today: LocalDate) -> String {
-        if range.lowerBound == range.upperBound { return RussianFormat.relativeDay(range.lowerBound, today: today) }
-        return "с \(RussianFormat.date(range.lowerBound)) по \(RussianFormat.date(range.upperBound))"
+        if range.lowerBound == range.upperBound { return Wording.relativeDay(range.lowerBound, today: today) }
+        return tr("from %1$@ to %2$@", Wording.date(range.lowerBound), Wording.date(range.upperBound))
     }
 }
 

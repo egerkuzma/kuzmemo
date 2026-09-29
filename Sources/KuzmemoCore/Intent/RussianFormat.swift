@@ -9,10 +9,10 @@ public enum RussianFormat {
     /// "on <weekday>" with the right preposition and case.
     static let weekdayOn = ["в понедельник", "во вторник", "в среду", "в четверг", "в пятницу", "в субботу", "в воскресенье"]
 
-    /// "30 сентября"
+    /// "30 сентября" (September 30)
     public static func date(_ date: LocalDate) -> String { "\(date.day) \(monthsGenitive[date.month - 1])" }
 
-    /// "ср, 30 сентября"
+    /// "ср, 30 сентября" (Wed, September 30)
     public static func dateWithWeekday(_ date: LocalDate) -> String {
         "\(weekdayShort[date.weekday.rawValue - 1]), \(Self.date(date))"
     }
@@ -22,20 +22,20 @@ public enum RussianFormat {
         "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
     ]
 
-    /// "Сентябрь 2026", the title of a month view.
+    /// "Сентябрь 2026" (September 2026), the title of a month view.
     public static func monthTitle(_ date: LocalDate) -> String {
         "\(monthsNominative[date.month - 1].capitalizedFirstLetter) \(date.year)"
     }
 
-    /// "пн", "вт", ... for the weekday row of a month view.
+    /// "пн", "вт", ... (Mon, Tue, ...) for the weekday row of a month view.
     public static func weekdayShortName(_ weekday: Weekday) -> String { weekdayShort[weekday.rawValue - 1] }
 
-    /// "Среда, 30 сентября", the title of a day.
+    /// "Среда, 30 сентября" (Wednesday, September 30), the title of a day.
     public static func dayTitle(_ date: LocalDate) -> String {
         "\(weekdayNames[date.weekday.rawValue - 1].capitalizedFirstLetter), \(Self.date(date))"
     }
 
-    /// "нет записей", "1 запись", "3 записи", "12 записей"
+    /// "нет записей", "1 запись", "3 записи", "12 записей" (no entries, 1 entry, 3 entries, 12 entries)
     public static func entryCount(_ count: Int) -> String {
         count == 0 ? "нет записей" : "\(count) \(plural(count, ("запись", "записи", "записей")))"
     }
@@ -45,7 +45,8 @@ public enum RussianFormat {
 
     public static func weekdayName(_ weekday: Weekday) -> String { weekdayNames[weekday.rawValue - 1] }
 
-    /// "сегодня", "завтра", "послезавтра", "в пятницу, 2 октября" (within a week) or "12 октября".
+    /// "сегодня", "завтра", "послезавтра" (today, tomorrow, the day after), "в пятницу, 2 октября" (on Friday, October 2;
+    /// within a week) or "12 октября".
     public static func relativeDay(_ date: LocalDate, today: LocalDate) -> String {
         switch today.days(until: date) {
         case 0: return "сегодня"
@@ -56,7 +57,7 @@ public enum RussianFormat {
         }
     }
 
-    /// Chooses the plural form for a count: forms = ("запись", "записи", "записей").
+    /// Chooses the plural form for a count. Russian has three: forms = ("запись", "записи", "записей") for 1, 2–4 and 5+.
     public static func plural(_ count: Int, _ forms: (String, String, String)) -> String {
         let n = abs(count) % 100
         let last = n % 10

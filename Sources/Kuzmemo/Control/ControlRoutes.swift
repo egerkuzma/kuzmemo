@@ -13,6 +13,8 @@ enum ControlRoutes {
         case ("GET", "/agenda"): return await agenda(request, env)
         case ("GET", "/inbox"): return await inbox(env)
         case ("POST", "/dev/seed"): return await seed(env)
+        case ("GET", "/glossary"): return await glossary(env)
+        case ("POST", "/glossary"): return await replaceGlossary(request, env)
         case ("GET", "/settings"): return await SettingsRoutes.read(env)
         case ("POST", "/settings"): return await SettingsRoutes.update(request, env)
         case ("GET", "/notifications"): return NotificationRoutes.state(request, env)
@@ -116,6 +118,37 @@ enum ControlRoutes {
         }
     }
 
+    /// The glossary as the database holds it.
+    private static func glossary(_ env: AppEnvironment) async -> HTTPResponse {
+        let terms = (try? await env.store.glossary()) ?? []
+        return .json(["terms": terms.map { term -> [String: Any] in
+            ["canonical": term.canonical, "kind": term.kind ?? NSNull(), "aliases": term.aliases, "spoken": term.spoken ?? NSNull(), "enabled": term.enabled]
+        }])
+    }
+
+    /// Replaces the whole glossary (a new install starts with an empty one, so tests bring their own words):
+    /// `{"terms": [{"canonical": "GitHub", "aliases": ["git hub"], "spoken": "Git Hub"}]}`.
+    private static func replaceGlossary(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
+        guard env.paths.isDev else { return .error("refusing to replace the glossary outside the dev bundle", status: 409) }
+        guard let items = request.jsonBody?["terms"] as? [[String: Any]] else { return .error("body must be {\"terms\": [...]}", status: 400) }
+        var terms: [GlossaryTerm] = []
+        for item in items {
+            guard let canonical = (item["canonical"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !canonical.isEmpty else {
+                return .error("every term needs a canonical spelling", status: 400)
+            }
+            terms.append(GlossaryTerm(
+                canonical: canonical, kind: item["kind"] as? String, aliases: (item["aliases"] as? [String]) ?? [],
+                spoken: item["spoken"] as? String, enabled: (item["enabled"] as? Bool) ?? true
+            ))
+        }
+        do {
+            try await env.store.replaceGlossary(with: terms)
+            return .json(["terms": terms.count])
+        } catch {
+            return .error("\(error)", status: 500)
+        }
+    }
+
     /// Puts the window in a state: `mode`, `date`, `search`, and `editor` ("new" or a part of an entry's title).
     private static func ui(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         guard let json = request.jsonBody else { return .error("body must be JSON", status: 400) }
@@ -210,7 +243,7 @@ enum ControlRoutes {
             // One tab on its own, as tall as asked, so the whole form is visible (the window scrolls it).
             let tab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
             let height = CGFloat(Double(request.query["height"] ?? "") ?? 1500)
-            data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.russian), width: SettingsView.size.width, height: height, dark: dark)
+            data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.locale), width: SettingsView.size.width, height: height, dark: dark)
         case "live":
             return await WindowRoutes.capture(
                 name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1",

@@ -251,7 +251,8 @@ struct UtteranceProcessorTests {
     }
 
     @Test func aSpokenAnswerContinuesTheConversationAndSkipsTheRouter() async throws {
-        // "завтра" alone would be the question "что на завтра" to the router; as an answer it is a date.
+        // "завтра" ("tomorrow") alone would be the question "что на завтра" ("what is on tomorrow") to the router; as an
+        // answer it is a date.
         let r = try rig(stt: ScriptedTranscriber([.reply("завтра")]), claude: [.json(ParserResponseTests.clarify), .json(ParserResponseTests.create)])
         defer { try? FileManager.default.removeItem(at: r.directory) }
         let asker = try await askingMemo(r, phrase: "напомни позвонить Дмитрию")

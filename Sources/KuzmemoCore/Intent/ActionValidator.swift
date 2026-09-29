@@ -8,7 +8,7 @@ public struct ValidationPolicy: Sendable {
     public var maxTitleLength = 200
     public var maxDetailsLength = 1000
     public var maxSpeechLength = 400
-    /// Between midnight and this time "завтра" is ambiguous (the user's day has not ended yet).
+    /// Between midnight and this time "tomorrow" is ambiguous (the person's day has not ended yet).
     public var lateNightUntil = LocalTime(hour: 4, minute: 0)!
 
     public init() {}
@@ -111,15 +111,15 @@ public enum ActionValidator {
             let deletes = actions.filter { $0.op == .delete }.count
             if deletes > policy.maxDeletesWithoutConfirmation && !vc.isFollowUp {
                 throw Stop(.clarify(Clarification(
-                    question: "Удалить \(deletes) \(RussianFormat.plural(deletes, ("запись", "записи", "записей")))?",
-                    reason: .destructiveConfirm, options: ["Да, удалить", "Нет"]
+                    question: trCount("Delete %lld entries?", deletes),
+                    reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")]
                 )))
             }
             let updates = actions.filter { $0.op == .update }.count
             if updates > policy.maxUpdatesWithoutConfirmation && !vc.isFollowUp {
                 throw Stop(.clarify(Clarification(
-                    question: "Изменить \(updates) \(RussianFormat.plural(updates, ("запись", "записи", "записей")))?",
-                    reason: .destructiveConfirm, options: ["Да, изменить", "Нет"]
+                    question: trCount("Change %lld entries?", updates),
+                    reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")]
                 )))
             }
             if !vc.isFollowUp {
@@ -157,7 +157,7 @@ public enum ActionValidator {
             case .skipOccurrence:
                 let target = try await resolveTarget(action)
                 guard target.item.recurrence != nil, let date = action.occurrenceDate ?? target.occurrenceDate else {
-                    throw Stop(.clarify(Clarification(question: "Какое из повторений пропустить?", reason: .ambiguousTarget)))
+                    throw Stop(.clarify(Clarification(question: tr("Which occurrence should I skip?"), reason: .ambiguousTarget)))
                 }
                 return .skipOccurrence(itemID: target.item.id, occurrenceDate: date)
             }
@@ -167,7 +167,7 @@ public enum ActionValidator {
         func occurrence(for target: Target, action: ParsedAction) throws -> LocalDate? {
             guard target.item.recurrence != nil else { return nil }
             guard let date = action.occurrenceDate ?? target.occurrenceDate else {
-                throw Stop(.clarify(Clarification(question: "Какое из повторений отметить?", reason: .ambiguousTarget)))
+                throw Stop(.clarify(Clarification(question: tr("Which occurrence should I mark?"), reason: .ambiguousTarget)))
             }
             return date
         }
@@ -182,31 +182,31 @@ public enum ActionValidator {
                 warnings.append("ref \(ref) is not in the list the model was shown")
             }
             guard let hint = clean(action.targetHint) else {
-                throw Stop(.clarify(Clarification(question: "Какую запись вы имеете в виду?", reason: .targetNotFound)))
+                throw Stop(.clarify(Clarification(question: tr("Which entry do you mean?"), reason: .targetNotFound)))
             }
             let hits = try await vc.store.search(hint, limit: 5)
             switch hits.count {
             case 0:
-                throw Stop(.clarify(Clarification(question: "Не нашёл запись «\(hint)». Что именно изменить?", reason: .targetNotFound)))
+                throw Stop(.clarify(Clarification(question: tr("I did not find the entry “%1$@”. What exactly should I change?", hint), reason: .targetNotFound)))
             case 1:
                 return Target(item: hits[0], occurrenceDate: action.occurrenceDate)
             default:
                 throw Stop(.clarify(Clarification(
-                    question: "Какую именно из этих записей?", reason: .ambiguousTarget,
+                    question: tr("Which one of these entries?"), reason: .ambiguousTarget,
                     options: hits.prefix(3).map { describe($0) }
                 )))
             }
         }
 
         func describe(_ item: Item) -> String {
-            item.date.map { "\(item.title), \(RussianFormat.date($0))" } ?? item.title
+            item.date.map { "\(item.title), \(Wording.date($0))" } ?? item.title
         }
 
         // MARK: Creation
 
         mutating func newItem(from parsed: ParsedItem) throws -> NewItem {
             guard let title = clean(parsed.title).map({ String($0.prefix(policy.maxTitleLength)) }) else {
-                throw Stop(.clarify(Clarification(question: "Не расслышал, что записать. Повторите?", reason: .unclearSpeech)))
+                throw Stop(.clarify(Clarification(question: tr("I did not catch what to note. Could you repeat?"), reason: .unclearSpeech)))
             }
             var resolved = ResolvedWhen(date: nil, time: nil)
             if let when = parsed.when { resolved = resolveWhen(when) }
@@ -215,15 +215,15 @@ public enum ActionValidator {
             switch parsed.kind {
             case .event:
                 if !hasDate {
-                    throw Stop(.clarify(Clarification(question: "На какую дату «\(title)»?", reason: .missingDate)))
+                    throw Stop(.clarify(Clarification(question: tr("For which date: “%1$@”?", title), reason: .missingDate)))
                 }
                 if resolved.time == nil {
-                    let day = RussianFormat.relativeDay(resolved.date!, today: anchor.date)
-                    throw Stop(.clarify(Clarification(question: "Во сколько «\(title)» \(day)?", reason: .missingTime)))
+                    let day = Wording.relativeDay(resolved.date!, today: anchor.date)
+                    throw Stop(.clarify(Clarification(question: tr("At what time: “%1$@” %2$@?", title, day), reason: .missingTime)))
                 }
             case .reminder:
                 if !hasDate {
-                    throw Stop(.clarify(Clarification(question: "На какую дату напомнить?", reason: .missingDate)))
+                    throw Stop(.clarify(Clarification(question: tr("For which date should I remind you?"), reason: .missingDate)))
                 }
             case .task, .note:
                 break
@@ -231,12 +231,12 @@ public enum ActionValidator {
 
             if parsed.recurrence == nil, let date = resolved.date, resolved.issues.contains(.inThePast) {
                 throw Stop(.clarify(Clarification(
-                    question: "Дата уже прошла (\(RussianFormat.date(date))). На какую поставить?", reason: .other
+                    question: tr("That date has passed (%1$@). Which date should I use?", Wording.date(date)), reason: .other
                 )))
             }
             let recurrence = parsed.recurrence.flatMap { sanitize($0, start: resolved.date) }
             if parsed.recurrence != nil, !hasDate {
-                throw Stop(.clarify(Clarification(question: "С какого дня повторять?", reason: .missingDate)))
+                throw Stop(.clarify(Clarification(question: tr("From which day should it repeat?"), reason: .missingDate)))
             }
             return NewItem(
                 kind: parsed.kind, title: title,
@@ -264,11 +264,11 @@ public enum ActionValidator {
             if let when = parsed.when, when.mode != .none || when.time != nil || when.dayPart != nil {
                 let resolved = resolveWhen(when)
                 if resolved.issues.contains(where: { if case .incomplete = $0 { true } else { false } }) {
-                    throw Stop(.clarify(Clarification(question: "На какую дату перенести?", reason: .missingDate)))
+                    throw Stop(.clarify(Clarification(question: tr("To which date should I move it?"), reason: .missingDate)))
                 }
                 if resolved.issues.contains(.inThePast), let date = resolved.date {
                     throw Stop(.clarify(Clarification(
-                        question: "Дата уже прошла (\(RussianFormat.date(date))). На какую перенести?", reason: .other
+                        question: tr("That date has passed (%1$@). To which date should I move it?", Wording.date(date)), reason: .other
                     )))
                 }
                 if when.mode != .none { newDate = resolved.date }
@@ -303,40 +303,38 @@ public enum ActionValidator {
             return resolved
         }
 
-        /// "В следующую пятницу" can mean the coming Friday or the one after it: the user decided to always
-        /// ask, so this is enforced here whatever the model answered.
+        /// "Next Friday" (in Russian, "в следующую пятницу") can mean the coming Friday or the one after it: it was decided
+        /// to always ask, so this is enforced here whatever the model answered.
         func nextWeekdayGuard(_ actions: [ParsedAction]) throws {
             for action in actions {
                 guard let when = action.item?.when ?? action.changes?.when, let phrase = when.phrase else { continue }
                 let words = SearchText.tokens(phrase)
-                // Only "следующую пятницу" (the adjective right before the weekday) is ambiguous;
-                // "на следующей неделе в пятницу" is not.
-                guard let index = words.indices.first(where: { PhraseDateHint.weekday(for: words[$0]) != nil && $0 > 0 && words[$0 - 1].hasPrefix("следующ") }),
+                // Only "next" right before the weekday is ambiguous ("next Friday"); "next week on Friday" is not.
+                guard let index = words.indices.first(where: { PhraseDateHint.weekday(for: words[$0]) != nil && $0 > 0 && PhraseDateHint.isNextMarker(words[$0 - 1]) }),
                       let weekday = PhraseDateHint.weekday(for: words[index]) else { continue }
                 let nearest = anchor.date.next(weekday)
                 let later = nearest.adding(days: 7)
                 throw Stop(.clarify(Clarification(
-                    question: "«\(phrase)» — это \(RussianFormat.date(nearest)) или \(RussianFormat.date(later))?",
+                    question: tr("“%1$@” — is that %2$@ or %3$@?", phrase, Wording.date(nearest), Wording.date(later)),
                     reason: .ambiguousDate,
-                    options: [RussianFormat.dateWithWeekday(nearest), RussianFormat.dateWithWeekday(later)]
+                    options: [Wording.dateWithWeekday(nearest), Wording.dateWithWeekday(later)]
                 )))
             }
         }
 
-        /// Between midnight and 04:00 "завтра" may mean the day that is already running: ask which.
+        /// Between midnight and 04:00 "tomorrow" may mean the day that is already running: ask which.
         func lateNightGuard(_ actions: [ParsedAction]) throws {
             guard anchor.time < policy.lateNightUntil else { return }
             for action in actions {
                 guard let when = action.item?.when ?? action.changes?.when, let phrase = when.phrase else { continue }
                 let words = SearchText.tokens(phrase)
-                guard words.contains("завтра") || words.contains("послезавтра") else { continue }
-                let days = words.contains("послезавтра") ? 2 : 1
+                guard let days = PhraseDateHint.daysAhead(words: words) else { continue }
                 let early = anchor.date.adding(days: days - 1)
                 let literal = anchor.date.adding(days: days)
                 throw Stop(.clarify(Clarification(
-                    question: "Сейчас после полуночи. «\(phrase)» — это \(RussianFormat.date(early)) или \(RussianFormat.date(literal))?",
+                    question: tr("It is after midnight. “%1$@” — is that %2$@ or %3$@?", phrase, Wording.date(early), Wording.date(literal)),
                     reason: .ambiguousDate,
-                    options: [RussianFormat.dateWithWeekday(early), RussianFormat.dateWithWeekday(literal)]
+                    options: [Wording.dateWithWeekday(early), Wording.dateWithWeekday(literal)]
                 )))
             }
         }
@@ -374,7 +372,7 @@ public enum ActionValidator {
                 target = .recurring
             case .search:
                 guard let text = clean(query.text) else {
-                    throw Stop(.clarify(Clarification(question: "Что найти?", reason: .unclearSpeech)))
+                    throw Stop(.clarify(Clarification(question: tr("What should I look for?"), reason: .unclearSpeech)))
                 }
                 target = .search(text)
             }
@@ -418,15 +416,15 @@ public enum ActionValidator {
 
         static func defaultQuestion(_ reason: ClarificationReason) -> String {
             switch reason {
-            case .missingDate: "На какую дату?"
-            case .missingTime: "Во сколько?"
-            case .ambiguousDate: "Какую дату вы имеете в виду?"
-            case .ambiguousTime: "Какое время вы имеете в виду?"
-            case .ambiguousTarget: "Какую именно запись?"
-            case .targetNotFound: "Не нашёл такую запись. Что именно изменить?"
-            case .unclearSpeech: "Не расслышал. Повторите, пожалуйста."
-            case .destructiveConfirm: "Подтвердите, пожалуйста."
-            case .other: "Уточните, пожалуйста."
+            case .missingDate: tr("For which date?")
+            case .missingTime: tr("At what time?")
+            case .ambiguousDate: tr("Which date do you mean?")
+            case .ambiguousTime: tr("Which time do you mean?")
+            case .ambiguousTarget: tr("Which entry exactly?")
+            case .targetNotFound: tr("I did not find such an entry. What exactly should I change?")
+            case .unclearSpeech: tr("I did not catch that. Please repeat.")
+            case .destructiveConfirm: tr("Please confirm.")
+            case .other: tr("Please clarify.")
             }
         }
     }

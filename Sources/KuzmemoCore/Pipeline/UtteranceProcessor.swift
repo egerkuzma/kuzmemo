@@ -144,7 +144,7 @@ public actor UtteranceProcessor {
         return results
     }
 
-    /// "Повторить" on a recording whose recognition failed: transcribe the kept audio now.
+    /// "Retry" on a recording whose recognition failed: transcribe the kept audio now.
     public func retry(
         memoID: String, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
     ) async -> UtteranceResult? {
@@ -199,7 +199,7 @@ public actor UtteranceProcessor {
             if let asker = memo.parentMemoID { await processor.supersede(asker) } // the answer carries the phrase on
             onStage(.interpreting(output.text))
             let anchor = MemoProcessor.parseAnchor(memo.anchorLocal) ?? clock.localNow()
-            // An answer such as "завтра" must not be mistaken for the question "что на завтра".
+            // An answer such as "завтра" ("tomorrow") must not be mistaken for the question "что на завтра" ("what is on tomorrow").
             if memo.parentMemoID == nil, let plan = router.route(output.text, today: anchor.date) {
                 let outcome = await processor.answerLocally(memo: memo, plan: plan)
                 return UtteranceResult(

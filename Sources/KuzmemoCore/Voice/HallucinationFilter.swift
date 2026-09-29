@@ -1,7 +1,7 @@
 import Foundation
 
 /// Removes text that Whisper is known to invent on silence, noise or music, and sound tags such as
-/// "[музыка]". Whole-utterance matching only, so a real command containing "спасибо" survives.
+/// "[музыка]" ("[music]"). Whole-utterance matching only, so a real command containing "спасибо" ("thanks") survives.
 public enum HallucinationFilter {
     /// Normalised phrases (lowercase, no punctuation) that are hallucinations when they are the whole text.
     static let phrases: Set<String> = [
@@ -20,14 +20,14 @@ public enum HallucinationFilter {
     /// The cleaned text, or `nil` when nothing real is left.
     public static func clean(_ text: String) -> String? {
         var working = text
-        // sound tags: [музыка], (аплодисменты), *смех*
+        // sound tags: [музыка], (аплодисменты), *смех* ([music], (applause), *laughter*)
         working = working.replacingOccurrences(of: #"[\[\(\*][^\]\)\*]{0,40}[\]\)\*]"#, with: " ", options: .regularExpression)
         working = working.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
         let normalized = SearchText.tokens(working).joined(separator: " ")
         guard !normalized.isEmpty else { return nil }
         if phrases.contains(normalized) { return nil }
         if prefixes.contains(where: { normalized.hasPrefix($0) }) { return nil }
-        // one token repeated over and over ("а а а а а", "да да да да да")
+        // one token repeated over and over ("а а а а а", "да да да да да": "ah ah ah…", "yes yes yes…")
         let words = normalized.split(separator: " ")
         if words.count >= 5, Set(words).count == 1 { return nil }
         // a lone letter or symbol

@@ -155,8 +155,8 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
     private var unavailableReason: String {
         switch status {
         case let .unavailable(problem): problem.message
-        case .missingHelper: "в этой сборке нет вспомогательного файла Silero"
-        default: "Silero не готов"
+        case .missingHelper: tr("this build has no Silero helper file")
+        default: tr("Silero is not ready")
         }
     }
 
@@ -176,7 +176,7 @@ final class SileroSpeechOutput: NSObject, AVAudioPlayerDelegate {
         player = next
         guard next.play() else {
             player = nil
-            throw SileroError.failed("не удалось начать воспроизведение")
+            throw SileroError.failed(tr("could not start playback"))
         }
         await withCheckedContinuation { playbackEnded = $0 }
         player = nil

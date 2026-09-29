@@ -15,52 +15,52 @@ struct NotificationsSettingsTab: View {
     var body: some View {
         @Bindable var settings = env.settings
         Form {
-            Section("Системные уведомления") {
-                Toggle("Напоминать уведомлениями", isOn: $settings.notifications.enabled)
-                PermissionRow(title: "Разрешение macOS", state: scheduler.permissionState, action: scheduler.permissionAction)
+            Section(tr("System notifications")) {
+                Toggle(tr("Remind with notifications"), isOn: $settings.notifications.enabled)
+                PermissionRow(title: tr("macOS permission"), state: scheduler.permissionState, action: scheduler.permissionAction)
                 permissionHint
             }
             Group {
-                Section("Встречи и звонки") {
-                    Hint("Записи типа «событие»: «созвон с командой завтра в 11», «планёрка в понедельник в 10». Тип Kuzmemo определяет по вашей фразе; он виден в календаре и меняется в редакторе записи. О встрече можно предупредить заранее и ещё раз в момент начала.")
+                Section(tr("Meetings and calls")) {
+                    Hint(tr("Entries of the “event” type: “team sync tomorrow at 11”, “stand-up on Monday at 10”. Kuzmemo decides the type from your phrase; it is shown in the calendar and can be changed in the entry editor. You can be warned ahead of a meeting and once more when it starts."))
                     LeadChips(choices: Self.choices(settings.notifications.eventLeads), selection: $settings.notifications.eventLeads)
-                    Hint(Self.summary(settings.notifications.eventLeads, what: "событии"))
+                    Hint(Self.summary(settings.notifications.eventLeads, whenEmpty: tr("No notifications about events.")))
                 }
-                Section("Напоминания и задачи") {
-                    Hint("С точным временем: «напомни позвонить в банк в 16:00», «ответить клиенту в 17:30». Обычно хватает сигнала в нужный момент.")
+                Section(tr("Reminders and tasks")) {
+                    Hint(tr("With an exact time: “remind me to call the bank at 4 pm”, “answer the client at 5:30 pm”. A signal at the right moment is usually enough."))
                     LeadChips(choices: Self.choices(settings.notifications.reminderLeads), selection: $settings.notifications.reminderLeads)
-                    Hint(Self.summary(settings.notifications.reminderLeads, what: "напоминании"))
-                    Hint("У отдельной записи в редакторе можно добавить ещё один ранний сигнал.")
+                    Hint(Self.summary(settings.notifications.reminderLeads, whenEmpty: tr("No notifications about reminders.")))
+                    Hint(tr("In the editor, an individual entry can get one more early alert."))
                 }
-                Section("Дела на весь день") {
-                    Hint("Напоминания и задачи с датой, но без времени: «напомни послезавтра оплатить хостинг». Пока дело не выполнено, Kuzmemo напомнит о нём в эти часы:")
+                Section(tr("All-day items")) {
+                    Hint(tr("Reminders and tasks with a date but no time: “remind me the day after tomorrow to pay for hosting”. Until the item is done, Kuzmemo reminds you about it at these times:"))
                     TimeList(times: $settings.notifications.allDayTimes, limit: 6)
                     Hint(Self.allDaySummary(settings.notifications.allDayTimes))
-                    Hint("Заметки и события без времени уведомлений не дают.")
+                    Hint(tr("Notes and events without a time never notify."))
                 }
-                Section("Звуки") {
-                    SoundRow(title: "Заранее", detail: "как «встреча через 5 минут» в Zoom", sound: $settings.notifications.headsUpSound)
-                    SoundRow(title: "В назначенное время", detail: "сама встреча или напоминание", sound: $settings.notifications.atTimeSound)
-                    SoundRow(title: "Дела на весь день", detail: "напоминание «на сегодня»", sound: $settings.notifications.allDaySound)
+                Section(tr("Sounds")) {
+                    SoundRow(title: tr("In advance"), detail: tr("like “meeting in 5 minutes” in Zoom"), sound: $settings.notifications.headsUpSound)
+                    SoundRow(title: tr("At the scheduled time"), detail: tr("the meeting itself or the reminder"), sound: $settings.notifications.atTimeSound)
+                    SoundRow(title: tr("All-day items"), detail: tr("the “for today” reminder"), sound: $settings.notifications.allDaySound)
                     HStack {
                         testMenu(settings.notifications)
                         if let testMessage { Hint(testMessage) }
                     }
-                    if AppPaths.isAutomation { Hint("В этой сборке звук и уведомления выключены (для автоматических проверок).") }
+                    if AppPaths.isAutomation { Hint(tr("Sound and notifications are off in this build (they are used for automated checks).")) }
                 }
-                Section("Ещё") {
-                    Toggle("Читать название вслух", isOn: $settings.notifications.speakTitle)
-                    Hint("Голосом из вкладки «Озвучка», пока Kuzmemo запущен.")
-                    Toggle("Тихие часы: без звука", isOn: $settings.notifications.quietHours.enabled.animation())
+                Section(tr("More")) {
+                    Toggle(tr("Read the title aloud"), isOn: $settings.notifications.speakTitle)
+                    Hint(tr("With the voice chosen in the Speech tab, while Kuzmemo is running."))
+                    Toggle(tr("Quiet hours: no sound"), isOn: $settings.notifications.quietHours.enabled.animation())
                     if settings.notifications.quietHours.enabled {
-                        LabeledContent("С") { TimeField(time: $settings.notifications.quietHours.from) }
-                        LabeledContent("До") { TimeField(time: $settings.notifications.quietHours.to) }
-                        Hint("В это время уведомления приходят, но без звука и без чтения вслух.")
+                        LabeledContent(tr("From")) { TimeField(time: $settings.notifications.quietHours.from) }
+                        LabeledContent(tr("Until")) { TimeField(time: $settings.notifications.quietHours.to) }
+                        Hint(tr("During this time notifications still arrive, but without sound and without reading aloud."))
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Кнопки «Отложить» на уведомлении")
+                        Text(tr("Snooze buttons on the notification"))
                         LeadChips(choices: Self.snoozeChoices(settings.notifications.snoozeMinutes), selection: $settings.notifications.snoozeMinutes, limit: 3)
-                        Hint("Не больше трёх. Рядом всегда есть кнопка «Готово».")
+                        Hint(tr("Up to three. There is always a “Done” button next to them."))
                     }
                 }
             }
@@ -79,9 +79,9 @@ struct NotificationsSettingsTab: View {
 
     @ViewBuilder private var permissionHint: some View {
         if scheduler.isLive, scheduler.access == .denied {
-            Hint("Уведомления для Kuzmemo выключены. Включите их в Системных настройках → Уведомления → Kuzmemo («Разрешить уведомления»).")
+            Hint(tr("Notifications for Kuzmemo are turned off. Turn them on in System Settings → Notifications → Kuzmemo (“Allow notifications”)."))
         } else {
-            Hint("Уведомления показывает сама macOS, поэтому они приходят в срок, даже если Kuzmemo закрыт. Вид (баннер или заметка) выбирается в Системных настройках → Уведомления → Kuzmemo.")
+            Hint(tr("Notifications are shown by macOS itself, so they arrive on time even when Kuzmemo is not running. The style (banner or alert) is set in System Settings → Notifications → Kuzmemo."))
         }
         if let error = scheduler.lastError { Text(verbatim: error).font(.caption).foregroundStyle(.red) }
     }
@@ -90,18 +90,18 @@ struct NotificationsSettingsTab: View {
 
     private func testMenu(_ settings: NotificationSettings) -> some View {
         Menu {
-            Button("Как перед событием · \(SoundCatalog.title(for: settings.headsUpSound))") { test(settings.headsUpSound) }
-            Button("Как в назначенное время · \(SoundCatalog.title(for: settings.atTimeSound))") { test(settings.atTimeSound) }
-            Button("Как для дела на весь день · \(SoundCatalog.title(for: settings.allDaySound))") { test(settings.allDaySound) }
+            Button(tr("As before an event · %1$@", "\(SoundCatalog.title(for: settings.headsUpSound))")) { test(settings.headsUpSound) }
+            Button(tr("As at the scheduled time · %1$@", "\(SoundCatalog.title(for: settings.atTimeSound))")) { test(settings.atTimeSound) }
+            Button(tr("As for an all-day item · %1$@", "\(SoundCatalog.title(for: settings.allDaySound))")) { test(settings.allDaySound) }
         } label: {
-            Label("Проверить уведомление", systemImage: "bell.badge")
+            Label(tr("Test notification"), systemImage: "bell.badge")
         }
         .fixedSize()
     }
 
     private func test(_ sound: AlertSound) {
         Task {
-            testMessage = await scheduler.sendTest(sound: sound) ?? "Уведомление появится через секунду."
+            testMessage = await scheduler.sendTest(sound: sound) ?? tr("The notification will appear in a second.")
             try? await Task.sleep(for: .seconds(6))
             testMessage = nil
         }
@@ -112,16 +112,16 @@ struct NotificationsSettingsTab: View {
     @ViewBuilder private func upcomingSection(_ settings: NotificationSettings) -> some View {
         let alerts = scheduler.planned
         let shown = 8
-        Section("Ближайшие уведомления") {
+        Section(tr("Upcoming notifications")) {
             if !settings.enabled {
-                Hint("Уведомления выключены.")
+                Hint(tr("Notifications are turned off."))
             } else if alerts.isEmpty {
-                Hint("Пока ничего не запланировано: нет записей на ближайшие \(settings.horizonDays) дней.")
+                Hint(tr("Nothing scheduled yet: no entries in the next %1$lld days.", numbers: settings.horizonDays))
             }
             ForEach(alerts.prefix(shown)) { alert in
                 UpcomingRow(alert: alert, now: env.clock.now(), timeZone: env.clock.timeZone)
             }
-            if alerts.count > shown { Hint("…и ещё \(alerts.count - shown)") }
+            if alerts.count > shown { Hint(tr("…and %1$lld more", numbers: alerts.count - shown)) }
         }
     }
 
@@ -147,23 +147,17 @@ struct NotificationsSettingsTab: View {
         Array(Set([5, 10, 15, 30, 60, 120]).union(selected)).sorted()
     }
 
-    /// "Придёт: за 5 минут и в момент начала."
-    static func summary(_ leads: [Int], what: String) -> String {
+    /// "Will arrive: 5 minutes before and at the start."
+    static func summary(_ leads: [Int], whenEmpty: String) -> String {
         let ordered = leads.sorted(by: >)
-        guard !ordered.isEmpty else { return "Уведомлений о \(what) не будет." }
-        return "Придёт: \(joined(ordered.map(RussianFormat.leadBefore)))."
+        guard !ordered.isEmpty else { return whenEmpty }
+        return tr("Will arrive: %1$@.", Wording.list(ordered.map(Wording.leadBefore)))
     }
 
     static func allDaySummary(_ times: [LocalTime]) -> String {
         let sorted = Array(Set(times)).sorted()
-        guard !sorted.isEmpty else { return "Без напоминаний: такие дела видны только в списке дня." }
-        return "Например, «Оплатить хостинг» напомнит о себе в \(joined(sorted.map(\.description))) — пока не отмечено выполненным."
-    }
-
-    /// "a", "a и b", "a, b и c".
-    static func joined(_ parts: [String]) -> String {
-        guard let last = parts.last else { return "" }
-        return parts.count == 1 ? last : parts.dropLast().joined(separator: ", ") + " и " + last
+        guard !sorted.isEmpty else { return tr("No reminders: such items are only visible in the day list.") }
+        return tr("For example, “Pay for hosting” will remind you at %1$@ until it is marked done.", Wording.list(sorted.map(\.description)))
     }
 }
 
@@ -179,7 +173,7 @@ private struct LeadChips: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 68), spacing: 8)], alignment: .leading, spacing: 8) {
             ForEach(choices, id: \.self) { minutes in
                 let isOn = selection.contains(minutes)
-                Toggle(isOn: binding(minutes)) { Text(verbatim: RussianFormat.leadChip(minutes)) }
+                Toggle(isOn: binding(minutes)) { Text(verbatim: Wording.leadChip(minutes)) }
                     .toggleStyle(ChipToggleStyle())
                     .disabled(!isOn && limit.map { selection.count >= $0 } == true)
             }
@@ -241,16 +235,16 @@ private struct TimeList: View {
 
     var body: some View {
         ForEach(times.indices, id: \.self) { index in
-            LabeledContent("Напоминание \(index + 1)") {
+            LabeledContent(tr("Reminder %1$lld", numbers: index + 1)) {
                 HStack(spacing: 10) {
                     TimeField(time: binding(index))
                     Button { remove(index) } label: { Image(systemName: "minus.circle") }
                         .buttonStyle(.borderless)
-                        .help("Убрать это время")
+                        .help(tr("Remove this time"))
                 }
             }
         }
-        Button { add() } label: { Label("Добавить время", systemImage: "plus.circle") }
+        Button { add() } label: { Label(tr("Add a time"), systemImage: "plus.circle") }
             .disabled(times.count >= limit)
     }
 
@@ -295,23 +289,23 @@ private struct SoundRow: View {
             LabeledContent {
                 HStack(spacing: 8) {
                     Picker("", selection: $sound) {
-                        Text("Без звука").tag(AlertSound.silent)
-                        Section("Мелодии Kuzmemo") {
+                        Text(tr("No sound")).tag(AlertSound.silent)
+                        Section(tr("Kuzmemo sounds")) {
                             ForEach(SoundCatalog.chimes) { chime in Text(verbatim: chime.title).tag(AlertSound.chime(chime.id)) }
                         }
-                        Section("Системные звуки macOS") {
+                        Section(tr("macOS system sounds")) {
                             ForEach(Self.systemNames, id: \.self) { name in Text(verbatim: name).tag(AlertSound.system(name)) }
                         }
                         if !isListed {
-                            Section("Выбрано") { Text(verbatim: SoundCatalog.title(for: sound)).tag(sound) }
+                            Section(tr("Chosen")) { Text(verbatim: SoundCatalog.title(for: sound)).tag(sound) }
                         }
                     }
                     .labelsHidden()
                     .frame(width: 210)
                     Button { SoundCatalog.preview(sound) } label: { Image(systemName: "play.fill") }
                         .disabled(sound.kind == .none)
-                        .help("Прослушать")
-                    Button("Свой файл…") { chooseFile() }
+                        .help(tr("Listen"))
+                    Button(tr("Custom file…")) { chooseFile() }
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
@@ -335,8 +329,8 @@ private struct SoundRow: View {
 
     private func chooseFile() {
         let panel = NSOpenPanel()
-        panel.title = "Выберите звуковой файл"
-        panel.message = "Подойдёт короткая мелодия до 30 секунд: wav, aiff, mp3, m4a."
+        panel.title = tr("Choose a sound file")
+        panel.message = tr("A short sound up to 30 seconds: wav, aiff, mp3, m4a.")
         panel.allowedContentTypes = [.audio]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -390,8 +384,8 @@ extension NotificationScheduler {
     /// The button beside it: ask (the first time) or open System Settings (once the person has decided).
     var permissionAction: (String, () -> Void) {
         if access == .notDetermined || access == .unknown {
-            return ("Разрешить…", { Task { _ = await self.requestAccess() } })
+            return (tr("Allow…"), { Task { _ = await self.requestAccess() } })
         }
-        return ("Открыть настройки", { PermissionsModel.openNotificationSettings() })
+        return (tr("Open Settings"), { PermissionsModel.openNotificationSettings() })
     }
 }

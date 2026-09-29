@@ -33,11 +33,14 @@ final class AppSettings {
     }
 
     func load() async {
+        // On the very first launch the recognition language is the system language (Russian is the stored default).
+        let firstLaunch = (try? await store.setting(RecognitionSettings.storageKey)) == nil
         loading = true
         speech = await store.settings(SpeechSettings.self)
         recognition = await store.settings(RecognitionSettings.self)
         recording = await store.settings(RecordingSettings.self)
         notifications = await store.settings(NotificationSettings.self)
+        if firstLaunch, AppLanguage.best() == .english { recognition.language = "en" }
         loading = false
         loaded = true
         for group in Group.allCases { notify(group) }

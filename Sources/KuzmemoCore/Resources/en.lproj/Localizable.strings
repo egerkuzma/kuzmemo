@@ -1,0 +1,23 @@
+/* English is the source language: a text with no entry here is shown as it is. Only plural forms are listed. */
+"%lld entries|one" = "%lld entry";
+"%lld entries|other" = "%lld entries";
+"%lld days|one" = "%lld day";
+"%lld days|other" = "%lld days";
+"%lld hours|one" = "%lld hour";
+"%lld hours|other" = "%lld hours";
+"%lld minutes|one" = "%lld minute";
+"%lld minutes|other" = "%lld minutes";
+"%lld weeks|one" = "%lld week";
+"%lld weeks|other" = "%lld weeks";
+"%lld months|one" = "%lld month";
+"%lld months|other" = "%lld months";
+"%lld years|one" = "%lld year";
+"%lld years|other" = "%lld years";
+"%lld items|one" = "%lld item";
+"%lld items|other" = "%lld items";
+"%lld more entries|one" = "%lld more entry";
+"%lld more entries|other" = "%lld more entries";
+"Delete %lld entries?|one" = "Delete %lld entry?";
+"Delete %lld entries?|other" = "Delete %lld entries?";
+"Change %lld entries?|one" = "Change %lld entry?";
+"Change %lld entries?|other" = "Change %lld entries?";

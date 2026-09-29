@@ -24,7 +24,7 @@ struct EntryRow: View {
                     .foregroundStyle(entry.isDone ? Color.accentColor : Color.secondary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(entry.isDone ? "Вернуть в работу" : "Отметить выполненным")
+            .accessibilityLabel(entry.isDone ? tr("Reopen") : tr("Mark as done"))
 
             Text(verbatim: whenText)
                 .font(.caption.monospacedDigit())
@@ -32,7 +32,7 @@ struct EntryRow: View {
                 .frame(width: 64, alignment: .leading)
 
             Image(systemName: symbol).font(.callout).foregroundStyle(.secondary).frame(width: 18)
-                .accessibilityLabel(entry.item.kind.russianName)
+                .accessibilityLabel(entry.item.kind.displayName)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: entry.item.title)
@@ -56,15 +56,15 @@ struct EntryRow: View {
         .contextMenu { menu }
         .popover(isPresented: $moving, arrowEdge: .trailing) { movePicker }
         .accessibilityElement(children: .combine)
-        .accessibilityAction(named: "Изменить") { env.editorRequest = .edit(entry.item) }
+        .accessibilityAction(named: tr("Edit")) { env.editorRequest = .edit(entry.item) }
     }
 
     // MARK: Pieces
 
     private var whenText: String {
-        if entry.item.date == nil { return "без даты" }
-        if showsDate { return RussianFormat.date(entry.date) }
-        return entry.time.map { "\($0)" } ?? "весь день"
+        if entry.item.date == nil { return tr("no date") }
+        if showsDate { return Wording.date(entry.date) }
+        return entry.time.map { "\($0)" } ?? tr("all day")
     }
 
     private var symbol: String {
@@ -78,8 +78,8 @@ struct EntryRow: View {
 
     private var subtitle: String? {
         var parts: [String] = []
-        if let rule = entry.item.recurrence { parts.append(RussianFormat.recurrence(rule).capitalizedFirst) }
-        if entry.wasMoved { parts.append("перенесено") }
+        if let rule = entry.item.recurrence { parts.append(Wording.recurrence(rule).capitalizedFirst) }
+        if entry.wasMoved { parts.append(tr("moved")) }
         if showsDate, let time = entry.time { parts.append("\(time)") }
         if let details = entry.item.details, let line = details.split(whereSeparator: \.isNewline).first {
             parts.append(String(line.prefix(80)))
@@ -90,33 +90,33 @@ struct EntryRow: View {
     @ViewBuilder private var badges: some View {
         HStack(spacing: 6) {
             if entry.item.approximate {
-                Text(verbatim: "≈").font(.callout).foregroundStyle(.secondary).help("Дата примерная")
+                Text(verbatim: "≈").font(.callout).foregroundStyle(.secondary).help(tr("Approximate date"))
             }
             if entry.isRecurring {
-                Image(systemName: "repeat").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Повторяется")
+                Image(systemName: "repeat").font(.caption).foregroundStyle(.secondary).accessibilityLabel(tr("Repeats"))
             }
             if entry.item.source == .voice {
-                Image(systemName: "mic.fill").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Голосовая запись")
+                Image(systemName: "mic.fill").font(.caption).foregroundStyle(.secondary).accessibilityLabel(tr("Voice entry"))
             }
         }
     }
 
     @ViewBuilder private var menu: some View {
-        Button("Изменить…") { env.editorRequest = .edit(entry.item) }
-        Button(entry.isDone ? "Вернуть в работу" : "Выполнено") { env.act { try await calendar.toggleDone(entry) } }
+        Button(tr("Edit…")) { env.editorRequest = .edit(entry.item) }
+        Button(entry.isDone ? tr("Reopen") : tr("Mark done")) { env.act { try await calendar.toggleDone(entry) } }
         Divider()
-        Button("На завтра") { env.act { try await calendar.moveToTomorrow(entry) } }
-        Button("Перенести на дату…") {
+        Button(tr("Move to tomorrow")) { env.act { try await calendar.moveToTomorrow(entry) } }
+        Button(tr("Move to date…")) {
             moveTarget = DateBridge.date(entry.date)
             moving = true
         }
         if entry.isRecurring {
-            Button("Пропустить это повторение") { env.act { try await calendar.skip(entry) } }
+            Button(tr("Skip this occurrence")) { env.act { try await calendar.skip(entry) } }
             Divider()
-            Button("Удалить всю серию", role: .destructive) { env.act { try await calendar.delete(entry.item) } }
+            Button(tr("Delete the whole series"), role: .destructive) { env.act { try await calendar.delete(entry.item) } }
         } else {
             Divider()
-            Button("Удалить", role: .destructive) { env.act { try await calendar.delete(entry.item) } }
+            Button(tr("Delete"), role: .destructive) { env.act { try await calendar.delete(entry.item) } }
         }
     }
 
@@ -125,11 +125,11 @@ struct EntryRow: View {
             DatePicker("", selection: $moveTarget, displayedComponents: .date)
                 .datePickerStyle(.graphical)
                 .labelsHidden()
-                .environment(\.locale, DateBridge.russian)
+                .environment(\.locale, DateBridge.locale)
             HStack {
-                Button("Отмена") { moving = false }.keyboardShortcut(.cancelAction)
+                Button(tr("Cancel")) { moving = false }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Перенести") {
+                Button(tr("Move")) {
                     moving = false
                     let target = DateBridge.localDate(moveTarget)
                     env.act { try await calendar.move(entry, to: target) }

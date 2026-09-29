@@ -24,8 +24,8 @@ struct HUDView: View {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Подготовка распознавания…").font(.callout.weight(.semibold))
-                    Text("Первый запуск: один раз, до пары минут").font(.caption).foregroundStyle(.secondary)
+                    Text(tr("Preparing speech recognition…")).font(.callout.weight(.semibold))
+                    Text(tr("First launch: once, up to a couple of minutes")).font(.caption).foregroundStyle(.secondary)
                 }
             }
         case let .recording(handsFree):
@@ -34,24 +34,24 @@ struct HUDView: View {
                 LevelBars(level: model.level)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: Self.clock(model.elapsed)).font(.callout.monospacedDigit().weight(.semibold))
-                    Text(handsFree ? "Идёт запись. Нажмите Fn, чтобы закончить" : "Говорите… отпустите Fn, когда закончите")
+                    Text(handsFree ? tr("Recording. Press Fn to finish") : tr("Speak… release Fn when you are done"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Button(action: actions.cancel) { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Отменить запись")
-                    .accessibilityLabel("Отменить запись")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help(tr("Cancel recording"))
+                    .accessibilityLabel(tr("Cancel recording"))
             }
         case .transcribing:
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
-                Text("Распознаю…").font(.callout.weight(.semibold))
+                Text(tr("Recognizing…")).font(.callout.weight(.semibold))
             }
         case let .interpreting(text):
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    Text("Думаю…").font(.callout.weight(.semibold))
+                    Text(tr("Thinking…")).font(.callout.weight(.semibold))
                 }
                 Text(verbatim: "«\(text)»").font(.caption).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -62,7 +62,7 @@ struct HUDView: View {
                 ResultContent(toast: toast, actions: actions)
                 HStack(spacing: 10) {
                     LevelBars(level: model.level)
-                    Text("Слушаю ответ… Esc — отмена").font(.caption).foregroundStyle(.secondary)
+                    Text(tr("Listening for your answer… Esc to cancel")).font(.caption).foregroundStyle(.secondary)
                 }
             }
         case let .note(text, style):
@@ -140,8 +140,8 @@ private struct ResultContent: View {
                 }
                 if toast.undoOpID != nil || toast.editItemID != nil {
                     HStack(spacing: 14) {
-                        if let opID = toast.undoOpID { Button("Отменить") { actions.undo(opID) } }
-                        if let itemID = toast.editItemID { Button("Изменить") { actions.edit(itemID) } }
+                        if let opID = toast.undoOpID { Button(tr("Undo")) { actions.undo(opID) } }
+                        if let itemID = toast.editItemID { Button(tr("Edit")) { actions.edit(itemID) } }
                     }
                     .buttonStyle(.link).font(.callout)
                 }

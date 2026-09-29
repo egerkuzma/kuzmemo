@@ -7,11 +7,11 @@ public struct RecurrenceForm: Equatable, Sendable {
         /// Text for a picker.
         public var title: String {
             switch self {
-            case .none: "Не повторять"
-            case .daily: "Каждый день"
-            case .weekly: "Каждую неделю"
-            case .monthly: "Каждый месяц"
-            case .yearly: "Каждый год"
+            case .none: tr("Does not repeat")
+            case .daily: tr("Every day")
+            case .weekly: tr("Every week")
+            case .monthly: tr("Every month")
+            case .yearly: tr("Every year")
             }
         }
 
@@ -71,17 +71,15 @@ public struct RecurrenceForm: Equatable, Sendable {
         return rule.normalized(start: start)
     }
 
-    /// The interval in words for the stepper: "1 неделя", "2 недели", "5 недель".
+    /// The interval in words for the stepper: "1 week", "2 weeks" (in Russian "1 неделя", "2 недели", "5 недель").
     public var intervalText: String {
-        let forms: (String, String, String)
         switch repeatKind {
-        case .none: return ""
-        case .daily: forms = ("день", "дня", "дней")
-        case .weekly: forms = ("неделя", "недели", "недель")
-        case .monthly: forms = ("месяц", "месяца", "месяцев")
-        case .yearly: forms = ("год", "года", "лет")
+        case .none: ""
+        case .daily: trCount("%lld days", interval)
+        case .weekly: trCount("%lld weeks", interval)
+        case .monthly: trCount("%lld months", interval)
+        case .yearly: trCount("%lld years", interval)
         }
-        return "\(interval) \(RussianFormat.plural(interval, forms))"
     }
 }
 
@@ -90,15 +88,15 @@ public enum MemoFailure {
     public static func explanation(for memo: Memo) -> String {
         let reason = memo.failReason ?? ""
         if memo.failStage == "stt" {
-            if reason.contains("modelMissing") { return "Не найдена модель распознавания речи. Запись сохранена." }
-            return "Не удалось распознать речь. Запись сохранена."
+            if reason.contains("modelMissing") { return tr("The speech recognition model was not found. Your recording is saved.") }
+            return tr("Could not recognize the speech. Your recording is saved.")
         }
-        if reason.contains("notLoggedIn") { return "Claude не выполнил вход: выполните «claude auth login» в терминале." }
-        if reason.contains("executableNotFound") { return "Не найдена программа claude." }
-        if reason.contains("unsupportedCLI") { return "Установленная версия claude не поддерживает нужные параметры." }
-        if reason.contains("rateLimited") { return "Лимит Claude исчерпан." }
-        if reason.contains("timedOut") { return "Claude не ответил вовремя." }
-        if memo.failStage == "apply" { return "Не удалось сохранить изменение в календаре." }
-        return "Не удалось обработать запись."
+        if reason.contains("notLoggedIn") { return tr("Claude is not signed in: run “claude auth login” in a terminal.") }
+        if reason.contains("executableNotFound") { return tr("The claude program was not found.") }
+        if reason.contains("unsupportedCLI") { return tr("The installed version of claude does not support the options the app needs.") }
+        if reason.contains("rateLimited") { return tr("Claude’s usage limit is reached.") }
+        if reason.contains("timedOut") { return tr("Claude did not answer in time.") }
+        if memo.failStage == "apply" { return tr("Could not save the change in the calendar.") }
+        return tr("Could not process the phrase.")
     }
 }

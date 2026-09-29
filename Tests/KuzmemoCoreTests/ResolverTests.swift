@@ -23,7 +23,7 @@ struct ResolverTests {
     }
 
     @Test func weekdayIsStrictlyInTheFutureEvenOnThatWeekday() {
-        // Said on a Monday: "в понедельник" means next Monday, "в пятницу" this Friday.
+        // Said on a Monday: "в понедельник" (on Monday) means next Monday, "в пятницу" (on Friday) this Friday.
         let monday = resolver().resolve(When(mode: .weekday, weekday: .mon, weekOffset: 0, time: LocalTime("10:00")))
         #expect(monday.date == date("2026-10-05") && monday.time == LocalTime("10:00"))
         #expect(resolver().resolve(When(mode: .weekday, weekday: .fri, weekOffset: 0)).date == date("2026-10-02"))
@@ -35,7 +35,7 @@ struct ResolverTests {
         // Wednesday 2026-09-30: Monday of this week is behind us, so offset 0 rolls to next week.
         let wed = resolver("2026-09-30 10:00")
         #expect(wed.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 0)).date == date("2026-10-05"))
-        #expect(wed.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 1)).date == date("2026-10-05")) // "на следующей неделе"
+        #expect(wed.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 1)).date == date("2026-10-05")) // "на следующей неделе" (next week)
         #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 0)).date == date("2026-10-02"))
         #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 1)).date == date("2026-10-09"))
         #expect(wed.resolve(When(mode: .weekday, weekday: .fri, weekOffset: 2)).date == date("2026-10-16"))
@@ -44,7 +44,7 @@ struct ResolverTests {
         let sun = resolver("2026-10-04 10:00")
         #expect(sun.resolve(When(mode: .weekday, weekday: .mon, weekOffset: 0)).date == date("2026-10-05"))
         #expect(sun.resolve(When(mode: .weekday, weekday: .sun, weekOffset: 0)).date == date("2026-10-11"))
-        // From Monday, "на следующей неделе" (mon, 1) is the coming Monday, not the one after
+        // From Monday, "на следующей неделе" (next week; mon, 1) is the coming Monday, not the one after
         #expect(resolver().resolve(When(mode: .weekday, weekday: .mon, weekOffset: 1)).date == date("2026-10-05"))
         // negative offsets point into the past and are flagged
         #expect(resolver().resolve(When(mode: .weekday, weekday: .fri, weekOffset: -1)).issues == [.inThePast])

@@ -10,7 +10,7 @@ struct SearchResultsView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Поиск").font(.title2.weight(.semibold))
+                Text(tr("Search")).font(.title2.weight(.semibold))
                 Text(verbatim: summary).font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -20,8 +20,8 @@ struct SearchResultsView: View {
             if calendar.searchResults.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.tertiary)
-                    Text(calendar.searchText.isEmpty ? "Введите запрос" : "Ничего не найдено").foregroundStyle(.secondary)
-                    if !calendar.searchText.isEmpty { Text("Ищу по названию, подробностям и словам записи").font(.caption).foregroundStyle(.tertiary) }
+                    Text(calendar.searchText.isEmpty ? tr("Enter a query") : tr("Nothing found")).foregroundStyle(.secondary)
+                    if !calendar.searchText.isEmpty { Text(tr("Searches titles, details and keywords")).font(.caption).foregroundStyle(.tertiary) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -39,8 +39,8 @@ struct SearchResultsView: View {
 
     private var summary: String {
         let query = calendar.searchText.trimmingCharacters(in: .whitespaces)
-        if query.isEmpty { return "Найдите запись по названию или слову" }
-        return "«\(query)» — \(RussianFormat.entryCount(calendar.searchResults.count))"
+        if query.isEmpty { return tr("Find an entry by title or keyword") }
+        return "«\(query)» — \(Wording.entryCount(calendar.searchResults.count))"
     }
 }
 
@@ -74,15 +74,15 @@ private struct SearchRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Открыть день") { open() }
-            Button("Изменить…") { env.editorRequest = .edit(item) }
+            Button(tr("Open day")) { open() }
+            Button(tr("Edit…")) { env.editorRequest = .edit(item) }
         }
         .accessibilityElement(children: .combine)
     }
 
     private var dateText: String {
-        guard let date = item.date else { return "Без даты" }
-        let base = RussianFormat.date(date)
+        guard let date = item.date else { return tr("No date") }
+        let base = Wording.date(date)
         return item.time.map { "\(base), \($0)" } ?? base
     }
 

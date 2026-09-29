@@ -20,7 +20,7 @@ final class AppEnvironment {
         var options: [String] = []
         /// The journal entry this toast can undo.
         var undoOpID: String?
-        /// A single item this toast is about, which the "Изменить" button opens in the editor.
+        /// A single item this toast is about, which the "Edit" button opens in the editor.
         var editItemID: String?
     }
 
@@ -50,6 +50,13 @@ final class AppEnvironment {
     static let maxQuestions = 2
     /// A question nobody answers within this long is closed and the phrase kept as a note.
     static let questionLifetime: TimeInterval = 120
+
+    /// The language of the interface and of spoken output, and what the person chose (System / English / Русский).
+    /// The choice lives in the user defaults so that it is known before the database is read.
+    private(set) var language = AppLanguage.english
+    var languagePreference = LanguagePreference.system {
+        didSet { applyLanguagePreference() }
+    }
 
     let paths: AppPaths
     let clock = AdjustableNow()
@@ -99,6 +106,11 @@ final class AppEnvironment {
     }
 
     init() {
+        let stored = LanguagePreference(rawValue: UserDefaults.standard.string(forKey: Self.languageKey) ?? "") ?? .system
+        let resolved = stored.resolved()
+        languagePreference = stored
+        language = resolved
+        Localization.set(resolved)
         paths = AppPaths.resolve()
         version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
         do {
@@ -138,6 +150,23 @@ final class AppEnvironment {
             }
             do { try server.start(); controlServer = server } catch { NSLog("Kuzmemo: control server failed: \(error)") }
         }
+    }
+
+    // MARK: - Language
+
+    private static let languageKey = "interfaceLanguage"
+
+    /// Puts a changed language choice to work: the texts of the whole app are built again in the new language.
+    private func applyLanguagePreference() {
+        UserDefaults.standard.set(languagePreference.rawValue, forKey: Self.languageKey)
+        let resolved = languagePreference.resolved()
+        guard resolved != language else { return }
+        language = resolved
+        Localization.set(resolved)
+        AppWindow.settings.window?.title = tr("Settings")
+        notifications?.requestSync(after: .milliseconds(200))
+        voice?.languageChanged()
+        Task { await reloadToday() }
     }
 
     // MARK: - Calendar
@@ -182,7 +211,7 @@ final class AppEnvironment {
         guard let question = taken ?? takeQuestion() else { return }
         if keep, let outcome = await processor.keepAsNote(memoID: question.memoID), case let .applied(result) = outcome.kind {
             toast = Toast(
-                style: .warning, lines: ["Не дождался ответа — сохранил как заметку без даты."], undoOpID: result.op?.id
+                style: .warning, lines: [tr("No answer came — saved as an undated note.")], undoOpID: result.op?.id
             )
         } else {
             await processor.discard(memoID: question.memoID, reason: "the question was cancelled")
@@ -212,9 +241,9 @@ final class AppEnvironment {
     func undo(opID: String) async {
         do {
             try await store.undo(opID: opID)
-            toast = Toast(style: .success, lines: ["Отменено"])
+            toast = Toast(style: .success, lines: [tr("Undone")])
         } catch {
-            toast = Toast(style: .error, lines: ["Не удалось отменить: изменение уже затронуто новыми правками."])
+            toast = Toast(style: .error, lines: [tr("Could not undo: the change was already affected by newer edits.")])
         }
     }
 
@@ -252,13 +281,13 @@ final class AppEnvironment {
         switch error {
         case let problem as ItemDraft.Problem:
             switch problem {
-            case .emptyTitle: "Введите название записи."
-            case .repeatWithoutDate: "Для повторяющейся записи нужна дата начала."
+            case .emptyTitle: tr("Enter a title for the entry.")
+            case .repeatWithoutDate: tr("A repeating entry needs a start date.")
             }
         case is StoreError:
-            "Запись уже изменилась: обновите окно и повторите."
+            tr("The entry has changed: refresh the window and try again.")
         default:
-            "Не удалось выполнить действие: \(error)"
+            tr("Could not do that: %1$@", "\(error)")
         }
     }
 
@@ -277,7 +306,7 @@ final class AppEnvironment {
     }
 
     /// Closes the menu-bar popover if it is open. SwiftUI leaves the window of a `.window`-style menu bar extra on the
-    /// screen until the person clicks somewhere else, which is wrong after choosing "Открыть" or "Настройки…".
+    /// screen until the person clicks somewhere else, which is wrong after choosing "Open" or "Settings…".
     func closePopover() {
         guard let window = popoverWindow, window.isVisible else { return }
         MenuBarPopover.hide(window)
@@ -289,7 +318,7 @@ final class AppEnvironment {
         closePopover()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title == "Kuzmemo" && $0.styleMask.contains(.titled) }) {
+        if let window = AppWindow.main.window {
             window.makeKeyAndOrderFront(nil)
         } else {
             openWindowAction?()
@@ -302,7 +331,7 @@ final class AppEnvironment {
         if let tab { settingsTab = tab }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title == "Настройки" && $0.styleMask.contains(.titled) }) {
+        if let window = AppWindow.settings.window {
             window.makeKeyAndOrderFront(nil)
         } else {
             openSettingsAction?()
@@ -311,7 +340,7 @@ final class AppEnvironment {
 
     // MARK: - Inbox cards
 
-    /// "Повторить": recognise the kept recording again, or ask Claude again.
+    /// "Retry": recognise the kept recording again, or ask Claude again.
     func retry(memo: Memo) {
         Task { @MainActor in
             baseStatus = .thinking
@@ -324,7 +353,7 @@ final class AppEnvironment {
         }
     }
 
-    /// "Править текст и повторить".
+    /// "Edit text…" followed by "Retry with this text".
     func editAndRetry(memo: Memo, text: String) {
         Task { @MainActor in
             baseStatus = .thinking
@@ -373,10 +402,10 @@ final class AppEnvironment {
                 // said rather than ask again.
                 if let saved = await processor.keepAsNote(memoID: outcome.memo.id), case let .applied(result) = saved.kind {
                     toast = Toast(
-                        style: .warning, lines: ["Не удалось уточнить — сохранил как заметку без даты."], undoOpID: result.op?.id
+                        style: .warning, lines: [tr("Could not clarify — saved as an undated note.")], undoOpID: result.op?.id
                     )
                 } else {
-                    toast = Toast(style: .warning, lines: ["Не удалось уточнить. Ничего не сохранено."])
+                    toast = Toast(style: .warning, lines: [tr("Could not clarify. Nothing was saved.")])
                 }
             } else {
                 toast = Toast(style: .question, lines: [clarification.question], options: clarification.options)
@@ -387,7 +416,7 @@ final class AppEnvironment {
             }
         case .unknown:
             baseStatus = .idle
-            toast = Toast(style: .warning, lines: ["Не похоже на команду для календаря. Ничего не сохранено."])
+            toast = Toast(style: .warning, lines: [tr("That does not sound like a calendar command. Nothing was saved.")])
         case let .failed(error, retryAt):
             baseStatus = .error
             toast = Toast(style: .error, lines: [Self.message(for: error, retryAt: retryAt, today: now.date)])
@@ -396,12 +425,12 @@ final class AppEnvironment {
 
     /// A plain-text answer for a query (the spoken version comes with the voice path).
     static func digest(_ result: QueryResult?, today: LocalDate) -> String {
-        guard let result else { return "Не удалось получить ответ." }
-        if result.entries.isEmpty { return "Пусто (\(result.title))." }
+        guard let result else { return tr("Could not get an answer.") }
+        if result.entries.isEmpty { return tr("Nothing (%1$@).", "\(result.title)") }
         let count = result.entries.count
-        var lines = ["\(count) \(RussianFormat.plural(count, ("запись", "записи", "записей"))) — \(result.title):"]
+        var lines = ["\(trCount("%lld entries", count)) — \(result.title):"]
         for entry in result.entries.prefix(8) {
-            let when = entry.time.map { "\($0)" } ?? "весь день"
+            let when = entry.time.map { "\($0)" } ?? tr("all day")
             lines.append("\(when) — \(entry.item.title)")
         }
         return lines.joined(separator: "\n")
@@ -410,19 +439,19 @@ final class AppEnvironment {
     static func message(for error: LLMError, retryAt: Date?, today: LocalDate) -> String {
         switch error {
         case .notLoggedIn:
-            return "Claude не выполнил вход. Запустите «claude auth login» в терминале. Запись сохранена."
+            return tr("Claude is not signed in. Run “claude auth login” in a terminal. Your phrase is saved.")
         case .executableNotFound:
-            return "Не нашёл программу claude. Укажите путь к ней в настройках. Запись сохранена."
+            return tr("Could not find the claude program. Install Claude Code and try again. Your phrase is saved.")
         case .rateLimited:
-            return "Лимит Claude исчерпан. Запись сохранена, повторю позже."
+            return tr("Claude’s usage limit is reached. Your phrase is saved; I will try again later.")
         case .timedOut:
-            return "Claude не ответил вовремя. Запись сохранена, повторю позже."
+            return tr("Claude did not answer in time. Your phrase is saved; I will try again later.")
         case .unsupportedCLI:
-            return "Установленная версия claude не поддерживает нужные параметры. Запись сохранена."
+            return tr("The installed version of claude does not support the options the app needs. Your phrase is saved.")
         default:
             return retryAt == nil
-                ? "Не удалось обработать запись. Она сохранена."
-                : "Не удалось обработать запись. Она сохранена, повторю позже."
+                ? tr("Could not process the phrase. It is saved.")
+                : tr("Could not process the phrase. It is saved; I will try again later.")
         }
     }
 }

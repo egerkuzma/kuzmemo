@@ -147,11 +147,11 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
 
     func registerCategories() {
         guard isLive else { return }
-        let done = UNNotificationAction(identifier: "done", title: "Готово", options: [])
+        let done = UNNotificationAction(identifier: "done", title: tr("Done"), options: [])
         let snoozes = env.settings.notifications.snoozeMinutes.map { minutes in
             UNNotificationAction(
                 identifier: "snooze-\(minutes)",
-                title: RussianFormat.leadPhrase(minutes).replacingOccurrences(of: "Через ", with: "Отложить на "), options: []
+                title: tr("Snooze for %1$@", Wording.duration(minutes: minutes)), options: []
             )
         }
         UNUserNotificationCenter.current().setNotificationCategories([
@@ -164,17 +164,17 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     /// Shows a notification in a second with the given sound, so the person can see and hear a setting.
     /// Returns a message when it cannot be shown.
     func sendTest(sound: AlertSound) async -> String? {
-        guard isLive else { return "В этой сборке системные уведомления выключены." }
+        guard isLive else { return tr("System notifications are turned off in this build.") }
         await refreshAccess()
         if access == .notDetermined { _ = await requestAccess() }
-        guard access == .allowed else { return "Уведомления запрещены: разрешите их в Системных настройках → Уведомления → Kuzmemo." }
+        guard access == .allowed else { return tr("Notifications are blocked: allow them in System Settings → Notifications → Kuzmemo.") }
         do {
             try await UNUserNotificationCenter.current().add(NotificationRequestBuilder.test(
-                sound: sound, title: "Проверка уведомления", body: "Так будет выглядеть напоминание · \(SoundCatalog.title(for: sound))"
+                sound: sound, title: tr("Notification test"), body: tr("This is how a reminder will look · %1$@", "\(SoundCatalog.title(for: sound))")
             ))
             return nil
         } catch {
-            return "Не удалось показать уведомление: \(error.localizedDescription)"
+            return tr("Could not show the notification: %1$@", "\(error.localizedDescription)")
         }
     }
 
@@ -193,9 +193,9 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             let glossary = (try? await env.store.glossary()) ?? []
             let title = Glossary.spokenForm(of: next.title, terms: glossary)
             let phrase: String = switch next.kind {
-            case .headsUp: RussianFormat.leadPhrase(next.leadMinutes) + ": " + title
-            case .atTime: "Сейчас: " + title
-            case .allDay: "Напоминание на сегодня: " + title
+            case .headsUp: tr("%1$@: %2$@", Wording.leadPhrase(next.leadMinutes), title)
+            case .atTime: tr("Now: %1$@", title)
+            case .allDay: tr("Reminder for today: %1$@", title)
             }
             await env.voice.speech.speak(phrase)
             requestSync(after: .seconds(1))
@@ -231,7 +231,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             guard !itemID.isEmpty else { return }
             env.act {
                 let result = try await self.env.store.perform(
-                    .complete(itemID: itemID, occurrenceDate: LocalDate(occurrence)), label: "Выполнено из уведомления"
+                    .complete(itemID: itemID, occurrenceDate: LocalDate(occurrence)), label: tr("Completed from a notification")
                 )
                 return ActionOutcome(op: result.op, lines: result.changes.map { $0.summary(today: self.env.clock.localNow().date) })
             }

@@ -13,50 +13,59 @@ struct GeneralSettingsTab: View {
     private var permissions: PermissionsModel { env.voice.permissions }
 
     var body: some View {
+        @Bindable var env = env
         Form {
-            Section("Запуск") {
-                Toggle("Запускать Kuzmemo при входе в систему", isOn: Binding(
+            Section(tr("Language")) {
+                Picker(tr("Interface language"), selection: $env.languagePreference) {
+                    Text(tr("Same as the system")).tag(LanguagePreference.system)
+                    Text(AppLanguage.english.nativeName).tag(LanguagePreference.english)
+                    Text(AppLanguage.russian.nativeName).tag(LanguagePreference.russian)
+                }
+                Hint(tr("Menus, messages, notifications and spoken answers follow this language. It does not change the language you speak: that is chosen in the Recognition tab."))
+            }
+            Section(tr("Launch")) {
+                Toggle(tr("Open Kuzmemo at login"), isOn: Binding(
                     get: { loginStatus == .enabled || loginStatus == .requiresApproval },
                     set: setLaunchAtLogin
                 ))
                 .disabled(AppPaths.isAutomation)
                 if AppPaths.isAutomation {
-                    Hint("В этой сборке (для автоматических проверок) автозапуск выключен.")
+                    Hint(tr("Launch at login is off in this build (it is used for automated checks)."))
                 } else if loginStatus == .requiresApproval {
-                    Hint("Разрешите запуск в Системных настройках → Основные → Объекты входа.")
-                    Button("Открыть объекты входа") { SMAppService.openSystemSettingsLoginItems() }
+                    Hint(tr("Allow it in System Settings → General → Login Items."))
+                    Button(tr("Open Login Items")) { SMAppService.openSystemSettingsLoginItems() }
                 } else {
-                    Hint("Приложение живёт в строке меню и не занимает Dock, пока окно закрыто.")
+                    Hint(tr("The app lives in the menu bar and stays out of the Dock while its window is closed."))
                 }
                 if let loginError { Text(verbatim: loginError).font(.caption).foregroundStyle(.red) }
             }
-            Section("Разрешения") {
+            Section(tr("Permissions")) {
                 PermissionRow(
-                    title: "Микрофон", state: microphoneState,
+                    title: tr("Microphone"), state: microphoneState,
                     action: microphoneAction
                 )
                 PermissionRow(
-                    title: "Мониторинг ввода (клавиша Fn)",
+                    title: tr("Input Monitoring (the Fn key)"),
                     state: AppPaths.isAutomation ? .notNeeded : (permissions.inputMonitoring ? .granted : .missing),
-                    action: ("Разрешить…", { env.voice.requestInputMonitoring() })
+                    action: (tr("Allow…"), { env.voice.requestInputMonitoring() })
                 )
-                Hint("Без «Мониторинга ввода» клавиша Fn не работает, но кнопка записи и запасное сочетание остаются.")
-                PermissionRow(title: "Уведомления", state: env.notifications.permissionState, action: env.notifications.permissionAction)
-                Hint("Напоминания приходят системными уведомлениями. Как они выглядят и звучат, настраивается на вкладке «Уведомления».")
+                Hint(tr("Without Input Monitoring the Fn key does not work, but the record button and the fallback shortcut still do."))
+                PermissionRow(title: tr("Notifications"), state: env.notifications.permissionState, action: env.notifications.permissionAction)
+                Hint(tr("Reminders arrive as system notifications. How they look and sound is set in the Notifications tab."))
             }
-            Section("Данные") {
-                LabeledContent("База данных") {
+            Section(tr("Data")) {
+                LabeledContent(tr("Database")) {
                     HStack {
                         Text(verbatim: env.paths.database.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        Button("Показать") { NSWorkspace.shared.activateFileViewerSelecting([env.paths.database]) }
+                        Button(tr("Show")) { NSWorkspace.shared.activateFileViewerSelecting([env.paths.database]) }
                     }
                 }
-                Hint("Записи, глоссарий и настройки хранятся только на этом Mac. Звук удаляется сразу после расшифровки; в Anthropic уходит только текст фразы.")
+                Hint(tr("Entries, the glossary and settings are stored on this Mac only. Audio is deleted right after transcription; only the text of the phrase is sent to Anthropic."))
             }
-            Section("О программе") {
-                LabeledContent("Версия") { Text(verbatim: env.version).foregroundStyle(.secondary) }
+            Section(tr("About")) {
+                LabeledContent(tr("Version")) { Text(verbatim: env.version).foregroundStyle(.secondary) }
                 if let commit = Bundle.main.object(forInfoDictionaryKey: "KuzmemoGitCommit") as? String {
-                    LabeledContent("Сборка") { Text(verbatim: commit).foregroundStyle(.secondary).textSelection(.enabled) }
+                    LabeledContent(tr("Build")) { Text(verbatim: commit).foregroundStyle(.secondary).textSelection(.enabled) }
                 }
             }
         }
@@ -75,7 +84,7 @@ struct GeneralSettingsTab: View {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
-            loginError = "Не получилось изменить автозапуск: \(error.localizedDescription)"
+            loginError = tr("Could not change launch at login: %1$@", "\(error.localizedDescription)")
         }
         loginStatus = SMAppService.mainApp.status
     }
@@ -92,8 +101,8 @@ struct GeneralSettingsTab: View {
 
     private var microphoneAction: (String, () -> Void) {
         permissions.microphone == .notDetermined
-            ? ("Разрешить…", { Task { await permissions.requestMicrophone() } })
-            : ("Открыть настройки", { PermissionsModel.openSettings(.microphone) })
+            ? (tr("Allow…"), { Task { await permissions.requestMicrophone() } })
+            : (tr("Open Settings"), { PermissionsModel.openSettings(.microphone) })
     }
 }
 
@@ -108,14 +117,14 @@ struct PermissionRow: View {
         LabeledContent(title) {
             HStack {
                 switch state {
-                case .granted: Label("Разрешено", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                case .granted: Label(tr("Allowed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                 case .undecided:
-                    Label("Не запрашивалось", systemImage: "questionmark.circle").foregroundStyle(.orange)
+                    Label(tr("Not requested"), systemImage: "questionmark.circle").foregroundStyle(.orange)
                     Button(action.0, action: action.1)
                 case .missing:
-                    Label("Нет доступа", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Label(tr("No access"), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Button(action.0, action: action.1)
-                case .notNeeded: Text("не нужно в этой сборке").foregroundStyle(.secondary)
+                case .notNeeded: Text(tr("not needed in this build")).foregroundStyle(.secondary)
                 }
             }
         }

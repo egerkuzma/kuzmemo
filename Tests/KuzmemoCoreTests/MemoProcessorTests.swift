@@ -269,7 +269,7 @@ struct MemoProcessorTests {
                                         inputKind: .voice, status: .failed, transcriptRaw: "напомни послезавтра", attempts: 1))
         _ = await processor.retry(memoID: "old")
         #expect(provider.requests.first?.userMessage.contains("<now>Sunday 2026-09-20 09:00 (Europe/Moscow, UTC+03:00)</now>") == true)
-        // "послезавтра" from 2026-09-20 is 2026-09-22
+        // "послезавтра" (the day after tomorrow) from 2026-09-20 is 2026-09-22
         #expect(try await store.items(on: LocalDate("2026-09-22")!).count == 1)
     }
 

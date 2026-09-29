@@ -9,10 +9,10 @@ public enum SileroError: Error, Equatable, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case let .startFailed(text): "Silero не запустился: \(text)"
-        case let .exited(text): "Silero остановился: \(text)"
-        case .timedOut: "Silero не ответил вовремя."
-        case let .failed(text): "Silero не смог озвучить фразу: \(text)"
+        case let .startFailed(text): tr("Silero did not start: %1$@", text)
+        case let .exited(text): tr("Silero stopped: %1$@", text)
+        case .timedOut: tr("Silero did not answer in time.")
+        case let .failed(text): tr("Silero could not speak the phrase: %1$@", text)
         }
     }
 }
@@ -117,7 +117,7 @@ public actor SileroHelper {
                     try send(request)
                 } catch {
                     pending[id] = nil
-                    continuation.resume(throwing: SileroError.exited("не удалось передать фразу: \(error.localizedDescription)"))
+                    continuation.resume(throwing: SileroError.exited(tr("could not hand the phrase over: %1$@", error.localizedDescription)))
                     return
                 }
                 let limit = requestTimeout
@@ -145,7 +145,7 @@ public actor SileroHelper {
             for _ in 0 ..< 10 where process.isRunning { try? await Task.sleep(for: .milliseconds(100)) }
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
-        cleanUp(failWith: SileroError.exited("остановлен"))
+        cleanUp(failWith: SileroError.exited(tr("stopped")))
     }
 
     // MARK: - Starting
@@ -214,7 +214,7 @@ public actor SileroHelper {
 
     private func startTimedOut(run started: Int) {
         guard started == run, state == .starting else { return }
-        fail(SileroError.startFailed("не загрузился за \(Int(startTimeout)) с"))
+        fail(SileroError.startFailed(tr("did not load within %1$lld s", numbers: Int(startTimeout))))
     }
 
     // MARK: - Events from the process
@@ -239,7 +239,7 @@ public actor SileroHelper {
                 waiters = []
                 for waiter in waiting { waiter.resume() }
             case "error":
-                fail(SileroError.startFailed((message["error"] as? String) ?? "неизвестная ошибка"))
+                fail(SileroError.startFailed((message["error"] as? String) ?? tr("unknown error")))
             default: break
             }
             return
@@ -251,7 +251,7 @@ public actor SileroHelper {
             let result = SileroSynthesis(url: URL(fileURLWithPath: path), seconds: seconds, milliseconds: (message["ms"] as? Int) ?? 0)
             if let continuation { continuation.resume(returning: result) } else { try? FileManager.default.removeItem(at: result.url) }
         } else {
-            continuation?.resume(throwing: SileroError.failed((message["error"] as? String) ?? "неизвестная ошибка"))
+            continuation?.resume(throwing: SileroError.failed((message["error"] as? String) ?? tr("unknown error")))
         }
     }
 
@@ -277,7 +277,8 @@ public actor SileroHelper {
 
     private func finishExit(run started: Int) {
         guard started == run, process != nil, let status = exitStatus else { return }
-        let detail = diagnostics.isEmpty ? "код \(status)" : "код \(status): \(diagnostics.split(separator: "\n").last.map(String.init) ?? "")"
+        let last = diagnostics.split(separator: "\n").last.map(String.init) ?? ""
+        let detail = diagnostics.isEmpty ? tr("exit code %1$lld", numbers: Int(status)) : tr("exit code %1$@: %2$@", "\(status)", last)
         cleanUp(failWith: state == .starting ? SileroError.startFailed(detail) : SileroError.exited(detail))
     }
 
@@ -334,7 +335,7 @@ public actor SileroHelper {
     // MARK: - Pipes
 
     private func send(_ object: [String: Any]) throws {
-        guard let handle = stdinPipe?.fileHandleForWriting else { throw SileroError.exited("не запущен") }
+        guard let handle = stdinPipe?.fileHandleForWriting else { throw SileroError.exited(tr("not running")) }
         var data = try JSONSerialization.data(withJSONObject: object)
         data.append(0x0A)
         try handle.write(contentsOf: data)

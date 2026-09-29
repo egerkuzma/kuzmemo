@@ -42,13 +42,13 @@ struct MonthView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(verbatim: RussianFormat.monthTitle(calendar.grid.month)).font(.title3.weight(.semibold))
+            Text(verbatim: Wording.monthTitle(calendar.grid.month)).font(.title3.weight(.semibold))
             Spacer()
             Button { calendar.moveMonth(by: -1) } label: { Image(systemName: "chevron.left") }
-                .help("Предыдущий месяц (⌘←)").accessibilityLabel("Предыдущий месяц")
-            Button("Сегодня") { calendar.goToToday() }.help("К сегодняшнему дню (⌘T)")
+                .help(tr("Previous month (⌘←)")).accessibilityLabel(tr("Previous month"))
+            Button(tr("Today")) { calendar.goToToday() }.help(tr("Go to today (⌘T)"))
             Button { calendar.moveMonth(by: 1) } label: { Image(systemName: "chevron.right") }
-                .help("Следующий месяц (⌘→)").accessibilityLabel("Следующий месяц")
+                .help(tr("Next month (⌘→)")).accessibilityLabel(tr("Next month"))
         }
         .buttonStyle(.borderless)
     }
@@ -56,7 +56,7 @@ struct MonthView: View {
     private var weekdays: some View {
         HStack(spacing: 2) {
             ForEach(Weekday.allCases, id: \.self) { weekday in
-                Text(verbatim: RussianFormat.weekdayShortName(weekday))
+                Text(verbatim: Wording.weekdayShortName(weekday))
                     .font(.caption)
                     .foregroundStyle(weekday.rawValue >= 6 ? .tertiary : .secondary)
                     .frame(maxWidth: .infinity)
@@ -91,7 +91,7 @@ private struct DayCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(verbatim: "\(RussianFormat.dayTitle(date)), \(RussianFormat.entryCount(marker?.total ?? 0))"))
+        .accessibilityLabel(Text(verbatim: "\(Wording.dayTitle(date)), \(Wording.entryCount(marker?.total ?? 0))"))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 

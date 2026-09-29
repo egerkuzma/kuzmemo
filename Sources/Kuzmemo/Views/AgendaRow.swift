@@ -6,7 +6,7 @@ struct AgendaRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: entry.time.map { "\($0)" } ?? "весь день")
+            Text(verbatim: entry.time.map { "\($0)" } ?? tr("all day"))
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -18,11 +18,11 @@ struct AgendaRow: View {
             Spacer(minLength: 0)
             if entry.isRecurring {
                 Image(systemName: "repeat").font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityLabel("Повторяется")
+                    .accessibilityLabel(tr("Repeats"))
             }
             if entry.item.source == .voice {
                 Image(systemName: "mic.fill").font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityLabel("Голосовая запись")
+                    .accessibilityLabel(tr("Voice entry"))
             }
         }
         .accessibilityElement(children: .combine)

@@ -48,13 +48,13 @@ struct ItemEditorView: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    TextField("", text: $draft.title, prompt: Text("Название"), axis: .vertical)
+                    TextField("", text: $draft.title, prompt: Text(tr("Title")), axis: .vertical)
                         .labelsHidden()
                         .font(.title3)
                         .lineLimit(1 ... 3)
                         .focused($titleFocused)
-                    Picker("Тип", selection: $draft.kind) {
-                        ForEach([ItemKind.reminder, .event, .task, .note], id: \.self) { Text(verbatim: $0.russianName).tag($0) }
+                    Picker(tr("Type"), selection: $draft.kind) {
+                        ForEach([ItemKind.reminder, .event, .task, .note], id: \.self) { Text(verbatim: $0.displayName).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -64,36 +64,36 @@ struct ItemEditorView: View {
                         if hasDate {
                             DatePicker("", selection: $dateValue, displayedComponents: .date).labelsHidden()
                         } else {
-                            Text("Во «Входящих»").foregroundStyle(.secondary)
+                            Text(tr("In the Inbox")).foregroundStyle(.secondary)
                         }
                     } label: {
-                        Toggle("Дата", isOn: $hasDate.animation())
+                        Toggle(tr("Date"), isOn: $hasDate.animation())
                     }
                     if hasDate {
                         LabeledContent {
                             if hasTime {
                                 DatePicker("", selection: $timeValue, displayedComponents: .hourAndMinute).labelsHidden()
                             } else {
-                                Text("Весь день").foregroundStyle(.secondary)
+                                Text(tr("All day")).foregroundStyle(.secondary)
                             }
                         } label: {
-                            Toggle("Время", isOn: $hasTime.animation())
+                            Toggle(tr("Time"), isOn: $hasTime.animation())
                         }
                         if hasTime {
                             if draft.kind == .event {
                                 Stepper(value: durationBinding, in: 0 ... 1440, step: 15) {
-                                    Text(verbatim: "Длительность: \(durationText)")
+                                    Text(verbatim: tr("Duration: %1$@", "\(durationText)"))
                                 }
                             }
-                            Picker("Напомнить заранее", selection: $draft.remindLeadMin) {
+                            Picker(tr("Remind in advance"), selection: $draft.remindLeadMin) {
                                 ForEach(Self.leadOptions(including: draft.remindLeadMin), id: \.minutes) { Text(verbatim: $0.title).tag($0.minutes) }
                             }
-                            Hint("Сроки уведомлений вообще выбираются в настройках. Здесь можно добавить ещё один ранний сигнал для этой записи.")
+                            Hint(tr("Notification times are chosen in Settings. Here you can add one more early alert for this entry."))
                         }
                     }
                 }
                 if hasDate { repeatSection }
-                Section("Подробности") {
+                Section(tr("Details")) {
                     TextEditor(text: $draft.details)
                         .font(.body)
                         .frame(minHeight: 50, maxHeight: 80)
@@ -101,7 +101,7 @@ struct ItemEditorView: View {
                 }
                 if let sourceText {
                     Section {
-                        Label { Text(verbatim: "Из реплики: «\(sourceText)»").font(.callout) } icon: { Image(systemName: "mic.fill") }
+                        Label { Text(verbatim: tr("From the phrase: “%1$@”", "\(sourceText)")).font(.callout) } icon: { Image(systemName: "mic.fill") }
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -111,7 +111,7 @@ struct ItemEditorView: View {
             footer
         }
         .frame(width: 480, height: 560)
-        .environment(\.locale, DateBridge.russian)
+        .environment(\.locale, DateBridge.locale)
         .task {
             titleFocused = isNew
             if case let .edit(item) = request, let memoID = item.memoID {
@@ -123,13 +123,13 @@ struct ItemEditorView: View {
     // MARK: Repeat
 
     @ViewBuilder private var repeatSection: some View {
-        Section("Повтор") {
-            Picker("Повторять", selection: $form.repeatKind.animation()) {
+        Section(tr("Repeat")) {
+            Picker(tr("Repeat rule"), selection: $form.repeatKind.animation()) {
                 ForEach(RecurrenceForm.Repeat.allCases, id: \.self) { Text(verbatim: $0.title).tag($0) }
             }
             if form.repeatKind != .none {
                 Stepper(value: $form.interval, in: 1 ... 99) {
-                    Text(verbatim: "Интервал: \(form.intervalText)")
+                    Text(verbatim: tr("Interval: %1$@", "\(form.intervalText)"))
                 }
                 if form.repeatKind == .weekly {
                     HStack(spacing: 4) {
@@ -137,29 +137,29 @@ struct ItemEditorView: View {
                             WeekdayChip(day: day, isOn: weekdayBinding(day))
                         }
                     }
-                    Text("Если ничего не выбрано, повторяется в день недели даты начала").font(.caption).foregroundStyle(.secondary)
+                    Text(tr("If none is selected, it repeats on the weekday of the start date")).font(.caption).foregroundStyle(.secondary)
                 }
                 if form.repeatKind == .monthly {
-                    Toggle("В день месяца как у даты начала", isOn: Binding(
+                    Toggle(tr("On the same day of the month as the start date"), isOn: Binding(
                         get: { form.monthday == nil }, set: { form.monthday = $0 ? nil : DateBridge.localDate(dateValue).day }
                     ))
                     if form.monthday != nil {
                         Stepper(value: Binding(get: { form.monthday ?? 1 }, set: { form.monthday = $0 }), in: 1 ... 31) {
-                            Text(verbatim: "Число месяца: \(form.monthday ?? 1)")
+                            Text(verbatim: tr("Day of month: %1$lld", numbers: form.monthday ?? 1))
                         }
                     }
                 }
-                Picker("Окончание", selection: endKindBinding) {
-                    Text("Никогда").tag(EndKind.never)
-                    Text("В указанный день").tag(EndKind.until)
-                    Text("После числа повторений").tag(EndKind.count)
+                Picker(tr("Ends"), selection: endKindBinding) {
+                    Text(tr("Never")).tag(EndKind.never)
+                    Text(tr("On a date")).tag(EndKind.until)
+                    Text(tr("After a number of times")).tag(EndKind.count)
                 }
-                if endKind == .until { DatePicker("До", selection: $untilValue, displayedComponents: .date) }
+                if endKind == .until { DatePicker(tr("Until"), selection: $untilValue, displayedComponents: .date) }
                 if endKind == .count {
-                    Stepper(value: $countValue, in: 1 ... 1000) { Text(verbatim: "Повторений: \(countValue)") }
+                    Stepper(value: $countValue, in: 1 ... 1000) { Text(verbatim: tr("Times: %1$lld", numbers: countValue)) }
                 }
                 if let rule = currentRule {
-                    Label { Text(verbatim: RussianFormat.recurrenceDetailed(rule)) } icon: { Image(systemName: "repeat") }
+                    Label { Text(verbatim: Wording.recurrenceDetailed(rule)) } icon: { Image(systemName: "repeat") }
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
@@ -214,21 +214,21 @@ struct ItemEditorView: View {
 
     private var durationText: String {
         let minutes = draft.durationMin ?? 0
-        if minutes == 0 { return "не указана" }
+        if minutes == 0 { return tr("not set") }
         let hours = minutes / 60
         let rest = minutes % 60
-        return [hours > 0 ? "\(hours) ч" : nil, rest > 0 ? "\(rest) мин" : nil].compactMap { $0 }.joined(separator: " ")
+        return [hours > 0 ? tr("%1$lld h", numbers: hours) : nil, rest > 0 ? tr("%1$lld min", numbers: rest) : nil].compactMap { $0 }.joined(separator: " ")
     }
 
     private static let leads: [(minutes: Int, title: String)] = [
-        (0, "Как в настройках"), (5, "За 5 минут"), (10, "За 10 минут"), (15, "За 15 минут"),
-        (30, "За 30 минут"), (60, "За 1 час"), (1440, "За 1 день"),
+        (0, tr("As in Settings")), (5, tr("5 minutes before")), (10, tr("10 minutes before")), (15, tr("15 minutes before")),
+        (30, tr("30 minutes before")), (60, tr("1 hour before")), (1440, tr("1 day before")),
     ]
 
     /// The choices, plus the entry's own value when it is not one of them (an older or imported entry keeps it).
     private static func leadOptions(including current: Int) -> [(minutes: Int, title: String)] {
         guard current > 0, !leads.contains(where: { $0.minutes == current }) else { return leads }
-        return (leads + [(current, RussianFormat.leadBefore(current).capitalizedFirst)]).sorted { $0.minutes < $1.minutes }
+        return (leads + [(current, Wording.leadBefore(current).capitalizedFirst)]).sorted { $0.minutes < $1.minutes }
     }
 
     // MARK: Footer and saving
@@ -240,14 +240,14 @@ struct ItemEditorView: View {
             }
             HStack {
                 if case let .edit(item) = request {
-                    Button(item.recurrence == nil ? "Удалить" : "Удалить серию", role: .destructive) {
+                    Button(item.recurrence == nil ? tr("Delete") : tr("Delete series"), role: .destructive) {
                         env.act { try await env.calendar.delete(item) }
                         dismiss()
                     }
                 }
                 Spacer()
-                Button("Отмена") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isNew ? "Добавить" : "Сохранить", action: save).keyboardShortcut(.defaultAction)
+                Button(tr("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? tr("Add") : tr("Save"), action: save).keyboardShortcut(.defaultAction)
             }
         }
         .padding(.horizontal, 20)
@@ -280,7 +280,7 @@ private struct WeekdayChip: View {
 
     var body: some View {
         Button { isOn.toggle() } label: {
-            Text(verbatim: RussianFormat.weekdayShortName(day))
+            Text(verbatim: Wording.weekdayShortName(day))
                 .font(.callout.weight(isOn ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: 26)
                 .foregroundStyle(isOn ? Color.white : Color.primary)

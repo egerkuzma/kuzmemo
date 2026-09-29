@@ -64,7 +64,7 @@ public struct ItemDraft: Equatable, Sendable {
 
 extension Store {
     /// Adds an item made in the editor or the quick-add field. Journaled like any other change, so it can be undone.
-    public func create(_ draft: ItemDraft, source: ItemSource = .manual, label: String = "Новая запись") async throws -> (op: Op?, item: Item) {
+    public func create(_ draft: ItemDraft, source: ItemSource = .manual, label: String = "New entry") async throws -> (op: Op?, item: Item) {
         let clean = try draft.validated()
         let result = try await performReturning(label: label) { mutator -> Item in
             try mutator.insert(Item(
@@ -78,7 +78,7 @@ extension Store {
 
     /// Saves the editor's changes to an existing item (the whole series when it repeats).
     @discardableResult
-    public func save(_ draft: ItemDraft, as itemID: String, label: String = "Изменение записи") async throws -> Op? {
+    public func save(_ draft: ItemDraft, as itemID: String, label: String = "Edit entry") async throws -> Op? {
         let clean = try draft.validated()
         return try await perform(label: label) { mutator in
             _ = try mutator.update(id: itemID) { item in

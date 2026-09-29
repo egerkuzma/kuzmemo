@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import KuzmemoCore
 
 protocol SpeechOutput: AnyObject {
     var isSpeaking: Bool { get }
@@ -15,7 +16,8 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
     private let synthesizer = AVSpeechSynthesizer()
     private var continuation: CheckedContinuation<Void, Never>?
 
-    var voiceIdentifier: String?
+    /// The chosen voice for each language of the interface; `nil` picks the best installed voice of that language.
+    var voiceIdentifiers: [AppLanguage: String] = [:]
     var rate: Float = AVSpeechUtteranceDefaultSpeechRate
     var muted = false
 
@@ -44,17 +46,22 @@ final class SystemSpeechOutput: NSObject, SpeechOutput, AVSpeechSynthesizerDeleg
         resume()
     }
 
+    /// The voice for what is about to be said: the person's choice for the interface language if it is still installed
+    /// (and really speaks that language), else the best installed voice of the language.
     func chosenVoice() -> AVSpeechSynthesisVoice? {
-        if let voiceIdentifier, let voice = AVSpeechSynthesisVoice(identifier: voiceIdentifier) { return voice }
-        return Self.bestRussianVoice()
+        let language = Localization.current
+        if let identifier = voiceIdentifiers[language], let voice = AVSpeechSynthesisVoice(identifier: identifier),
+           voice.language.hasPrefix(language.rawValue) { return voice }
+        return Self.bestVoice(for: language)
     }
 
-    static func russianVoices() -> [AVSpeechSynthesisVoice] {
-        AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("ru") }.sorted { $0.quality.rawValue > $1.quality.rawValue }
+    /// Installed voices of a language, best quality first.
+    static func voices(for language: AppLanguage) -> [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(language.rawValue) }.sorted { $0.quality.rawValue > $1.quality.rawValue }
     }
 
-    static func bestRussianVoice() -> AVSpeechSynthesisVoice? {
-        russianVoices().first ?? AVSpeechSynthesisVoice(language: "ru-RU")
+    static func bestVoice(for language: AppLanguage) -> AVSpeechSynthesisVoice? {
+        voices(for: language).first ?? AVSpeechSynthesisVoice(language: language == .russian ? "ru-RU" : "en-US")
     }
 
     private func resume() {

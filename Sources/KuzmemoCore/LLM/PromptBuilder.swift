@@ -14,6 +14,7 @@ public struct PromptBuilder: Sendable {
     ) -> String {
         var lines: [String] = []
         lines.append("<now>\(nowText(anchor, timeZone))</now>")
+        lines.append("<language>\(Localization.current == .russian ? "Russian" : "English")</language>")
         lines.append("<defaults>morning=\(dayParts.morning) day=\(dayParts.day) evening=\(dayParts.evening) night=\(dayParts.night); a reminder without a time fires at \(dayParts.defaultReminder)</defaults>")
         let glossaryLine = Glossary.promptLine(terms: glossary)
         if !glossaryLine.isEmpty { lines.append("<glossary>\(Self.clean(glossaryLine))</glossary>") }
@@ -42,7 +43,7 @@ public struct PromptBuilder: Sendable {
 
     static let englishWeekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-    /// `2026-10-01 15:00 event "Встреча с Дмитрием"`, with repeat and done markers.
+    /// `2026-10-01 15:00 event "Meeting with Dmitry"`, with repeat and done markers.
     static func describe(_ entry: AgendaEntry) -> String {
         let item = entry.item
         var parts: [String] = []

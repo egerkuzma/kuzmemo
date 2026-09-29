@@ -15,12 +15,20 @@ enum SettingsRoutes {
             "speech": object(env.settings.speech), "recognition": object(env.settings.recognition), "recording": object(env.settings.recording),
             "notifications": object(env.settings.notifications),
         ]
-        return .json(["stored": stored, "live": live, "loaded": env.settings.loaded])
+        let interface: [String: Any] = ["preference": env.languagePreference.rawValue, "language": env.language.rawValue]
+        return .json(["stored": stored, "live": live, "interface": interface, "loaded": env.settings.loaded])
     }
 
-    /// `{"speech": {"rate": 0.4}, "recording": {"maxSeconds": 90}}`: named fields replace the current values.
+    /// `{"speech": {"rate": 0.4}, "recording": {"maxSeconds": 90}, "interface": {"language": "english"}}`: named fields
+    /// replace the current values. The interface language is "system", "english" or "russian".
     static func update(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         guard let json = request.jsonBody else { return .error("body must be JSON", status: 400) }
+        if let patch = json["interface"] as? [String: Any], let name = patch["language"] as? String {
+            guard let preference = LanguagePreference(rawValue: name) else {
+                return .error("the interface language is one of \(LanguagePreference.allCases.map(\.rawValue))", status: 400)
+            }
+            env.languagePreference = preference
+        }
         if let patch = json["speech"] as? [String: Any] { env.settings.speech = merged(env.settings.speech, patch) }
         if let patch = json["recognition"] as? [String: Any] { env.settings.recognition = merged(env.settings.recognition, patch) }
         if let patch = json["recording"] as? [String: Any] { env.settings.recording = merged(env.settings.recording, patch) }

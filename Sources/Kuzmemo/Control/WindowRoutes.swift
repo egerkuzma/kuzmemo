@@ -7,8 +7,7 @@ import Foundation
 enum WindowRoutes {
     /// The calendar window (`main`) or the settings window (`settings`).
     private static func window(_ name: String) -> NSWindow? {
-        let title = name == "settings" ? "Настройки" : "Kuzmemo"
-        return NSApp.windows.first { $0.title == title && $0.styleMask.contains(.titled) }
+        (name == "settings" ? AppWindow.settings : AppWindow.main).window
     }
 
     /// Every window of the app with its class, so the menu-bar popover and other system-made windows can be identified.
@@ -29,7 +28,7 @@ enum WindowRoutes {
             return .json(["open": false, "policy": "\(NSApp.activationPolicy().rawValue)"])
         }
         return .json([
-            "open": true, "visible": window.isVisible, "key": window.isKeyWindow, "active": NSApp.isActive,
+            "open": true, "title": window.title, "visible": window.isVisible, "key": window.isKeyWindow, "active": NSApp.isActive,
             "frame": "\(Int(window.frame.width))x\(Int(window.frame.height))", "sheets": window.sheets.count,
             "sheetAttached": window.attachedSheet != nil, "policy": "\(NSApp.activationPolicy().rawValue)",
             "onScreen": window.occlusionState.contains(.visible),

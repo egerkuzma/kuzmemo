@@ -3,7 +3,7 @@
 ///
 /// Rules: `interval` counts days/weeks/months/years; weekly rules use ISO weeks (Monday first) and
 /// `byWeekday` (default: the weekday of the start date); monthly rules use `byMonthday` (default: the day of
-/// the start date) and clamp to the month length ("каждое 31-е" falls on the last day of shorter months);
+/// the start date) and clamp to the month length ("каждое 31-е", every 31st, falls on the last day of shorter months);
 /// yearly rules keep month and day and clamp Feb 29 to Feb 28 in common years. `count` includes the first
 /// occurrence; `until` is inclusive.
 public enum RecurrenceExpander {

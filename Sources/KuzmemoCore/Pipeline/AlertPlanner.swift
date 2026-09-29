@@ -58,7 +58,7 @@ public enum AlertPlanner {
         return leads.sorted(by: >).map { lead in
             let moment = start.adding(minutes: -lead)
             let kind: PlannedAlert.Kind = lead == 0 ? .atTime : .headsUp
-            let body = "\(RussianFormat.leadPhrase(lead)) · \(time)"
+            let body = "\(Wording.leadPhrase(lead)) · \(time)"
             return make(entry, kind: kind, lead: lead, at: moment, body: body, settings: settings, timeZone: timeZone)
         }
     }
@@ -68,7 +68,7 @@ public enum AlertPlanner {
     private static func allDayAlerts(for entry: AgendaEntry, settings: NotificationSettings, timeZone: TimeZone) -> [PlannedAlert] {
         guard entry.item.kind != .event else { return [] } // an event without a time is a question for the person, not an alarm
         return settings.allDayTimes.map { time in
-            make(entry, kind: .allDay, lead: 0, at: LocalDateTime(date: entry.date, time: time), body: "Сегодня · весь день", settings: settings, timeZone: timeZone)
+            make(entry, kind: .allDay, lead: 0, at: LocalDateTime(date: entry.date, time: time), body: tr("Today · all day"), settings: settings, timeZone: timeZone)
         }
     }
 
@@ -85,7 +85,7 @@ public enum AlertPlanner {
         }
         let silent = settings.quietHours.contains(moment.time)
         let fireAt = moment.instant(in: timeZone)
-        let subtitle = entry.item.kind.russianName
+        let subtitle = entry.item.kind.displayName
         let occurrence = entry.occurrenceDate.map { "\($0)" } ?? "-"
         let content = "\(entry.item.title)|\(subtitle)|\(body)|\(sound.kind.rawValue):\(sound.name)|\(silent)"
         let id = "\(idPrefix)\(entry.item.id)|\(occurrence)|\(kind.rawValue)|\(lead)|\(Int(fireAt.timeIntervalSince1970))|\(fingerprint(content))"
@@ -116,44 +116,5 @@ public struct AlertDiff: Equatable, Sendable {
         let wanted = Set(planned.map(\.id))
         toAdd = planned.filter { !ours.contains($0.id) }
         toRemove = ours.subtracting(wanted).sorted()
-    }
-}
-
-extension RussianFormat {
-    /// "Сейчас", "Через 5 минут", "Через 1 час", "Через 1 день".
-    public static func leadPhrase(_ minutes: Int) -> String {
-        minutes <= 0 ? "Сейчас" : "Через " + leadQuantity(minutes)
-    }
-
-    /// "в момент начала", "за 5 минут", "за 1 час", "за 2 дня": how a list of chosen lead times is read out.
-    public static func leadBefore(_ minutes: Int) -> String {
-        minutes <= 0 ? "в момент начала" : "за " + leadQuantity(minutes)
-    }
-
-    /// The short text of a choice chip: "В момент", "5 мин", "1 час", "1 день".
-    public static func leadChip(_ minutes: Int) -> String {
-        if minutes <= 0 { return "В момент" }
-        if minutes >= 1440, minutes % 1440 == 0 {
-            let days = minutes / 1440
-            return "\(days) \(plural(days, ("день", "дня", "дней")))"
-        }
-        if minutes >= 60, minutes % 60 == 0 {
-            let hours = minutes / 60
-            return "\(hours) \(plural(hours, ("час", "часа", "часов")))"
-        }
-        return "\(minutes) мин"
-    }
-
-    /// "5 минут", "1 час", "2 дня": a length of time in the accusative, ready to follow "за" or "через".
-    private static func leadQuantity(_ minutes: Int) -> String {
-        if minutes >= 1440, minutes % 1440 == 0 {
-            let days = minutes / 1440
-            return "\(days) \(plural(days, ("день", "дня", "дней")))"
-        }
-        if minutes >= 60, minutes % 60 == 0 {
-            let hours = minutes / 60
-            return "\(hours) \(plural(hours, ("час", "часа", "часов")))"
-        }
-        return "\(minutes) \(plural(minutes, ("минуту", "минуты", "минут")))"
     }
 }

@@ -15,11 +15,13 @@ public enum SileroVoice {
     /// The speaker used until another is chosen.
     public static let defaultSpeaker = "eugene"
 
-    public static let speakers: [Speaker] = [
-        Speaker(id: "eugene", title: "eugene · мужской"), Speaker(id: "aidar", title: "aidar · мужской"),
-        Speaker(id: "xenia", title: "xenia · женский"), Speaker(id: "kseniya", title: "kseniya · женский"),
-        Speaker(id: "baya", title: "baya · женский"),
-    ]
+    public static var speakers: [Speaker] {
+        [
+            Speaker(id: "eugene", title: tr("%1$@ · male", "eugene")), Speaker(id: "aidar", title: tr("%1$@ · male", "aidar")),
+            Speaker(id: "xenia", title: tr("%1$@ · female", "xenia")), Speaker(id: "kseniya", title: tr("%1$@ · female", "kseniya")),
+            Speaker(id: "baya", title: tr("%1$@ · female", "baya")),
+        ]
+    }
 
     /// SSML `prosody rate` values, slowest first.
     public enum Rate: String, CaseIterable, Sendable {

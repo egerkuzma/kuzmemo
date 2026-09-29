@@ -31,9 +31,12 @@ public struct ContextPlanner: Sendable {
 
     public init() {}
 
+    /// Word beginnings (Russian, then English) that mark a phrase as an edit, a deletion or a question.
     static let editCues = [
         "перенес", "передвин", "сдвин", "отмен", "удал", "отмет", "выполн", "готов", "измен", "переимен",
         "поменя", "верни", "верн", "что", "когда", "какие", "какой", "найд", "покаж", "скаж", "есть", "сколько",
+        "move", "reschedul", "postpon", "cancel", "delet", "remov", "complet", "finish", "mark", "chang", "renam",
+        "reopen", "what", "when", "which", "find", "show", "tell", "list", "how",
     ]
 
     /// Words that carry no identifying content for the text search.
@@ -42,6 +45,9 @@ public struct ContextPlanner: Sendable {
         "перенеси", "передвинь", "отмени", "удали", "отметь", "выполненным", "запиши", "скажи", "найди",
         "покажи", "когда", "что", "какие", "меня", "будет", "надо", "нужно", "пожалуиста", "ещё", "еще",
         "утром", "днем", "вечером", "ночью", "часов", "часа", "утра", "вечера",
+        "remind", "tomorrow", "today", "please", "need", "should", "about", "next", "week", "this", "that", "with",
+        "move", "delete", "remove", "cancel", "find", "show", "tell", "what", "when", "which", "have", "will", "morning",
+        "evening", "night", "afternoon",
     ]
 
     public func plan(transcript: String, anchor: LocalDateTime, store: Store) async throws -> ContextPlan {

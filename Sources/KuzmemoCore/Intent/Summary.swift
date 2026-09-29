@@ -1,19 +1,21 @@
 extension ItemKind {
-    /// "Напоминание", "Событие", "Задача", "Заметка"
-    public var russianName: String {
+    /// "Reminder", "Event", "Task", "Note" in the current language.
+    public var displayName: String {
         switch self {
-        case .reminder: "Напоминание"
-        case .event: "Событие"
-        case .task: "Задача"
-        case .note: "Заметка"
+        case .reminder: tr("Reminder")
+        case .event: tr("Event")
+        case .task: tr("Task")
+        case .note: tr("Note")
         }
     }
 }
 
 extension RussianFormat {
+    /// "every Monday" in Russian, one form per weekday (the case depends on the weekday's grammatical gender).
     static let weekdayEvery = ["каждый понедельник", "каждый вторник", "каждую среду", "каждый четверг", "каждую пятницу", "каждую субботу", "каждое воскресенье"]
 
     /// "каждый понедельник", "по будням", "каждые 2 недели по пт", "каждое 25-е число"
+    /// (every Monday, on weekdays, every 2 weeks on Fri, on the 25th of every month)
     public static func recurrence(_ rule: Recurrence) -> String {
         let n = rule.interval
         switch rule.freq {
@@ -36,7 +38,8 @@ extension RussianFormat {
         }
     }
 
-    /// The rule for a list or an editor, with its end: "Каждую среду, до 31 декабря", "Каждый день, 10 раз".
+    /// The rule for a list or an editor, with its end: "Каждую среду, до 31 декабря", "Каждый день, 10 раз"
+    /// (Every Wednesday, until December 31; Every day, 10 times).
     public static func recurrenceDetailed(_ rule: Recurrence) -> String {
         var text = recurrence(rule).capitalizedFirstLetter
         if let until = rule.until { text += ", до \(date(until))" }
@@ -46,7 +49,7 @@ extension RussianFormat {
 
     static let weekdayAccusative = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"]
 
-    /// "на завтра", "на пятницу, 2 октября" (within a week), "на 12 октября".
+    /// "на завтра", "на пятницу, 2 октября" (within a week), "на 12 октября" (for tomorrow, for Friday, October 2, for October 12).
     public static func onDay(_ date: LocalDate, today: LocalDate) -> String {
         switch today.days(until: date) {
         case 0: return "на сегодня"
@@ -57,7 +60,8 @@ extension RussianFormat {
         }
     }
 
-    /// When an item happens, for toasts: "завтра в 11:00", "в среду, 30 сентября", "без даты".
+    /// When an item happens, for toasts: "завтра в 11:00", "в среду, 30 сентября", "без даты" (tomorrow at 11:00, on Wednesday,
+    /// September 30, no date).
     public static func when(date: LocalDate?, time: LocalTime?, today: LocalDate) -> String {
         guard let date else { return "без даты" }
         let day = relativeDay(date, today: today)
@@ -66,28 +70,29 @@ extension RussianFormat {
 }
 
 extension AppliedChange {
-    /// One line for the confirmation toast, for example `Напоминание · послезавтра · «Сказать Дмитрию»`.
+    /// One line for the confirmation toast, for example `Reminder · the day after tomorrow · “Tell Dmitry”`.
     public func summary(today: LocalDate) -> String {
-        let title = "«\(item.title)»"
+        let title = Wording.quoted(item.title)
+        let when = Wording.when(date: item.date, time: item.time, today: today)
         switch kind {
         case .created:
-            var parts = [item.kind.russianName, RussianFormat.when(date: item.date, time: item.time, today: today), title]
-            if let rule = item.recurrence { parts.insert(RussianFormat.recurrence(rule), at: 2) }
+            var parts = [item.kind.displayName, when, title]
+            if let rule = item.recurrence { parts.insert(Wording.recurrence(rule), at: 2) }
             return parts.joined(separator: " · ")
         case .updated:
-            return ["Изменено", title, RussianFormat.when(date: item.date, time: item.time, today: today)].joined(separator: " · ")
+            return [tr("Changed"), title, when].joined(separator: " · ")
         case .moved:
-            var target = newDate.map { RussianFormat.onDay($0, today: today) } ?? "без даты"
-            if let time = newTime ?? item.time { target += " в \(time)" }
-            return ["Перенесено", title, target].joined(separator: " · ")
+            var target = newDate.map { Wording.onDay($0, today: today) } ?? tr("no date")
+            if let time = newTime ?? item.time { target += tr(" at %1$@", Wording.time(time)) }
+            return [tr("Moved"), title, target].joined(separator: " · ")
         case .completed:
-            return ["Выполнено", title, occurrenceDate.map { RussianFormat.date($0) }].compactMap { $0 }.joined(separator: " · ")
+            return [tr("Completed"), title, occurrenceDate.map { Wording.date($0) }].compactMap { $0 }.joined(separator: " · ")
         case .reopened:
-            return ["Возвращено", title, occurrenceDate.map { RussianFormat.date($0) }].compactMap { $0 }.joined(separator: " · ")
+            return [tr("Reopened"), title, occurrenceDate.map { Wording.date($0) }].compactMap { $0 }.joined(separator: " · ")
         case .deleted:
-            return "Удалено · \(title)"
+            return "\(tr("Deleted")) · \(title)"
         case .skipped:
-            return ["Пропущено", title, occurrenceDate.map { RussianFormat.date($0) }].compactMap { $0 }.joined(separator: " · ")
+            return [tr("Skipped"), title, occurrenceDate.map { Wording.date($0) }].compactMap { $0 }.joined(separator: " · ")
         }
     }
 }

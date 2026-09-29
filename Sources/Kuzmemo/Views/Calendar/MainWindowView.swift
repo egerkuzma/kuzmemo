@@ -36,16 +36,16 @@ struct MainWindowView: View {
             MonthView(calendar: calendar, focused: $gridFocused)
             Divider()
             VStack(spacing: 2) {
-                SidebarRow(title: "Календарь", symbol: "calendar", badge: 0, selected: calendar.mode == .day) {
+                SidebarRow(title: tr("Calendar"), symbol: "calendar", badge: 0, selected: calendar.mode == .day) {
                     calendar.select(calendar.selectedDate)
                 }
-                SidebarRow(title: "Входящие", symbol: "tray", badge: calendar.inboxCount, selected: calendar.mode == .inbox) {
+                SidebarRow(title: tr("Inbox"), symbol: "tray", badge: calendar.inboxCount, selected: calendar.mode == .inbox) {
                     calendar.show(.inbox)
                 }
-                SidebarRow(title: "Повторяющиеся", symbol: "repeat", badge: 0, selected: calendar.mode == .recurring) {
+                SidebarRow(title: tr("Repeating"), symbol: "repeat", badge: 0, selected: calendar.mode == .recurring) {
                     calendar.show(.recurring)
                 }
-                SidebarRow(title: "Настройки", symbol: "gearshape", badge: 0, selected: false) {
+                SidebarRow(title: tr("Settings"), symbol: "gearshape", badge: 0, selected: false) {
                     env.showSettings()
                 }
             }
@@ -59,7 +59,7 @@ struct MainWindowView: View {
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Поиск по записям", text: Binding(get: { calendar.searchText }, set: { calendar.setSearchText($0) }))
+            TextField(tr("Search entries"), text: Binding(get: { calendar.searchText }, set: { calendar.setSearchText($0) }))
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .onSubmit { calendar.setSearchText(calendar.searchText) }
@@ -68,7 +68,7 @@ struct MainWindowView: View {
                     calendar.setSearchText("")
                     calendar.select(calendar.selectedDate)
                 } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain).accessibilityLabel("Очистить поиск")
+                    .buttonStyle(.plain).accessibilityLabel(tr("Clear search"))
             }
         }
         .padding(.horizontal, 10)

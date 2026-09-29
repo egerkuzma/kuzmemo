@@ -2,8 +2,9 @@ import Foundation
 
 /// Helpers around the user's glossary of brands and names.
 public enum Glossary {
-    /// Replaces known misspellings ("нотион") with the canonical form ("Notion"), whole words only,
-    /// case-insensitively. Longer aliases are applied first so "гитхаб" wins over "гит".
+    /// Replaces known misspellings with the canonical form ("нотион", "Notion" as recognition writes it in Russian, becomes
+    /// "Notion"), whole words only, case-insensitively. Longer aliases are applied first so "гит хаб" ("git hub") wins
+    /// over "гит" ("git").
     public static func applyAliases(to text: String, terms: [GlossaryTerm]) -> String {
         let pairs = terms.filter(\.enabled).flatMap { term in
             term.aliases.map { (alias: $0.trimmingCharacters(in: .whitespaces), canonical: term.canonical) }
@@ -24,7 +25,7 @@ public enum Glossary {
         return result
     }
 
-    /// One line for the LLM prompt: "Notion (нотион, ношн); GitHub (гитхаб)".
+    /// One line for the LLM prompt: "Notion (нотион, ношн); GitHub (гит хаб)".
     public static func promptLine(terms: [GlossaryTerm], limit: Int = 60) -> String {
         terms.filter(\.enabled).prefix(limit).map { term in
             term.aliases.isEmpty ? term.canonical : "\(term.canonical) (\(term.aliases.joined(separator: ", ")))"

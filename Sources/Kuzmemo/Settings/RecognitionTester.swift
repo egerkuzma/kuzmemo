@@ -30,14 +30,14 @@ final class RecognitionTester {
     func run(env: AppEnvironment, seconds: Double = 5) async {
         guard !isBusy else { return }
         guard !env.voice.isRecording else {
-            state = .failed("Сейчас идёт обычная запись: дождитесь её конца.")
+            state = .failed(tr("A regular recording is in progress: wait for it to finish."))
             return
         }
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await env.voice.permissions.requestMicrophone()
         }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
-            state = .failed("Нет доступа к микрофону. Разрешите его в Системных настройках → Конфиденциальность → Микрофон.")
+            state = .failed(tr("No microphone access. Allow it in System Settings → Privacy & Security → Microphone."))
             return
         }
 
@@ -45,7 +45,7 @@ final class RecognitionTester {
         let meter = LevelMeter()
         mic.onLevel = { meter.record($0) }
         do { try mic.start() } catch {
-            state = .failed("Не удалось включить микрофон: \(error)")
+            state = .failed(tr("Could not turn on the microphone: %1$@", "\(error)"))
             return
         }
         let started = Date()
@@ -65,7 +65,7 @@ final class RecognitionTester {
         case let .success(.noSpeech(reason)):
             state = .nothingHeard(reason)
         case let .failure(error):
-            state = .failed("Не удалось распознать: \(error)")
+            state = .failed(tr("Could not recognize: %1$@", "\(error)"))
         }
     }
 }

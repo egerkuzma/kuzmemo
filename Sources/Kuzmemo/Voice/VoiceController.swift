@@ -115,7 +115,7 @@ final class VoiceController {
             undo: { [weak self] opID in
                 Task { @MainActor in
                     await self?.env.undo(opID: opID)
-                    self?.hud.showNote("Отменено", style: .success, seconds: 2)
+                    self?.hud.showNote(tr("Undone"), style: .success, seconds: 2)
                 }
             },
             edit: { [weak self] itemID in
@@ -164,17 +164,22 @@ final class VoiceController {
         guard case let .applied(result) = outcome.kind, !result.changes.isEmpty, session == nil else { return }
         let today = env.clock.localNow().date
         if env.settings.speech.confirmationSound { cues.play(.saved) }
-        hud.showNote("Записал отложенное: " + result.changes.map { $0.summary(today: today) }.joined(separator: "; "), style: .success, seconds: 5)
+        hud.showNote(tr("Saved the delayed phrase: %1$@", result.changes.map { $0.summary(today: today) }.joined(separator: "; ")), style: .success, seconds: 5)
     }
 
     // MARK: - Settings
+
+    /// The interface language changed: whatever is being said in the old one is cut off.
+    func languageChanged() {
+        speech.stop()
+    }
 
     /// Puts a changed preference to work.
     func settingsChanged(_ group: AppSettings.Group) {
         let settings = env.settings
         switch group {
         case .speech:
-            speech.system.voiceIdentifier = settings.speech.voiceIdentifier
+            speech.system.voiceIdentifiers = [.russian: settings.speech.voiceIdentifier, .english: settings.speech.englishVoiceIdentifier].compactMapValues { $0 }
             speech.system.rate = Float(settings.speech.rate)
             speech.engine = settings.speech.engine
             speech.silero.speaker = settings.speech.sileroSpeaker
@@ -207,7 +212,7 @@ final class VoiceController {
         return configuration
     }
 
-    /// Says a sample with the current voice and speed (the settings window's "Прослушать").
+    /// Says a sample with the current voice and speed (the settings window's "Listen").
     func previewSpeech(_ text: String) {
         Task { @MainActor in await speech.speak(text) }
     }
@@ -220,11 +225,11 @@ final class VoiceController {
     /// The model that is loaded or loading, for the settings window.
     var modelSummary: String {
         switch modelState {
-        case .notLoaded: "не загружена (загрузится при первой записи)"
-        case .loading: "загружается…"
-        case .ready: "готова"
-        case .missing: "не найдена"
-        case let .failed(reason): "ошибка: \(reason)"
+        case .notLoaded: tr("not loaded (loads at the first recording)")
+        case .loading: tr("loading…")
+        case .ready: tr("ready")
+        case .missing: tr("not found")
+        case let .failed(reason): tr("error: %1$@", "\(reason)")
         }
     }
 
@@ -341,13 +346,13 @@ final class VoiceController {
                 break
             case .notDetermined:
                 policy.recordingEnded()
-                hud.showNote("Разрешите доступ к микрофону в системном окне и нажмите клавишу ещё раз.", style: .warning, seconds: 6)
+                hud.showNote(tr("Allow microphone access in the system dialog and press the key again."), style: .warning, seconds: 6)
                 Task { await permissions.requestMicrophone() }
                 return
             default:
                 policy.recordingEnded()
                 problem = .microphoneDenied
-                hud.showNote("Нет доступа к микрофону. Разрешите его: Системные настройки → Конфиденциальность → Микрофон.", style: .error, seconds: 8)
+                hud.showNote(tr("No microphone access. Allow it: System Settings → Privacy & Security → Microphone."), style: .error, seconds: 8)
                 return
             }
             input = MicCapture()
@@ -366,7 +371,7 @@ final class VoiceController {
             try input.start()
         } catch {
             policy.recordingEnded()
-            hud.showNote("Не удалось включить микрофон: \(error)", style: .error, seconds: 6)
+            hud.showNote(tr("Could not turn on the microphone: %1$@", "\(error)"), style: .error, seconds: 6)
             return
         }
 
@@ -405,7 +410,7 @@ final class VoiceController {
         switch session.detector.feed(level: peak, at: elapsed) {
         case .endOfSpeech: finishRecording()
         case .noSpeech:
-            if session.question != nil { giveUpListening() } else { cancelRecording(note: "Не слышу речи — запись остановлена.") }
+            if session.question != nil { giveUpListening() } else { cancelRecording(note: tr("No speech heard — recording stopped.")) }
         case .speechStarted, nil: break
         }
         guard self.session === session else { return }
@@ -452,7 +457,7 @@ final class VoiceController {
             if question != nil {
                 Task { @MainActor in await closeUnanswered() }
             } else {
-                hud.showNote("Слишком короткая запись — пропускаю.", style: .warning, seconds: 2)
+                hud.showNote(tr("Recording too short — skipped."), style: .warning, seconds: 2)
             }
             return
         }
@@ -504,7 +509,7 @@ final class VoiceController {
         switch result.kind {
         case .noSpeech:
             if question != nil { await closeUnanswered() } else {
-                showBackground(.note("Речи не слышно — ничего не записал.", .warning), autoHideAfter: 2.5)
+                showBackground(.note(tr("No speech heard — nothing was saved."), .warning), autoHideAfter: 2.5)
             }
 
         case let .recognitionFailed(message, needsUser, retryAt):
@@ -514,10 +519,12 @@ final class VoiceController {
             } else if needsUser {
                 modelState = .missing(message)
                 problem = .modelMissing
-                showBackground(.note("Нет модели распознавания. Запись сохранена — выполните scripts/install_models.sh.", .error), autoHideAfter: 8)
+                showBackground(.note(tr("No recognition model. Your recording is saved — download the model in Settings → Recognition."), .error), autoHideAfter: 8)
             } else {
-                let later = retryAt == nil ? "" : " Попробую ещё раз позже."
-                showBackground(.note("Не удалось распознать речь. Запись сохранена.\(later)", .error), autoHideAfter: 6)
+                let message = retryAt == nil
+                    ? tr("Could not recognize the speech. Your recording is saved.")
+                    : tr("Could not recognize the speech. Your recording is saved; I will try again later.")
+                showBackground(.note(message, .error), autoHideAfter: 6)
             }
 
         case let .processed(outcome):
@@ -555,7 +562,7 @@ final class VoiceController {
         perform(policy.beginHandsFree())
     }
 
-    /// "Повторить" on an Inbox card whose recording could not be recognised.
+    /// "Retry" on an Inbox card whose recording could not be recognised.
     func retryRecognition(memoID: String) async {
         pendingJobs += 1
         defer { pendingJobs -= 1 }

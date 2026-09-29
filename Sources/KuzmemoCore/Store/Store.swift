@@ -220,4 +220,16 @@ public struct Store: Sendable {
     public func deleteTerm(id: Int64) async throws {
         try await writer.write { db in _ = try GlossaryTerm.deleteOne(db, key: id) }
     }
+
+    /// Replaces the whole glossary in one transaction (a duplicate spelling rolls everything back). For test setups.
+    public func replaceGlossary(with terms: [GlossaryTerm]) async throws {
+        try await writer.write { db in
+            _ = try GlossaryTerm.deleteAll(db)
+            for term in terms {
+                var row = term
+                row.id = nil
+                try row.insert(db)
+            }
+        }
+    }
 }
