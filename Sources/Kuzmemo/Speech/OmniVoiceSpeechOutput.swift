@@ -210,6 +210,7 @@ final class OmniVoiceSpeechOutput {
         var startedAhead = false
         var failure: (any Error)?
         do {
+            try player?.prepare(sampleRate: 24_000) // the sound device wakes while the sentences are made
             try handOver()
             if !missing.isEmpty {
                 let session: OmniVoiceSession

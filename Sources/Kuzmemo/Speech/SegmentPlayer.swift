@@ -34,9 +34,17 @@ final class SegmentPlayer {
     /// The seconds of speech still to be heard, counted from now.
     var remainingSeconds: TimeInterval { max(0, endsAt?.timeIntervalSinceNow ?? 0) }
 
+    /// Opens the sound output now, before there is anything to play: a device that has to wake up (a Bluetooth headset
+    /// drops the first syllables of what it is sent while it does) is awake when the first sentence arrives, and a Mac with no
+    /// output is found out at once, not after the sentences have been made.
+    func prepare(sampleRate: Double) throws {
+        if !running { try start(sampleRate: sampleRate) }
+    }
+
     func enqueue(_ segment: SpokenSegment) throws {
         if !running { try start(sampleRate: Double(segment.sampleRate)) }
-        guard let format, let buffer = Self.buffer(for: segment, format: format) else { return }
+        guard let format, format.sampleRate == Double(segment.sampleRate) else { throw Problem.noOutput("unexpected sample rate \(segment.sampleRate)") }
+        guard let buffer = Self.buffer(for: segment, format: format) else { return }
         let now = Date()
         if firstQueuedAt == nil { firstQueuedAt = now }
         if let endsAt, now > endsAt { silences.append(now.timeIntervalSince(endsAt)) }
