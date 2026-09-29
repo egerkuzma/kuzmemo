@@ -1,8 +1,7 @@
 import Foundation
 
-/// The JSON Schema passed to `claude -p --json-schema`. Source of truth for the response contract; the
-/// documentation copy lives in docs/PLAN.md (appendix A). Only `intent` and `confidence` are required, so the
-/// model can omit empty fields and keep the output (and the latency) short.
+/// The JSON Schema passed to `claude -p --json-schema`. Source of truth for the response contract. Only `intent` and
+/// `confidence` are required, so the model can omit empty fields and keep the output (and the latency) short.
 public enum ResponseSchema {
     public static let json: String = #"""
 {

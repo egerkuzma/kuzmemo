@@ -1,6 +1,6 @@
 /// How the model describes a date/time. The model never does calendar arithmetic: it names the relative
 /// offset (or the explicit date the user said) and `RelativeDateResolver` computes the calendar date.
-/// Mirrors the `when` object of the response schema (docs/PLAN.md, appendix A).
+/// Mirrors the `when` object of the response schema (`ResponseSchema`).
 public struct When: Codable, Hashable, Sendable {
     public enum Mode: String, Codable, Sendable {
         case none

@@ -35,3 +35,8 @@ __pycache__/
 
 # Screenshots and other generated output of scripts
 scripts/out/
+
+# Working notes for the maintainer and for coding-assistant sessions: kept on disk, never committed or pushed
+CLAUDE.md
+docs/HANDOFF.md
+docs/PLAN.md

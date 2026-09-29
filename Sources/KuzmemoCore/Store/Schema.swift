@@ -1,9 +1,8 @@
 import GRDB
 
-/// Forward-only migrations. Table layout mirrors docs/PLAN.md, appendix C, with one deliberate change:
-/// `items_fts` is a self-contained FTS5 table maintained from Swift (normalized text, keyed by `item_id`)
-/// instead of an external-content table, because `items` has a TEXT primary key and its implicit rowid is
-/// not stable across VACUUM.
+/// Forward-only migrations. `items_fts` is a self-contained FTS5 table maintained from Swift (normalized text,
+/// keyed by `item_id`) instead of an external-content table, because `items` has a TEXT primary key and its
+/// implicit rowid is not stable across VACUUM.
 public enum Schema {
     public static func migrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
