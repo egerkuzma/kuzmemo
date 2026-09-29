@@ -11,6 +11,7 @@ The interface and the spoken answers are available in **English and Russian**; r
 ## Features
 
 - **One key.** Tap **Fn** to record hands-free (it stops when you stop talking) or hold it to talk while pressed. **⌃⌥M** works without any extra permission. **Esc** cancels.
+- **The right microphone.** When macOS has selected a Bluetooth headset as the input, Kuzmemo records with the built-in microphone instead: a headset needs a few seconds to switch to call mode, which eats the first words. Settings → Recording lets you pick any input.
 - **Understands ordinary phrases.** Reminders, events, tasks and notes; "tomorrow", "next Monday", "in two hours", "every weekday at 6 pm", "on the 25th". Ambiguous phrases ("next Friday") are answered with a short spoken question and buttons instead of a guess; you can reply by voice, by tapping an option or by typing.
 - **Answers questions aloud.** "What's on today?", "what do I have tomorrow", "what's overdue", "find everything about the budget". Simple questions are answered locally in about half a second.
 - **A calendar of its own** (SQLite, nothing is synced anywhere): month grid, day list, an Inbox for undated notes and for phrases that could not be processed yet, recurring entries, full-text search that understands word forms, an editor with a live description of the repeat rule.
@@ -87,6 +88,10 @@ Everything lives in `~/Library/Application Support/Kuzmemo` (database, models). 
 ## Status
 
 Personal project, work in progress: the voice path, the calendar window, settings, notifications and the bilingual interface are built; the long-run soak and a first release are next.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (all MIT). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0, for non-commercial use.
 
 ## Contributing
 
