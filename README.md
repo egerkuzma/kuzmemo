@@ -33,20 +33,10 @@ Hold **Fn** and speak. A small card follows you through the steps — recording,
   <img src="docs/images/hud-question.png" width="420" alt="A clarifying question with two answers">
 </p>
 
-The menu-bar popover shows today and takes typed phrases through the same pipeline; every entry can be edited by hand, with repeat rules:
-
-<table>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/popover.png" width="360" alt="The menu-bar popover"></td>
-    <td align="center" valign="top"><img src="docs/images/editor.png" width="440" alt="The entry editor"></td>
-  </tr>
-</table>
-
-A couple of settings pages: how and when notifications arrive, and the glossary that teaches it your names and jargon.
+The menu-bar popover shows today and takes typed phrases through the same pipeline:
 
 <p align="center">
-  <img src="docs/images/settings-notifications.png" width="760" alt="Notification settings"><br>
-  <img src="docs/images/settings-glossary.png" width="760" alt="The glossary of names and jargon">
+  <img src="docs/images/popover.png" width="380" alt="The menu-bar popover">
 </p>
 
 ## Features

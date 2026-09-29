@@ -33,20 +33,10 @@
   <img src="docs/images/hud-question.png" width="420" alt="Уточняющий вопрос с двумя вариантами">
 </p>
 
-Всплывающее окно в строке меню показывает сегодняшний день и принимает набранные фразы тем же путём, что и речь; любую запись можно поправить руками, в том числе правило повтора:
-
-<table>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/popover.png" width="360" alt="Всплывающее окно в строке меню"></td>
-    <td align="center" valign="top"><img src="docs/images/editor.png" width="440" alt="Редактор записи"></td>
-  </tr>
-</table>
-
-Пара страниц настроек: как и когда приходят уведомления и глоссарий, который учит приложение вашим именам и терминам.
+Всплывающее окно в строке меню показывает сегодняшний день и принимает набранные фразы тем же путём, что и речь:
 
 <p align="center">
-  <img src="docs/images/settings-notifications.png" width="760" alt="Настройки уведомлений"><br>
-  <img src="docs/images/settings-glossary.png" width="760" alt="Глоссарий имён и терминов">
+  <img src="docs/images/popover.png" width="380" alt="Всплывающее окно в строке меню">
 </p>
 
 ## Возможности

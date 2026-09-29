@@ -8,8 +8,8 @@ make README pictures). Needs the dev app running (scripts/run_app.sh). It erases
 
 The default folder is scripts/out/screenshots (git-ignored). Renders are drawn offscreen and never show a window;
 --live also opens the real settings window (behind other windows, without activating the app) and captures it with
-its title bar. --readme takes the curated set (the calendar and a few settings pages as real windows at 2x, the cards
-drawn offscreen; all dark, and macOS has to be in dark mode while it runs), and
+its title bar. --readme takes the curated set (the calendar window as a real window at 2x, the cards drawn offscreen; all dark,
+and macOS has to be in dark mode while it runs), and
 finishes them with scripts/frame_screenshots.swift (rounded corners and a shadow). The real windows come to the front
 for a moment while they are captured.
 """
@@ -33,14 +33,7 @@ GLOSSARY = [
     {"canonical": "Slack", "kind": "product", "aliases": ["слэк", "слак"], "spoken": "Слэк"},
     {"canonical": "Acme", "kind": "company", "aliases": ["акме"], "spoken": "Акме"},
 ]
-# The words of the README's glossary picture: names that speech recognition tends to get wrong in English.
-GLOSSARY_EN = [
-    {"canonical": "GitHub", "kind": "product", "aliases": ["git hub", "get hub"], "spoken": "Git Hub"},
-    {"canonical": "Kubernetes", "kind": "product", "aliases": ["cooper netties", "kuber netties"], "spoken": "Koo-ber-net-eez"},
-    {"canonical": "Notion", "kind": "product", "aliases": ["notion", "no shun"]},
-    {"canonical": "Slack", "kind": "product", "aliases": ["slak"]},
-]
-SERIES_TITLE ={"english": "Team standup", "russian": "Планёрка"}
+SERIES_TITLE = {"english": "Team standup", "russian": "Планёрка"}
 
 
 class Unix(http.client.HTTPConnection):
@@ -90,8 +83,6 @@ def readme():
 
     call("POST", "/clock", {"local": "2026-09-28 14:30"})
     call("POST", "/settings", {"interface": {"language": "english"}})
-    call("POST", "/glossary", {"terms": GLOSSARY_EN})
-    call("POST", "/settings", {"recognition": {"language": "en"}})
     call("POST", "/db/reset")
     call("POST", "/dev/seed")
     try:
@@ -102,22 +93,13 @@ def readme():
         time.sleep(1.0)
         grab("calendar", "/render?view=live&name=main&chrome=1&front=1&scale=2", radius=48)
         call("POST", "/window/close?name=main")
-        # a few settings pages (the General and Recording tabs show a file path and a device name: left out)
-        call("POST", "/window/open?name=settings")
-        time.sleep(1.0)
-        for tab in ("notifications", "glossary"):
-            call("POST", "/ui", {"settingsTab": tab})
-            time.sleep(0.6)
-            grab(f"settings-{tab}", "/render?view=live&name=settings&chrome=1&front=1&scale=2", radius=48)
-        call("POST", "/window/close?name=settings")
-        # the cards that appear while talking, the menu-bar popover and the entry editor (drawn offscreen)
+        # the cards that appear while talking and the menu-bar popover (drawn offscreen)
         for state in ("recording", "result", "question"):
             grab(f"hud-{state}", f"/render?view=hud&state={state}&scheme=dark", radius=40, margin=48)
         grab("popover", "/render?view=popover&scheme=dark", radius=36)
-        grab("editor", "/render?view=editor&title=Team standup&scheme=dark", radius=36)
     finally:
-        call("POST", "/settings", {"interface": {"language": "russian"}, "recognition": {"language": "ru"}})
-    spec =os.path.join(raw, "jobs.json")
+        call("POST", "/settings", {"interface": {"language": "russian"}})
+    spec = os.path.join(raw, "jobs.json")
     with open(spec, "w") as handle:
         json.dump(jobs, handle)
     subprocess.run(["swift", os.path.join(ROOT, "scripts", "frame_screenshots.swift"), spec], check=True, cwd=ROOT)
