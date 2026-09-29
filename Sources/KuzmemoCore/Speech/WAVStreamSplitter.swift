@@ -6,6 +6,18 @@ public struct SpokenSegment: Equatable, Sendable {
     /// Signed 16-bit little-endian samples, one channel.
     public var pcm: Data
 
+    public init(sampleRate: Int, pcm: Data) {
+        self.sampleRate = sampleRate
+        self.pcm = pcm
+    }
+
+    /// The samples of a mono 16-bit WAV file (one this type wrote, or any other plain one); `nil` for anything else.
+    public init?(wav: Data) {
+        guard let info = try? WAVInfo(data: wav), info.channels == 1, info.bitsPerSample == 16, info.dataBytes >= 2 else { return nil }
+        let start = wav.startIndex + info.dataOffset
+        self.init(sampleRate: info.sampleRate, pcm: Data(wav[start ..< start + info.dataBytes - info.dataBytes % 2]))
+    }
+
     public var seconds: Double { Double(pcm.count / 2) / Double(max(sampleRate, 1)) }
 
     /// A complete WAV file with true sizes in its header, which a player can open (the stream's own headers say "length

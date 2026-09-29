@@ -113,6 +113,14 @@ struct SpeechTextTests {
         // an older saved value (before the engine existed) keeps working
         #expect(try decode(#"{"rate":0.4,"speakAnswers":false}"#).rate == 0.4)
     }
+
+    @Test func theCloneEngineAndItsStepsAreReadForgivingly() throws {
+        let decode = { (json: String) throws -> SpeechSettings in try JSONDecoder().decode(SpeechSettings.self, from: Data(json.utf8)) }
+        #expect(try decode(#"{"engine":"clone"}"#).engine == .clone)
+        #expect(try decode("{}").cloneSteps == 16)
+        #expect(try decode(#"{"cloneSteps":12}"#).cloneSteps == 12)
+        #expect(try decode(#"{"cloneSteps":1}"#).cloneSteps == 8 && decode(#"{"cloneSteps":500}"#).cloneSteps == 32) // kept in range
+    }
 }
 
 extension SpeechTextTests {

@@ -21,9 +21,10 @@ extension Store {
     }
 }
 
-/// What produces the voice: the system's synthesizer, or the Silero neural voice (a Python helper process).
+/// What produces the voice: the system's synthesizer, the Silero neural voice (a Python helper process), or the
+/// person's own cloned voice ("My voice", a native program that runs for as long as an answer is spoken).
 public enum SpeechEngine: String, Codable, CaseIterable, Sendable {
-    case system, silero
+    case system, silero, clone
 }
 
 /// Voice output.
@@ -40,8 +41,10 @@ public struct SpeechSettings: SettingsGroup {
     public var voiceIdentifier: String?
     /// The same for English speech.
     public var englishVoiceIdentifier: String?
-    /// The speaking rate, shared by both engines; 0.5 is the system default.
+    /// The speaking rate of the system voice and Silero; 0.5 is the system default. The cloned voice keeps its own pace.
     public var rate = 0.5
+    /// How many decoding steps the cloned voice takes for every sentence: fewer is quicker, more is clearer (8 slurs words).
+    public var cloneSteps = SpeechSettings.defaultCloneSteps
     /// Read answers and questions aloud.
     public var speakAnswers = true
     /// Also say what was saved ("Saved: …").
@@ -49,10 +52,13 @@ public struct SpeechSettings: SettingsGroup {
     /// A short sound when something was saved.
     public var confirmationSound = true
 
+    public static let defaultCloneSteps = 16
+    public static let cloneStepsRange = 8 ... 32
+
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case engine, sileroSpeaker, sileroPython, voiceIdentifier, englishVoiceIdentifier, rate, speakAnswers, speakConfirmations, confirmationSound
+        case engine, sileroSpeaker, sileroPython, voiceIdentifier, englishVoiceIdentifier, rate, cloneSteps, speakAnswers, speakConfirmations, confirmationSound
     }
 
     public init(from decoder: any Decoder) throws {
@@ -65,6 +71,7 @@ public struct SpeechSettings: SettingsGroup {
         voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier)
         englishVoiceIdentifier = try c.decodeIfPresent(String.self, forKey: .englishVoiceIdentifier)
         rate = min(max(try c.decodeIfPresent(Double.self, forKey: .rate) ?? rate, 0.2), 0.7)
+        cloneSteps = min(max(try c.decodeIfPresent(Int.self, forKey: .cloneSteps) ?? cloneSteps, Self.cloneStepsRange.lowerBound), Self.cloneStepsRange.upperBound)
         speakAnswers = try c.decodeIfPresent(Bool.self, forKey: .speakAnswers) ?? speakAnswers
         speakConfirmations = try c.decodeIfPresent(Bool.self, forKey: .speakConfirmations) ?? speakConfirmations
         confirmationSound = try c.decodeIfPresent(Bool.self, forKey: .confirmationSound) ?? confirmationSound
