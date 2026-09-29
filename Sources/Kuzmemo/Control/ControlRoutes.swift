@@ -14,6 +14,10 @@ enum ControlRoutes {
         case ("GET", "/inbox"): return await inbox(env)
         case ("POST", "/dev/seed"): return await seed(env)
         case ("POST", "/ui"): return await ui(request, env)
+        case ("GET", "/window"): return WindowRoutes.describe()
+        case ("POST", "/window/open"): return await WindowRoutes.open(env)
+        case ("POST", "/window/close"): return WindowRoutes.close()
+        case ("GET", "/window/texts"): return WindowRoutes.texts(sheet: request.query["sheet"] == "1")
         case ("POST", "/undo"): return await undo(env)
         case ("POST", "/clock"): return clock(request, env)
         case ("POST", "/db/reset"): return await reset(env)
@@ -188,6 +192,8 @@ enum ControlRoutes {
         case "main":
             let height = CGFloat(Double(request.query["height"] ?? "") ?? 660)
             data = Snapshot.png(MainWindowView(env: env), width: max(width, 860), height: height, dark: dark)
+        case "live":
+            return await WindowRoutes.capture(sheet: request.query["sheet"] == "1", front: request.query["front"] == "1", scale: 2)
         case "editor":
             let title = request.query["title"] ?? "new"
             let editing: AppEnvironment.EditorRequest
