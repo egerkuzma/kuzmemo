@@ -261,4 +261,23 @@ struct SettingsTests {
         try await store.save(term: GlossaryTerm(canonical: "Foo", aliases: ["фу"]))
         #expect(try await store.glossary().map(\.canonical) == ["Foo"])
     }
+
+    @Test func theWholeGlossaryCanBeReplacedAtOnce() async throws {
+        let store = try makeStore()
+        try await store.save(term: GlossaryTerm(canonical: "Old", aliases: ["олд"]))
+        try await store.replaceGlossary(with: [
+            GlossaryTerm(id: 99, canonical: "Notion", aliases: ["нотион"], spoken: "Ношн"),
+            GlossaryTerm(canonical: "Slack", aliases: ["слак"], enabled: false),
+        ])
+        let terms = try await store.glossary()
+        #expect(terms.map(\.canonical) == ["Notion", "Slack"])
+        #expect(terms.first?.spoken == "Ношн" && terms.last?.enabled == false)
+        #expect(terms.first?.id != 99) // ids are the database's own
+
+        // a duplicate spelling fails and leaves the previous glossary in place
+        await #expect(throws: (any Error).self) {
+            try await store.replaceGlossary(with: [GlossaryTerm(canonical: "A"), GlossaryTerm(canonical: "A")])
+        }
+        #expect(try await store.glossary().map(\.canonical) == ["Notion", "Slack"])
+    }
 }
