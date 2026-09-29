@@ -501,7 +501,7 @@ final class VoiceController {
         let seconds = Double(samples.count) / 16_000
         let timing = lastTiming
         if let timing {
-            Self.log.info("""
+            Self.log.notice("""
                 recording: held \(timing.held, format: .fixed(precision: 2), privacy: .public) s, \
                 microphone up in \(timing.startSeconds, format: .fixed(precision: 2), privacy: .public) s, \
                 captured \(seconds, format: .fixed(precision: 2), privacy: .public) s from \(timing.source, privacy: .private)
