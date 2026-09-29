@@ -6,60 +6,78 @@
 
 <p align="center">
   <b>Talk to your calendar.</b><br>
-  A macOS menu-bar app: press a key, say what you need, and it lands in a calendar of its own — or is read back to you.
+  Press a key, say what you need, and it lands in a calendar of its own — or is read back to you.
 </p>
 
 <p align="center">
-  <a href="README.ru.md">Русская версия</a> · <a href="LICENSE">MIT License</a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white" alt="Swift 6.2">
+  <img src="https://img.shields.io/badge/speech-on--device-5B6CFF" alt="On-device speech recognition">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <a href="#how-it-feels">How it feels</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="README.ru.md">Русская версия</a>
 </p>
 
 <p align="center">
   <img src="docs/images/calendar.png" alt="The Kuzmemo calendar window" width="860">
 </p>
 
-*"Remind me the day after tomorrow to send the report."* · *"Team sync tomorrow at 11."* · *"Every weekday at 6 pm, check the stats."* · *"What's on today?"*
+Kuzmemo is a macOS menu-bar app. Hold **Fn** and say *"remind me the day after tomorrow to send the report"*, *"team sync tomorrow at 11"* or *"every weekday at 6 pm, check the stats"*, and the entry appears in its own calendar. Ask *"what's on today?"* and it reads the answer back.
 
-Speech recognition runs on your Mac. Understanding the phrase is done by Claude through the `claude` command-line tool you already use with your Claude subscription; the app itself only trusts a strict, validated JSON answer and does all the date arithmetic on its own.
+Speech recognition runs on your Mac. Claude, through the `claude` command-line tool you already use with your Claude subscription, turns the phrase into a structured action; the app validates it, does all the date arithmetic itself and writes to a local SQLite database. Nothing is synced anywhere.
 
-The interface and the spoken answers are available in **English and Russian**; recognition of Russian speech is what the app was designed around first.
+The interface, the spoken answers and the recognition are available in **English and Russian**.
 
-## What it looks like
+## How it feels
 
-Hold **Fn** and speak. A small card follows you through the steps — recording, the result with a short chance to **Undo**, or a question when the phrase is ambiguous:
-
-<p align="center">
-  <img src="docs/images/hud-recording.png" width="420" alt="Recording"><br>
-  <img src="docs/images/hud-result.png" width="420" alt="The result with Undo"><br>
-  <img src="docs/images/hud-question.png" width="420" alt="A clarifying question with two answers">
-</p>
-
-The menu-bar popover shows today and takes typed phrases through the same pipeline:
-
-<p align="center">
-  <img src="docs/images/popover.png" width="380" alt="The menu-bar popover">
-</p>
+<table>
+  <tr>
+    <td valign="middle"><b>1. Speak.</b><br>Hold <b>Fn</b>, or tap it to talk hands-free; the recording stops when you stop talking. A small card shows the level and the time. <b>Esc</b> cancels.</td>
+    <td valign="middle"><img src="docs/images/hud-recording.png" width="420" alt="Recording"></td>
+  </tr>
+  <tr>
+    <td valign="middle"><b>2. Confirm, or undo.</b><br>The result stays for a couple of seconds with an <b>Undo</b> button. The entry is already in the calendar; every change made by voice can be undone, also later.</td>
+    <td valign="middle"><img src="docs/images/hud-result.png" width="420" alt="The result with Undo"></td>
+  </tr>
+  <tr>
+    <td valign="middle"><b>3. Or be asked.</b><br>An ambiguous phrase such as "next Friday" gets a short question instead of a guess. Answer aloud, tap an option, or type.</td>
+    <td valign="middle"><img src="docs/images/hud-question.png" width="420" alt="A clarifying question with two answers"></td>
+  </tr>
+  <tr>
+    <td valign="middle"><b>4. Glance.</b><br>The menu-bar popover shows today, records with one click and takes typed phrases through the same pipeline.</td>
+    <td valign="middle"><img src="docs/images/popover.png" width="380" alt="The menu-bar popover"></td>
+  </tr>
+</table>
 
 ## Features
 
-- **One key.** Tap **Fn** to record hands-free (it stops when you stop talking) or hold it to talk while pressed. **⌃⌥M** works without any extra permission. **Esc** cancels.
+**Voice**
+- **One key.** **Fn** for hands-free (tap) or push-to-talk (hold). **⌃⌥M** works without any extra permission.
+- **Ordinary phrases.** Reminders, events, tasks and notes; "tomorrow", "next Monday", "in two hours", "every weekday at 6 pm", "on the 25th".
+- **Answers aloud.** "What's on today?", "what do I have tomorrow", "what's overdue", "find everything about the budget". Simple questions are answered locally in about half a second, and what has already passed today is not read out.
 - **The right microphone.** When macOS has selected a Bluetooth headset as the input, Kuzmemo records with the built-in microphone instead: a headset needs a few seconds to switch to call mode, which eats the first words. Settings → Recording lets you pick any input.
-- **Understands ordinary phrases.** Reminders, events, tasks and notes; "tomorrow", "next Monday", "in two hours", "every weekday at 6 pm", "on the 25th". Ambiguous phrases ("next Friday") are answered with a short spoken question and buttons instead of a guess; you can reply by voice, by tapping an option or by typing.
-- **Answers questions aloud.** "What's on today?", "what do I have tomorrow", "what's overdue", "find everything about the budget". Simple questions are answered locally in about half a second, and what has already passed today is not read out.
-- **A calendar of its own** (SQLite, nothing is synced anywhere): month grid, day list, an Inbox for undated notes and for phrases that could not be processed yet, recurring entries, full-text search that understands word forms, an editor with a live description of the repeat rule.
-- **Nothing is lost.** The recording is stored before recognition and the text before it is sent; if `claude` is unavailable, the phrase waits in the Inbox and is retried. Every change made by voice can be undone (card, menu, an undo journal that survives restarts).
-- **Notifications you control.** System notifications with your own lead times (for example 10 and 5 minutes before a meeting and at the start), several reminders per day for entries without a time, your own sounds or macOS sounds, snooze buttons, quiet hours.
 - **Voices.** The system voice, or the optional neural [Silero](https://github.com/snakers4/silero-models) voice (Russian) that runs locally in a small Python helper.
-- **Glossary.** Teach it names and jargon: how they are misheard, how they are written, how a voice should say them. It starts empty; the terms live in your database and can be exported and imported as JSON.
-- **Private by design.** Audio never leaves the Mac and is deleted after transcription. Only the recognized text, your glossary terms and the titles of a few nearby calendar entries are sent to Claude.
+- **Glossary.** Teach it names and jargon: how they are misheard, how they are written, how a voice should say them. It starts empty and can be exported and imported as JSON.
 
-## Requirements
+**Calendar**
+- **A calendar of its own.** Month grid, day list, an Inbox for undated notes and for phrases that could not be processed yet, recurring entries, full-text search that understands word forms, and an editor with a live description of the repeat rule.
+- **Notifications you control.** System notifications with your own lead times (10 and 5 minutes before a meeting and at the start, say), several reminders a day for entries without a time, your own sounds or macOS sounds, snooze buttons, quiet hours.
 
-- macOS 26 or later; Apple silicon recommended (speech recognition uses the Neural Engine).
-- Xcode 26 or later (Swift 6.2+) to build.
-- [Claude Code](https://claude.com/claude-code) installed and signed in (`claude auth login`). Kuzmemo calls `claude -p`, so it uses your Claude subscription; there is no API-key mode.
-- About 2 GB of disk for the speech model (and about 800 MB more for the optional neural voice).
+**Trust**
+- **Nothing is lost.** The recording is stored before recognition and the text before it is sent; if `claude` is unavailable, the phrase waits in the Inbox and is retried.
+- **Everything is undoable.** Deletes are soft and every change goes through an undo journal that survives restarts.
+- **Private by design.** Audio never leaves the Mac and is deleted after transcription. See [Privacy](#privacy).
 
-## Build and run
+## Quick start
+
+Requirements: macOS 26 or later (Apple silicon recommended), Xcode 26 or later (Swift 6.2+), [Claude Code](https://claude.com/claude-code) installed and signed in with `claude auth login` (Kuzmemo calls `claude -p`, so it uses your Claude subscription; there is no API-key mode), and about 2 GB of disk for the speech model.
 
 ```bash
 git clone <this repository> && cd kuzmemo
@@ -73,13 +91,11 @@ export KUZMEMO_SIGN_IDENTITY="<certificate name or SHA-1 hash>"   # or put it in
 scripts/run_app.sh --prod
 ```
 
-On first launch grant **Microphone**, **Input Monitoring** (needed for the Fn key; the ⌃⌥M chord works without it) and **Notifications**. In **Settings → Recognition** download the speech model. If Fn opens the emoji picker or dictation, set *System Settings → Keyboard → Press 🌐 key to* **Do Nothing**.
+On first launch grant **Microphone**, **Input Monitoring** (needed for the Fn key; the ⌃⌥M chord works without it) and **Notifications**, then download the speech model in **Settings → Recognition**. If Fn opens the emoji picker or dictation, set *System Settings → Keyboard → Press 🌐 key to* **Do Nothing**.
 
-The optional neural voice: `scripts/install_silero.sh` (needs Python 3.10+; it creates its own environment and downloads the model into `~/Library/Application Support/Kuzmemo/silero`), then choose it in *Settings → Speech*.
+The optional neural voice needs about 800 MB more: run `scripts/install_silero.sh` (Python 3.10+; it creates its own environment and downloads the model into `~/Library/Application Support/Kuzmemo/silero`), then choose it in *Settings → Speech*.
 
-`scripts/run_app.sh` without `--prod` builds the *automation build* used by the end-to-end scripts (see below). The app icon is drawn by `scripts/make_icon.swift` during the build.
-
-## Using it
+### Things to say
 
 | Say | What happens |
 |---|---|
@@ -90,7 +106,7 @@ The optional neural voice: `scripts/install_silero.sh` (needs Python 3.10+; it c
 | "Move the meeting with Anna to Thursday" | The matching entry is changed (with Undo) |
 | "Next Friday, sync at three" | "Which Friday?" with two buttons; answer aloud or tap |
 
-The card that follows a command offers **Undo** for a couple of seconds; the menu-bar popover shows today, the result of the last command and a text box that goes through the same pipeline as speech. **⌘,** opens the settings; the **Calendar** window is the full month view.
+**⌘,** opens the settings; the **Calendar** window is the full month view.
 
 ## How it works
 
@@ -101,37 +117,32 @@ key → microphone → on-device Whisper (WhisperKit) → transcript
     → SQLite + undo journal → card / spoken answer / notifications
 ```
 
-The ideas the code is built around:
-
 - **Claude describes, the app computes.** The model returns structure ("a weekday, next week, at 11"); date arithmetic, validation and every write are deterministic app code. A second, independent reading of simple date phrases cross-checks the model.
 - **Untrusted input.** Transcripts and calendar text are data, never instructions: the model gets no tools, answers under a strict schema, may only ask for allow-listed actions, and deletes are soft with Undo.
 - **Nothing is lost.** Every phrase is persisted before each stage; a failure leaves an Inbox card with a retry, and interrupted work is finished at the next launch.
 - **Testable without a person.** A UI-free core, recorded model answers (a golden set of about sixty phrases, also runnable against the real `claude -p`), and a control socket in the development build that drives the real app.
 
-Three SwiftPM targets: `KuzmemoCore` (UI-free logic and storage on GRDB, fully unit-tested), `KuzmemoSTT` (WhisperKit behind a protocol) and `Kuzmemo` (the app). The interface is localized with English source keys and Russian translation tables; `scripts/check_localization.py` keeps them in step with the code.
+Three SwiftPM targets: `KuzmemoCore` (UI-free logic and storage on GRDB, fully unit-tested), `KuzmemoSTT` (WhisperKit behind a protocol) and `Kuzmemo` (the app).
 
-## Tests
+## Privacy
+
+Everything lives in `~/Library/Application Support/Kuzmemo` (database, models). Audio is a temporary file, removed as soon as the text is stored. Only the recognized text of a phrase, your glossary terms and the titles of a few nearby calendar entries go to Anthropic, through Claude Code; nothing else leaves the Mac.
+
+## Development
 
 ```bash
 swift test                                   # unit tests; the golden set replays recorded model answers offline
 KUZMEMO_LIVE_CLAUDE=1 swift test --filter liveAgainstClaude   # the golden set against the real `claude -p`
 python3 scripts/check_localization.py        # translation tables against the code
+scripts/run_app.sh                           # the automation build, then scripts/e2e/*.py drive the real app
 ```
 
-The development build exposes a control socket, so scripts can drive the real app without a person: `scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py` (run `scripts/run_app.sh` first; speech fixtures come from `scripts/fixtures/make_synth.sh`). That build is muted, ignores the keyboard trigger and never opens the microphone. The pictures in this README come from `scripts/screenshots.py --readme` (macOS in dark mode).
+The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
 
-## Data and privacy
+Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 
-Everything lives in `~/Library/Application Support/Kuzmemo` (database, models). Audio is a temporary file, removed as soon as the text is stored. The text of a phrase, the glossary and the titles of nearby entries go to Anthropic through Claude Code; nothing else does.
-
-## Status
-
-Personal project, work in progress: the voice path, the calendar window, settings, notifications and the bilingual interface are built; the long-run soak and a first release are next.
+Status: a personal project in active development. The voice path, the calendar window, settings, notifications and the bilingual interface are built; a long-run soak and a first release are next.
 
 ## License
 
 MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (all MIT). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0, for non-commercial use.
-
-## Contributing
-
-Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables (English keys, Russian translations). Please keep personal data out of examples and tests.
