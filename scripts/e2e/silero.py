@@ -4,9 +4,8 @@ model are found, that the real helper turns text (with digits and Latin letters)
 that the app falls back to the system voice when Silero is missing. Nothing is played: the automation build is muted and
 phrases are only made, never played.
 
-Needs the dev app running (scripts/run_app.sh) and, for the live part, a Python with torch and the model (the
-environment of ~/Projects/another project is found by itself, or run scripts/install_silero.sh); without them the live part is
-skipped.
+Needs the dev app running (scripts/run_app.sh) and, for the live part, the app's own Python with torch and the model
+(scripts/install_silero.sh); without them the live part is skipped.
 
     scripts/e2e/silero.py
 """

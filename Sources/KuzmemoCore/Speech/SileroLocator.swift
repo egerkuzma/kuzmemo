@@ -36,15 +36,14 @@ public enum SileroLocator {
         }
     }
 
-    /// `~/Library/Application Support/Kuzmemo/silero`, where `scripts/install_silero.sh` puts its own environment and
-    /// a copy of the model.
+    /// `~/Library/Application Support/Kuzmemo/silero`, where `scripts/install_silero.sh` puts the app's own Python
+    /// environment (`venv`) and the model (`v4_ru.pt`).
     public static func ownDirectory(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         home.appendingPathComponent("Library/Application Support/Kuzmemo/silero", isDirectory: true)
     }
 
-    /// An interpreter chosen by hand wins; otherwise the app's own environment, then the one of the another project
-    /// project (which already speaks with this voice). The model is looked for next to the app's data and in the
-    /// torch hub cache.
+    /// An interpreter chosen by hand wins; otherwise the app's own environment is used. The model is always the app's
+    /// own copy.
     public static func find(
         override: String?, home: URL = FileManager.default.homeDirectoryForCurrentUser, fileManager: FileManager = .default
     ) -> Result<SileroInstallation, Problem> {
@@ -54,10 +53,7 @@ public enum SileroLocator {
             guard fileManager.isExecutableFile(atPath: url.path) else { return .failure(.pythonMissing(override)) }
             candidates = [(url, "указан вручную")]
         } else {
-            candidates = [
-                (ownDirectory(home: home).appendingPathComponent("venv/bin/python"), "окружение Kuzmemo"),
-                (home.appendingPathComponent("Projects/another project/venv/bin/python"), "окружение проекта another project"),
-            ]
+            candidates = [(ownDirectory(home: home).appendingPathComponent("venv/bin/python"), "окружение Kuzmemo")]
         }
         var withoutTorch: URL?
         for candidate in candidates where fileManager.isExecutableFile(atPath: candidate.python.path) {
@@ -78,16 +74,10 @@ public enum SileroLocator {
         return versions.contains { fileManager.fileExists(atPath: lib.appendingPathComponent($0).appendingPathComponent("site-packages/torch").path) }
     }
 
+    /// The app's own copy of the model; a truncated download does not count.
     static func findModel(home: URL, fileManager: FileManager) -> URL? {
-        let hub = home.appendingPathComponent(".cache/torch/hub")
-        let candidates = [
-            ownDirectory(home: home).appendingPathComponent(modelFileName),
-            hub.appendingPathComponent("snakers4_silero-models_master/src/silero/model/\(modelFileName)"),
-            hub.appendingPathComponent("checkpoints/\(modelFileName)"),
-        ]
-        return candidates.first { url in
-            let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-            return size > 1_000_000
-        }
+        let url = ownDirectory(home: home).appendingPathComponent(modelFileName)
+        let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        return size > 1_000_000 ? url : nil
     }
 }

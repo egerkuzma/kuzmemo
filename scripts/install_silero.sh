@@ -6,7 +6,7 @@
 #
 # Needs Python 3.10 or newer (for example: brew install python@3.13) and a network connection (about 100 MB to download,
 # about 750 MB on disk afterwards).
-# Kuzmemo also finds the environment of ~/Projects/another project by itself, so this is only needed without it.
+# Safe to run again: whatever is already there is kept.
 # The Silero models are licensed CC BY-NC-SA 4.0: fine for personal use.
 set -euo pipefail
 
@@ -15,16 +15,7 @@ MODEL="$DIR/v4_ru.pt"
 MODEL_URL="https://models.silero.ai/models/tts/ru/v4_ru.pt"
 mkdir -p "$DIR"
 
-# 1. The model: reuse a copy that torch hub already downloaded (an APFS clone costs no space), else download it.
-if [ ! -s "$MODEL" ]; then
-  for source in "$HOME/.cache/torch/hub/snakers4_silero-models_master/src/silero/model/v4_ru.pt" "$HOME/.cache/torch/hub/checkpoints/v4_ru.pt"; do
-    if [ -s "$source" ]; then
-      cp -c "$source" "$MODEL"
-      echo "model: cloned from $source"
-      break
-    fi
-  done
-fi
+# 1. The model (v4_ru.pt) is downloaded from Silero's own server.
 if [ ! -s "$MODEL" ]; then
   echo "model: downloading $MODEL_URL"
   curl -fL --progress-bar -o "$MODEL.part" "$MODEL_URL"

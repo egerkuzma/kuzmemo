@@ -271,46 +271,40 @@ struct SileroLocatorTests {
         FileManager.default.createFile(atPath: url.path, contents: Data(count: Int(megabytes * 1_000_000)))
     }
 
-    @Test func theAppsOwnEnvironmentIsPreferred() throws {
+    @Test func theAppsOwnEnvironmentAndModelAreFound() throws {
         let home = try home { home in
             try venv(at: SileroLocator.ownDirectory(home: home).appendingPathComponent("venv"), torch: true)
             try model(at: SileroLocator.ownDirectory(home: home).appendingPathComponent("v4_ru.pt"))
-            try venv(at: home.appendingPathComponent("Projects/another project/venv"), torch: true)
         }
         defer { try? FileManager.default.removeItem(at: home) }
         let found = try SileroLocator.find(override: nil, home: home).get()
         #expect(found.python.path.contains("Application Support/Kuzmemo/silero/venv/bin/python") && found.source == "окружение Kuzmemo")
-        #expect(found.model.lastPathComponent == "v4_ru.pt")
+        #expect(found.model.path.hasSuffix("Application Support/Kuzmemo/silero/v4_ru.pt"))
     }
 
-    @Test func theHelloKuzmaEnvironmentAndTheTorchHubModelAreFoundOnAMacThatHasThem() throws {
+    @Test func nothingOutsideTheAppsFolderIsLookedAt() throws {
+        // Environments and models lying elsewhere (another project's venv, the torch hub cache) are not used.
         let home = try home { home in
-            try venv(at: home.appendingPathComponent("Projects/another project/venv"), torch: true)
+            try venv(at: home.appendingPathComponent("Projects/other/venv"), torch: true)
             try model(at: home.appendingPathComponent(".cache/torch/hub/snakers4_silero-models_master/src/silero/model/v4_ru.pt"))
         }
         defer { try? FileManager.default.removeItem(at: home) }
-        let found = try SileroLocator.find(override: nil, home: home).get()
-        #expect(found.source == "окружение проекта another project" && found.model.path.contains(".cache/torch/hub"))
+        #expect(SileroLocator.find(override: nil, home: home) == .failure(.noPython))
     }
 
-    @Test func anEnvironmentWithoutTorchIsSkipped() throws {
+    @Test func anEnvironmentWithoutTorchIsNotUsed() throws {
         let home = try home { home in
             try venv(at: SileroLocator.ownDirectory(home: home).appendingPathComponent("venv"), torch: false)
-            try venv(at: home.appendingPathComponent("Projects/another project/venv"), torch: true)
             try model(at: SileroLocator.ownDirectory(home: home).appendingPathComponent("v4_ru.pt"))
         }
         defer { try? FileManager.default.removeItem(at: home) }
-        #expect(try SileroLocator.find(override: nil, home: home).get().source == "окружение проекта another project")
+        guard case .failure(.noTorch) = SileroLocator.find(override: nil, home: home) else { Issue.record("expected noTorch"); return }
     }
 
     @Test func problemsAreNamed() throws {
         let empty = try home { _ in }
         defer { try? FileManager.default.removeItem(at: empty) }
         #expect(SileroLocator.find(override: nil, home: empty) == .failure(.noPython))
-
-        let noTorch = try home { try venv(at: SileroLocator.ownDirectory(home: $0).appendingPathComponent("venv"), torch: false) }
-        defer { try? FileManager.default.removeItem(at: noTorch) }
-        guard case .failure(.noTorch) = SileroLocator.find(override: nil, home: noTorch) else { Issue.record("expected noTorch"); return }
 
         let noModel = try home { try venv(at: SileroLocator.ownDirectory(home: $0).appendingPathComponent("venv"), torch: true) }
         defer { try? FileManager.default.removeItem(at: noModel) }

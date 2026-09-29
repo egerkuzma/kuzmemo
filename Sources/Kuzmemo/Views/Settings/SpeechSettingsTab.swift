@@ -30,7 +30,7 @@ struct SpeechSettingsTab: View {
                 if settings.speech.engine == .silero {
                     sileroStatus(settings.speech)
                 } else {
-                    Hint("Голос, встроенный в macOS: быстрый, ничего не нужно устанавливать. Нейросетевой Silero звучит естественнее (как в проекте another project), но требует Python с torch.")
+                    Hint("Голос, встроенный в macOS: быстрый, ничего не нужно устанавливать. Нейросетевой Silero звучит естественнее, но ему нужны Python с torch и файл модели (ставятся одной командой).")
                 }
             }
             Section("Голос") {

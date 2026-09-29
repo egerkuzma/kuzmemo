@@ -12,7 +12,7 @@ public enum SileroVoice {
         }
     }
 
-    /// The voice another project uses.
+    /// The speaker used until another is chosen.
     public static let defaultSpeaker = "eugene"
 
     public static let speakers: [Speaker] = [
