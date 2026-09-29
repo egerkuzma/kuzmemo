@@ -69,7 +69,22 @@ for file in ${(k)SIZE}; do
   mv "$target.part" "$target"
 done
 
-# 3. A short self-check: the program starts and prints its version.
+# 3. Warm-up. The first run of a newly built program compiles its GPU kernels, which takes 15 to 20 seconds; done here, once,
+# it does not make the first spoken answer slow. (The kernels of the voice encoder are compiled when a voice is recorded.)
+WARM="$DIR/.warm"
+if [ "$(cat "$WARM" 2>/dev/null || true)" != "$SRC_SHA" ]; then
+  echo "warm-up: compiling the GPU kernels (about 20 seconds, once)"
+  TMP="$(mktemp -d)"
+  if echo "Проверка." | "$DIR/build/omnivoice-tts" --model "$DIR/models/omnivoice-base-Q8_0.gguf" \
+       --codec "$DIR/models/omnivoice-tokenizer-Q8_0.gguf" --lang Russian --steps 4 -o "$TMP/warm.wav" >/dev/null 2>&1 && [ -s "$TMP/warm.wav" ]; then
+    echo "$SRC_SHA" >"$WARM"
+  else
+    echo "note: the warm-up run failed; the first spoken answer may be slow or fail" >&2
+  fi
+  rm -rf "$TMP"
+fi
+
+# 4. A short self-check: the program starts and prints its version.
 "$DIR/build/omnivoice-tts" --help 2>&1 | sed -n 1p || true # prints its version; the help text itself ends with a non-zero status
 echo "done: $DIR"
 echo "next: Kuzmemo → Settings → Speech → My voice (not built yet: this installs the parts)"
