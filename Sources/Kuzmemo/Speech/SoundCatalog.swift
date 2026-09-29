@@ -13,11 +13,12 @@ enum SoundCatalog {
         var title: String
     }
 
-    static let chimes: [Chime] = [
+    /// The app's own chimes. Computed, not stored: the titles must follow the interface language when it changes.
+    static var chimes: [Chime] { [
         Chime(id: "bell", title: tr("Bell")), Chime(id: "drop", title: tr("Drop")), Chime(id: "gong", title: tr("Soft gong")),
         Chime(id: "marimba", title: tr("Marimba")), Chime(id: "sonar", title: tr("Sonar")), Chime(id: "glass", title: tr("Glass chime")),
         Chime(id: "melody", title: tr("Rising melody")), Chime(id: "soft", title: tr("Soft signal")),
-    ]
+    ] }
 
     static let systemDirectory = URL(fileURLWithPath: "/System/Library/Sounds", isDirectory: true)
     static var userSoundsDirectory: URL {

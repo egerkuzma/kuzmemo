@@ -220,10 +220,11 @@ struct ItemEditorView: View {
         return [hours > 0 ? tr("%1$lld h", numbers: hours) : nil, rest > 0 ? tr("%1$lld min", numbers: rest) : nil].compactMap { $0 }.joined(separator: " ")
     }
 
-    private static let leads: [(minutes: Int, title: String)] = [
+    /// Computed, not stored: the titles must follow the interface language when it changes.
+    private static var leads: [(minutes: Int, title: String)] { [
         (0, tr("As in Settings")), (5, tr("5 minutes before")), (10, tr("10 minutes before")), (15, tr("15 minutes before")),
         (30, tr("30 minutes before")), (60, tr("1 hour before")), (1440, tr("1 day before")),
-    ]
+    ] }
 
     /// The choices, plus the entry's own value when it is not one of them (an older or imported entry keeps it).
     private static func leadOptions(including current: Int) -> [(minutes: Int, title: String)] {

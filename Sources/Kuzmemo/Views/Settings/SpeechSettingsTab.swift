@@ -71,10 +71,12 @@ struct SpeechSettingsTab: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tr("Sample phrase")).font(.caption).foregroundStyle(.secondary)
-                    TextField("", text: $sample, axis: .vertical)
-                        .lineLimit(2 ... 4)
-                        .multilineTextAlignment(.leading)
-                        .textFieldStyle(.roundedBorder)
+                    // a TextEditor: a multi-line TextField in a grouped form aligns its text to the trailing edge
+                    TextEditor(text: $sample)
+                        .font(.body)
+                        .frame(height: 56)
+                        .scrollContentBackground(.hidden)
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.primary.opacity(0.15)))
                 }
                 HStack {
                     Button { preview() } label: { Label(tr("Listen"), systemImage: "play.fill") }
