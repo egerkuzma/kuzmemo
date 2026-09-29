@@ -1,6 +1,17 @@
 import GRDB
 
 /// One line of the calendar: a one-off item or a single occurrence of a recurring one.
+extension AgendaEntry {
+    /// Whether the entry's moment is behind `now`: it is on an earlier day, or it is today with a time whose end (the
+    /// time plus the duration, when there is one) has gone by. An all-day entry does not pass during its day.
+    public func hasPassed(at now: LocalDateTime) -> Bool {
+        if date < now.date { return true }
+        guard date == now.date, let time else { return false }
+        let end = time.hour * 60 + time.minute + max(item.durationMin ?? 0, 0)
+        return end <= now.time.hour * 60 + now.time.minute
+    }
+}
+
 public struct AgendaEntry: Hashable, Sendable, Identifiable {
     public var item: Item
     public var date: LocalDate

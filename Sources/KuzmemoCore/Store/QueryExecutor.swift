@@ -6,6 +6,9 @@ public struct QueryResult: Equatable, Sendable {
     public var entries: [AgendaEntry]
     /// A label for headings in the current language, for example "today" or "from September 28 to October 4".
     public var title: String
+    /// How many of today's timed entries were left out because their time has gone by: "what's on today" is about what
+    /// is still ahead, so a reminder from this morning is not read out at five in the afternoon.
+    public var passedToday = 0
 }
 
 extension Store {
@@ -32,8 +35,14 @@ extension Store {
         let today = now.date
         switch plan.target {
         case let .days(range):
-            let entries = try await agenda(in: range, includeDone: plan.includeDone)
-            return QueryResult(plan: plan, entries: entries, title: Self.title(for: range, today: today))
+            var entries = try await agenda(in: range, includeDone: plan.includeDone)
+            var passed = 0
+            if !plan.includeDone, range.contains(today) { // asking for the whole day (with done ones) keeps what has passed
+                let before = entries.count
+                entries.removeAll { $0.date == today && $0.hasPassed(at: now) }
+                passed = before - entries.count
+            }
+            return QueryResult(plan: plan, entries: entries, title: Self.title(for: range, today: today), passedToday: passed)
 
         case let .upcoming(limit):
             let entries = try await agenda(in: today ... today.adding(days: 60), includeDone: false)

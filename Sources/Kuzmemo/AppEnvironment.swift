@@ -426,7 +426,9 @@ final class AppEnvironment {
     /// A plain-text answer for a query (the spoken version comes with the voice path).
     static func digest(_ result: QueryResult?, today: LocalDate) -> String {
         guard let result else { return tr("Could not get an answer.") }
-        if result.entries.isEmpty { return tr("Nothing (%1$@).", "\(result.title)") }
+        if result.entries.isEmpty {
+            return result.passedToday > 0 ? tr("Nothing left (%1$@).", "\(result.title)") : tr("Nothing (%1$@).", "\(result.title)")
+        }
         let count = result.entries.count
         var lines = ["\(trCount("%lld entries", count)) — \(result.title):"]
         for entry in result.entries.prefix(8) {

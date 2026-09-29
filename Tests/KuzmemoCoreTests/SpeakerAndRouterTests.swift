@@ -9,8 +9,8 @@ private func entry(_ title: String, _ date: String, _ time: String? = nil) -> Ag
     return AgendaEntry(item: item, date: LocalDate(date)!, time: item.time, isDone: false, occurrenceDate: nil, wasMoved: false)
 }
 
-private func result(_ target: QueryPlan.Target, _ entries: [AgendaEntry], detail: QueryDetail = .digest) -> QueryResult {
-    QueryResult(plan: QueryPlan(target: target, detail: detail), entries: entries, title: "")
+private func result(_ target: QueryPlan.Target, _ entries: [AgendaEntry], detail: QueryDetail = .digest, passed: Int = 0) -> QueryResult {
+    QueryResult(plan: QueryPlan(target: target, detail: detail), entries: entries, title: "", passedToday: passed)
 }
 
 private func day(_ offset: Int) -> QueryPlan.Target {
@@ -25,6 +25,16 @@ struct AgendaSpeakerTests {
     @Test func anEmptyDay() {
         #expect(speaker.speech(for: result(day(0), []), today: today) == "На сегодня у вас ничего не запланировано.")
         #expect(speaker.speech(for: result(day(1), []), today: today) == "На завтра у вас ничего не запланировано.")
+    }
+
+    @Test func whenOnlyPassedThingsRemainTheDayIsDoneNotEmpty() {
+        #expect(speaker.speech(for: result(day(0), [], passed: 2), today: today) == "На сегодня у вас больше ничего.")
+        #expect(speaker.speech(for: result(day(0), [], detail: .count, passed: 1), today: today) == "На сегодня у вас больше ничего.")
+        #expect(speaker.speech(for: result(day(0), [], detail: .count), today: today) == "На сегодня у вас ничего нет.")
+        Localization.with(.english) {
+            #expect(speaker.speech(for: result(day(0), [], passed: 2), today: today) == "Today you have nothing left.")
+            #expect(speaker.speech(for: result(day(0), []), today: today) == "Today you have nothing planned.")
+        }
     }
 
     @Test func oneAndSeveralEntriesReadTimesAsWords() {

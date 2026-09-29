@@ -24,17 +24,60 @@ private func seeded() async throws -> Store {
 
 @Suite("Store.run (queries)")
 struct QueryExecutorTests {
-    @Test func aDayShowsOneOffsAndOccurrencesInOrder() async throws {
+    @Test func aDayShowsWhatIsStillAheadOfOneOffsAndOccurrences() async throws {
         let store = try await seeded()
         let result = try await store.run(QueryPlan(target: .days(day("2026-09-28") ... day("2026-09-28"))), now: now)
-        #expect(result.entries.map(\.item.title) == ["Планёрка", "Созвон с Акме"])
+        #expect(result.entries.map(\.item.title) == ["Созвон с Акме"]) // the 10:00 stand-up has passed at 14:30
+        #expect(result.passedToday == 1)
         #expect(result.title == "сегодня")
+        // asking for the whole day, done things included, keeps what has passed
+        let whole = try await store.run(QueryPlan(target: .days(day("2026-09-28") ... day("2026-09-28")), includeDone: true), now: now)
+        #expect(whole.entries.map(\.item.title) == ["Планёрка", "Созвон с Акме"] && whole.passedToday == 0)
+    }
+
+    @Test func whatHasPassedTodayIsLeftOutButAllDayThingsAndEventsInProgressStay() async throws {
+        let store = try makeStore()
+        var inProgress = Item(id: "", kind: .event, title: "Идёт сейчас", date: day("2026-09-28"), time: LocalTime("14:00"), source: .voice)
+        inProgress.durationMin = 60 // until 15:00
+        let ongoing = inProgress
+        try await store.perform(label: "seed") { m in
+            try m.insert(Item(id: "", kind: .reminder, title: "Вчера", date: day("2026-09-27"), time: LocalTime("10:00"), source: .voice))
+            try m.insert(Item(id: "", kind: .reminder, title: "Утром", date: day("2026-09-28"), time: LocalTime("09:00"), source: .voice))
+            try m.insert(Item(id: "", kind: .reminder, title: "Ровно сейчас", date: day("2026-09-28"), time: LocalTime("14:30"), source: .voice))
+            try m.insert(ongoing)
+            try m.insert(Item(id: "", kind: .reminder, title: "Вечером", date: day("2026-09-28"), time: LocalTime("18:00"), source: .voice))
+            try m.insert(Item(id: "", kind: .reminder, title: "Весь день", date: day("2026-09-28"), source: .voice))
+        }
+        let today = try await store.run(QueryPlan(target: .days(day("2026-09-28") ... day("2026-09-28"))), now: now)
+        #expect(today.entries.map(\.item.title) == ["Весь день", "Идёт сейчас", "Вечером"])
+        #expect(today.passedToday == 2)
+        // an earlier day in the range is a question about the past: nothing is hidden from it
+        let both = try await store.run(QueryPlan(target: .days(day("2026-09-27") ... day("2026-09-28"))), now: now)
+        #expect(both.entries.map(\.item.title) == ["Вчера", "Весь день", "Идёт сейчас", "Вечером"] && both.passedToday == 2)
+        let tomorrow = try await store.run(QueryPlan(target: .days(day("2026-09-29") ... day("2026-09-29"))), now: now)
+        #expect(tomorrow.entries.isEmpty && tomorrow.passedToday == 0)
+    }
+
+    @Test func anEntryHasPassedWhenItsTimeIsBehind() {
+        func entry(_ time: String?, duration: Int? = nil, date: String = "2026-09-28") -> AgendaEntry {
+            var item = Item(id: "x", kind: .event, title: "x", date: day(date), time: time.flatMap(LocalTime.init), source: .voice)
+            item.durationMin = duration
+            return AgendaEntry(item: item, date: day(date), time: item.time, isDone: false, occurrenceDate: nil, wasMoved: false)
+        }
+        #expect(entry("14:29").hasPassed(at: now) && entry("14:30").hasPassed(at: now))
+        #expect(!entry("14:31").hasPassed(at: now))
+        #expect(!entry("14:00", duration: 60).hasPassed(at: now)) // still running until 15:00
+        #expect(entry("14:00", duration: 30).hasPassed(at: now)) // ended at 14:30
+        #expect(!entry(nil).hasPassed(at: now)) // all-day
+        #expect(entry(nil, date: "2026-09-27").hasPassed(at: now)) // an earlier day
+        #expect(!entry("09:00", date: "2026-09-29").hasPassed(at: now)) // tomorrow
+        #expect(!entry("23:30", duration: 120).hasPassed(at: LocalDateTime(date: day("2026-09-28"), time: LocalTime("23:59")!)))
     }
 
     @Test func rangesAreLabelled() async throws {
         let store = try await seeded()
         let result = try await store.run(QueryPlan(target: .days(day("2026-09-28") ... day("2026-10-04"))), now: now)
-        #expect(result.entries.count == 4)
+        #expect(result.entries.count == 3 && result.passedToday == 1)
         #expect(result.title == "с 28 сентября по 4 октября")
     }
 

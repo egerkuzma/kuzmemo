@@ -19,7 +19,8 @@ public struct AgendaSpeaker: Sendable {
         let label = Self.label(for: result, today: today)
 
         if case .days = result.plan.target, result.plan.detail == .count {
-            return entries.isEmpty ? tr("%1$@ nothing.", label) : tr("%1$@ %2$@.", label, Self.countPhrase(entries.count))
+            if entries.isEmpty { return result.passedToday > 0 ? tr("%1$@ nothing left.", label) : tr("%1$@ nothing.", label) }
+            return tr("%1$@ %2$@.", label, Self.countPhrase(entries.count))
         }
         if entries.isEmpty { return Self.emptyPhrase(for: result, label: label) }
 
@@ -84,7 +85,7 @@ public struct AgendaSpeaker: Sendable {
 
     static func emptyPhrase(for result: QueryResult, label: String) -> String {
         switch result.plan.target {
-        case .days: tr("%1$@ nothing planned.", label)
+        case .days: result.passedToday > 0 ? tr("%1$@ nothing left.", label) : tr("%1$@ nothing planned.", label)
         case .upcoming: tr("There is nothing coming up.")
         case .overdue: tr("Nothing is overdue.")
         case .inbox: tr("There are no undated entries.")

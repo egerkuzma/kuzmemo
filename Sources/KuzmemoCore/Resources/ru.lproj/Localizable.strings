@@ -533,6 +533,8 @@
 "Recording from “%1$@”." = "Запись идёт с «%1$@».";
 "No audio input found." = "Не найден ни один вход звука.";
 "The microphone needed %1$@ s to start, so the beginning was not recorded. Choose the built-in microphone in Settings → Recording." = "Микрофон включался %1$@ с, начало не записалось. Выберите встроенный микрофон в Настройки → Запись.";
+"%1$@ nothing left." = "%1$@ больше ничего.";
+"Nothing left (%1$@)." = "Больше ничего (%1$@).";
 "%lld entries|one" = "%lld запись";
 "%lld entries|few" = "%lld записи";
 "%lld entries|many" = "%lld записей";
