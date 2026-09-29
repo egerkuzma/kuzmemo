@@ -43,7 +43,8 @@ public struct SpeechSettings: SettingsGroup {
     public var englishVoiceIdentifier: String?
     /// The speaking rate of the system voice and Silero; 0.5 is the system default. The cloned voice keeps its own pace.
     public var rate = 0.5
-    /// How many decoding steps the cloned voice takes for every sentence: fewer is quicker, more is clearer (8 slurs words).
+    /// How many decoding steps the cloned voice takes for every sentence: fewer is quicker, more is clearer. The owner listened
+    /// to 8, 12 and 16 with their own sample and chose to start with 8 (the answer starts about 1.6 s sooner than with 16).
     public var cloneSteps = SpeechSettings.defaultCloneSteps
     /// Read answers and questions aloud.
     public var speakAnswers = true
@@ -52,7 +53,7 @@ public struct SpeechSettings: SettingsGroup {
     /// A short sound when something was saved.
     public var confirmationSound = true
 
-    public static let defaultCloneSteps = 16
+    public static let defaultCloneSteps = 8
     public static let cloneStepsRange = 8 ... 32
 
     public init() {}

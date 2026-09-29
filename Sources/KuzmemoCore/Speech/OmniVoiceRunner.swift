@@ -84,13 +84,13 @@ public enum OmniVoiceError: Error, Equatable, Sendable {
 /// next is still being made. The process lives only as long as the answer, so nothing stays in memory between answers.
 public struct OmniVoiceRunner: Sendable {
     public var locator: OmniVoiceLocator
-    /// Decoding steps of the model: more is clearer and slower. 16 is intelligible; 8 makes slips.
+    /// Decoding steps of the model: more is clearer and slower (the app's default is `SpeechSettings.defaultCloneSteps`).
     public var steps: Int
     /// The longest an answer may take before the program is stopped.
     public var timeout: TimeInterval
     public var language: String
 
-    public init(locator: OmniVoiceLocator = .standard, steps: Int = 16, timeout: TimeInterval = 90, language: String = "Russian") {
+    public init(locator: OmniVoiceLocator = .standard, steps: Int = SpeechSettings.defaultCloneSteps, timeout: TimeInterval = 90, language: String = "Russian") {
         self.locator = locator
         self.steps = steps
         self.timeout = timeout

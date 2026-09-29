@@ -624,15 +624,12 @@
 "Integrity" = "Целостность";
 "%1$@ steps" = "Шагов: %1$@";
 "Answers are spoken in your own voice, learned from a recording of you. It starts speaking a few seconds after the answer is ready, while the other voices start at once. It speaks Russian only." = "Ответы звучат твоим собственным голосом, выученным по твоей записи. Он начинает говорить через несколько секунд после готового ответа, а другие голоса — сразу. Говорит только по-русски.";
-"Balanced — 16 steps" = "Сбалансированно — 16 шагов";
 "Check again" = "Проверить снова";
 "Check the words said in the recording. The likeness depends on them being exact: write numbers in words, as you say them." = "Проверь слова, сказанные в записи. Похожесть зависит от их точности: числа пиши словами, как ты их произносишь.";
 "Choose a recording of your own voice, 3 to 15 seconds long (8 to 12 is best)." = "Выбери запись своего голоса длиной от 3 до 15 секунд (лучше 8–12).";
 "Choose a recording of your own voice: 8 to 12 seconds of clear speech with no other sounds (Voice Memos will do). In the next step you check the words said in it." = "Выбери запись своего голоса: 8–12 секунд чистой речи без посторонних звуков (подойдёт «Диктофон»). На следующем шаге ты проверишь слова, сказанные в ней.";
 "Choose a recording…" = "Выбрать запись…";
-"Clearer — 24 steps" = "Чётче — 24 шага";
 "Could not play the sound: %1$@" = "Не удалось воспроизвести звук: %1$@";
-"Faster — 12 steps" = "Быстрее — 12 шагов";
 "For now the system voice speaks. To install it (about 1 GB, one time), run this in Terminal:" = "Пока говорит системный голос. Чтобы установить программу (около 1 ГБ, один раз), выполни в Терминале:";
 "Forget my voice" = "Забыть мой голос";
 "Forget your voice?" = "Забыть твой голос?";
@@ -666,3 +663,7 @@
 "Write the words said in the recording (at least two)." = "Напиши слова, сказанные в записи (не меньше двух).";
 "Your voice is saved" = "Твой голос сохранён";
 "Your voice is saved · recording %1$@ · %2$@" = "Твой голос сохранён · запись %1$@ · %2$@";
+"Fast — 8 steps" = "Быстро — 8 шагов";
+"Balanced — 12 steps" = "Сбалансированно — 12 шагов";
+"Clearer — 16 steps" = "Чётче — 16 шагов";
+"Clearest — 24 steps" = "Самый чёткий — 24 шага";

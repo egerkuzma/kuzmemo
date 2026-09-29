@@ -45,7 +45,7 @@ def call(method, path, body=None, raw=False, timeout=180):
 
 DEFAULT_SPEECH = {
     "engine": "system", "sileroSpeaker": "eugene", "sileroPython": None, "voiceIdentifier": None, "rate": 0.5,
-    "cloneSteps": 16, "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True,
+    "cloneSteps": 8, "speakAnswers": True, "speakConfirmations": False, "confirmationSound": True,
 }
 
 SAMPLE_TEXT = ("Сегодня хорошая погода, и я записываю образец голоса для проверки. "
@@ -101,7 +101,9 @@ def run(work):
     check("the voice state names the engine", call("GET", "/voice")["speech"]["engine"] == "clone")
     odd = call("POST", "/settings", {"speech": {"cloneSteps": 500}})
     check("steps out of range are brought back into it", odd["live"]["speech"]["cloneSteps"] == 32, json.dumps(odd["live"]["speech"]))
-    call("POST", "/settings", {"speech": {"cloneSteps": 16}})
+    call("POST", "/settings", {"speech": {"cloneSteps": 8}})
+    reset = call("POST", "/settings", {"speech": {"cloneSteps": None}})  # a missing value falls back to the default
+    check("the default is 8 steps", reset["live"]["speech"]["cloneSteps"] == 8, json.dumps(reset["live"]["speech"]))
 
     print("finding the engine")
     state = call("GET", "/speech/clone")

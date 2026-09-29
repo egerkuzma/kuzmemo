@@ -182,9 +182,10 @@ struct SpeechSettingsTab: View {
 
     private func qualityChoices(_ current: Int) -> [QualityChoice] {
         var choices = [
-            QualityChoice(steps: 12, title: tr("Faster — 12 steps")),
-            QualityChoice(steps: 16, title: tr("Balanced — 16 steps")),
-            QualityChoice(steps: 24, title: tr("Clearer — 24 steps")),
+            QualityChoice(steps: 8, title: tr("Fast — 8 steps")),
+            QualityChoice(steps: 12, title: tr("Balanced — 12 steps")),
+            QualityChoice(steps: 16, title: tr("Clearer — 16 steps")),
+            QualityChoice(steps: 24, title: tr("Clearest — 24 steps")),
         ]
         if !choices.contains(where: { $0.steps == current }) { choices.append(QualityChoice(steps: current, title: tr("%1$@ steps", "\(current)"))) }
         return choices.sorted { $0.steps < $1.steps }
