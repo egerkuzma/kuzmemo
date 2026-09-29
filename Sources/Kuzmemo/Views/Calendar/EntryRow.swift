@@ -7,6 +7,9 @@ struct EntryRow: View {
     let env: AppEnvironment
     /// Shown for entries from another day (overdue) instead of the time.
     var showsDate = false
+    var isSelected = false
+    /// A click on the row (the day list uses it for keyboard control).
+    var onSelect: () -> Void = {}
     @State private var hovering = false
     @State private var moving = false
     @State private var moveTarget = Date()
@@ -45,10 +48,11 @@ struct EntryRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
-        .background(hovering ? Color.primary.opacity(0.06) : Color.clear)
+        .background(isSelected ? Color.accentColor.opacity(0.16) : (hovering ? Color.primary.opacity(0.06) : Color.clear))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(count: 2) { env.editorRequest = .edit(entry.item) }
+        .onTapGesture { onSelect() }
         .contextMenu { menu }
         .popover(isPresented: $moving, arrowEdge: .trailing) { movePicker }
         .accessibilityElement(children: .combine)
