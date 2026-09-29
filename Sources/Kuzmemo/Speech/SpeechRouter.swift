@@ -80,8 +80,8 @@ final class SpeechRouter: SpeechOutput {
         if engine == .silero, Localization.current == .russian, !muted { silero.prewarm() } // the muted automation build never starts torch on its own
     }
 
-    /// A recording has ended and its answer is a few seconds away: starts the program of the cloned voice so that its
-    /// weights are loaded by then. It stops itself if nothing is said.
+    /// Claude is being asked about a phrase and its answer is a few seconds away: starts the program of the cloned voice so
+    /// that its weights are loaded by then. It stops itself if nothing is said.
     func prewarmForAnswer() {
         if engine == .clone, Localization.current == .russian, !muted { clone.prewarm() }
     }

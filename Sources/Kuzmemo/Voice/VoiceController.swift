@@ -537,7 +537,6 @@ final class VoiceController {
     ) {
         nextJobID += 1
         pendingJobs += 1
-        if env.settings.speech.speakAnswers { speech.prewarmForAnswer() } // the answer may be spoken in a few seconds
         showBackground(modelState == .loading ? .preparingModel : .transcribing)
         jobs.yield(Job(id: nextJobID, utterance: utterance, reply: reply, done: done))
     }
@@ -558,7 +557,11 @@ final class VoiceController {
         guard activeJob == job else { return }
         switch stage {
         case .transcribing: showBackground(modelState == .loading ? .preparingModel : .transcribing)
-        case let .interpreting(text): showBackground(.interpreting(text))
+        case let .interpreting(text):
+            showBackground(.interpreting(text))
+            // Claude is being asked and its answer may be spoken in a couple of seconds: the cloned voice loads meanwhile
+            // (not earlier: nothing said, nothing to load, and the recognizer is not disturbed).
+            if env.settings.speech.speakAnswers { speech.prewarmForAnswer() }
         }
     }
 
