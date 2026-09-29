@@ -120,7 +120,7 @@ enum VoiceRoutes {
     static func hudState(_ name: String) -> HUDModel? {
         let russian = Localization.current == .russian
         let phrase = russian ? "напомни мне послезавтра сказать Дмитрию про доступ в Notion" : "remind me the day after tomorrow to tell Dmitry about access to Notion"
-        let question = russian ? "Какую пятницу имеете в виду?" : "Which Friday do you mean?"
+        let question = russian ? "Какую пятницу ты имеешь в виду?" : "Which Friday do you mean?"
         let options = russian
             ? ["Ближайшая пятница, 2 октября", "Пятница следующей недели, 9 октября"]
             : ["This coming Friday, October 2", "Friday of next week, October 9"]

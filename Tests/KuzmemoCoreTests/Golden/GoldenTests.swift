@@ -68,11 +68,12 @@ struct GoldenTests {
 
         var runs: [GoldenRun] = []
         var recorded: [String: String] = [:]
-        for c in try Golden.loadCases() where only == nil || only!.contains(c.id) {
-            for _ in 0 ..< repeats {
+        let selected = try Golden.loadCases().filter { only == nil || only!.contains($0.id) }
+        for _ in 0 ..< repeats { // whole passes, so identical requests are never back to back
+            for c in selected {
                 let run = await Golden.live(c, provider: provider, model: model)
                 runs.append(run)
-                if let raw = run.rawAnswer, run.passed || recorded[c.id] == nil { recorded[c.id] = raw }
+                if let raw = run.rawAnswer, run.passed { recorded[c.id] = raw } // a failing answer never replaces a recording
             }
         }
 

@@ -23,14 +23,14 @@ struct AgendaSpeakerTests {
     private let speaker = AgendaSpeaker()
 
     @Test func anEmptyDay() {
-        #expect(speaker.speech(for: result(day(0), []), today: today) == "На сегодня у вас ничего не запланировано.")
-        #expect(speaker.speech(for: result(day(1), []), today: today) == "На завтра у вас ничего не запланировано.")
+        #expect(speaker.speech(for: result(day(0), []), today: today) == "На сегодня у тебя ничего не запланировано.")
+        #expect(speaker.speech(for: result(day(1), []), today: today) == "На завтра у тебя ничего не запланировано.")
     }
 
     @Test func whenOnlyPassedThingsRemainTheDayIsDoneNotEmpty() {
-        #expect(speaker.speech(for: result(day(0), [], passed: 2), today: today) == "На сегодня у вас больше ничего.")
-        #expect(speaker.speech(for: result(day(0), [], detail: .count, passed: 1), today: today) == "На сегодня у вас больше ничего.")
-        #expect(speaker.speech(for: result(day(0), [], detail: .count), today: today) == "На сегодня у вас ничего нет.")
+        #expect(speaker.speech(for: result(day(0), [], passed: 2), today: today) == "На сегодня у тебя больше ничего.")
+        #expect(speaker.speech(for: result(day(0), [], detail: .count, passed: 1), today: today) == "На сегодня у тебя больше ничего.")
+        #expect(speaker.speech(for: result(day(0), [], detail: .count), today: today) == "На сегодня у тебя ничего нет.")
         Localization.with(.english) {
             #expect(speaker.speech(for: result(day(0), [], passed: 2), today: today) == "Today you have nothing left.")
             #expect(speaker.speech(for: result(day(0), []), today: today) == "Today you have nothing planned.")
@@ -39,24 +39,24 @@ struct AgendaSpeakerTests {
 
     @Test func oneAndSeveralEntriesReadTimesAsWords() {
         let one = speaker.speech(for: result(day(0), [entry("Созвон с Акме", "2026-09-28", "11:00")]), today: today)
-        #expect(one == "На сегодня у вас одно дело: в одиннадцать часов, Созвон с Акме.")
+        #expect(one == "На сегодня у тебя одно дело: в одиннадцать часов, Созвон с Акме.")
         let several = speaker.speech(for: result(day(0), [
             entry("Планёрка", "2026-09-28", "09:00"), entry("Встреча", "2026-09-28", "16:30"), entry("Оплатить инвойс", "2026-09-28"),
         ]), today: today)
-        #expect(several == "На сегодня у вас три дела: в девять часов, Планёрка. в шестнадцать тридцать, Встреча. без времени, Оплатить инвойс.")
+        #expect(several == "На сегодня у тебя три дела: в девять часов, Планёрка. в шестнадцать тридцать, Встреча. без времени, Оплатить инвойс.")
     }
 
     @Test func rangesMentionTheDayOfEachEntry() {
         let text = speaker.speech(for: result(.days(today ... today.adding(days: 6)), [
             entry("Созвон", "2026-09-29", "11:00"), entry("Оплатить инвойс", "2026-10-02"),
         ]), today: today)
-        #expect(text == "С 28 сентября по 4 октября у вас два дела: завтра, в одиннадцать часов, Созвон. в пятницу, 2 октября, Оплатить инвойс.")
+        #expect(text == "С 28 сентября по 4 октября у тебя два дела: завтра, в одиннадцать часов, Созвон. в пятницу, 2 октября, Оплатить инвойс.")
     }
 
     @Test func longListsAreCutOffWithACount() {
         let entries = (1 ... 9).map { entry("Дело \($0)", "2026-09-28", String(format: "%02d:00", 8 + $0)) }
         let text = speaker.speech(for: result(day(0), entries), today: today)
-        #expect(text.hasPrefix("На сегодня у вас девять дел:"))
+        #expect(text.hasPrefix("На сегодня у тебя девять дел:"))
         #expect(text.hasSuffix("И ещё три записи."))
         #expect(text.components(separatedBy: "Дело").count == 7) // six read
     }
@@ -64,13 +64,13 @@ struct AgendaSpeakerTests {
     @Test func glossarySpokenFormsReplaceBrandNames() {
         let speaker = AgendaSpeaker(glossary: [GlossaryTerm(canonical: "Notion", aliases: [], spoken: "Нотион")])
         let text = speaker.speech(for: result(day(0), [entry("Проверить доступ Notion", "2026-09-28")]), today: today)
-        #expect(text == "На сегодня у вас одно дело: без времени, Проверить доступ Нотион.")
+        #expect(text == "На сегодня у тебя одно дело: без времени, Проверить доступ Нотион.")
     }
 
     @Test func countAndFirstDetails() {
         let entries = (1 ... 3).map { entry("Дело \($0)", "2026-09-29", "1\($0):00") }
-        #expect(speaker.speech(for: result(day(1), entries, detail: .count), today: today) == "На завтра у вас три дела.")
-        #expect(speaker.speech(for: result(day(1), [], detail: .count), today: today) == "На завтра у вас ничего нет.")
+        #expect(speaker.speech(for: result(day(1), entries, detail: .count), today: today) == "На завтра у тебя три дела.")
+        #expect(speaker.speech(for: result(day(1), [], detail: .count), today: today) == "На завтра у тебя ничего нет.")
         #expect(speaker.speech(for: result(.upcoming(limit: 1), [entries[0]], detail: .first), today: today)
             == "Ближайшее: завтра, в одиннадцать часов, Дело 1.")
     }

@@ -129,7 +129,7 @@ cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<'STR'
 "NSMicrophoneUsageDescription" = "Kuzmemo records your speech to turn it into calendar entries. The audio is processed on this Mac and deleted as soon as it has been recognized.";
 STR
 cat > "$APP/Contents/Resources/ru.lproj/InfoPlist.strings" <<'STR'
-"NSMicrophoneUsageDescription" = "Kuzmemo записывает вашу речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.";
+"NSMicrophoneUsageDescription" = "Kuzmemo записывает твою речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.";
 STR
 
 cat > "$ROOT/.build/app/Kuzmemo.entitlements" <<ENT

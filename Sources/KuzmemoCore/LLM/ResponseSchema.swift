@@ -43,7 +43,8 @@ public enum ResponseSchema {
    "$ref": "#/definitions/clarification"
   },
   "speech": {
-   "type": "string"
+   "type": "string",
+   "description": "In Russian address the user as \"ты\" (never \"вы\")."
   }
  },
  "definitions": {
@@ -319,7 +320,8 @@ public enum ResponseSchema {
    ],
    "properties": {
     "question": {
-     "type": "string"
+     "type": "string",
+     "description": "In Russian address the user as \"ты\" (never \"вы\")."
     },
     "reason": {
      "enum": [

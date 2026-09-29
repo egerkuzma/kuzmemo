@@ -74,7 +74,7 @@ struct InterpreterTests {
         let provider = ScriptedProvider([.json(answer)])
         let result = try await Interpreter(store: store, provider: provider).interpret(InterpretRequest(
             transcript: "пятницу следующей недели", anchor: mondayAfternoon, timeZone: moscow,
-            followUp: FollowUp(previous: "в следующую пятницу созвон в три с нотион", question: "Какую пятницу имеете в виду?")
+            followUp: FollowUp(previous: "в следующую пятницу созвон в три с нотион", question: "Какую пятницу ты имеешь в виду?")
         ))
         guard case let .mutate(plan) = result.interpretation, case let .create(new)? = plan.actions.first else {
             Issue.record("expected a create plan, got \(result.interpretation)"); return
@@ -82,7 +82,7 @@ struct InterpreterTests {
         #expect(new.date == LocalDate("2026-10-09"))
         let message = try #require(provider.requests.first?.userMessage)
         #expect(message.contains("<previous>в следующую пятницу созвон в три с Notion</previous>")) // aliases apply to both parts
-        #expect(message.contains("<question>Какую пятницу имеете в виду?</question>"))
+        #expect(message.contains("<question>Какую пятницу ты имеешь в виду?</question>"))
         #expect(message.hasSuffix("<transcript>пятницу следующей недели</transcript>"))
     }
 
