@@ -60,6 +60,10 @@ public actor SileroHelper {
     private var idleTask: Task<Void, Never>?
     private var startTimer: Task<Void, Never>?
     private var stderrTail: [String] = []
+    /// A process's end is only acted on once everything it wrote has been read, so that its last words (an error
+    /// event, say) are not overtaken by the news that it exited.
+    private var exitStatus: Int32?
+    private var outputDrained = false
 
     /// The voices the loaded model offers (empty until the helper has started).
     public private(set) var speakers: [String] = []
@@ -188,10 +192,13 @@ public actor SileroHelper {
         stderrPipe = errPipe
         state = .starting
         stderrTail = []
+        exitStatus = nil
+        outputDrained = false
 
         let stdout = Self.lines(from: outPipe.fileHandleForReading)
         Task { [weak self] in
             for await line in stdout { await self?.receive(line, run: mine) }
+            await self?.outputEnded(run: mine)
         }
         let stderr = Self.lines(from: errPipe.fileHandleForReading)
         Task { [weak self] in
@@ -250,6 +257,26 @@ public actor SileroHelper {
 
     private func processExited(run started: Int, status: Int32) {
         guard started == run, process != nil else { return }
+        exitStatus = status
+        if outputDrained {
+            finishExit(run: started)
+        } else {
+            // the reader is still handing over what the process wrote last; do not wait for it forever
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                await self?.finishExit(run: started)
+            }
+        }
+    }
+
+    private func outputEnded(run started: Int) {
+        guard started == run else { return }
+        outputDrained = true
+        if exitStatus != nil { finishExit(run: started) }
+    }
+
+    private func finishExit(run started: Int) {
+        guard started == run, process != nil, let status = exitStatus else { return }
         let detail = diagnostics.isEmpty ? "код \(status)" : "код \(status): \(diagnostics.split(separator: "\n").last.map(String.init) ?? "")"
         cleanUp(failWith: state == .starting ? SileroError.startFailed(detail) : SileroError.exited(detail))
     }
