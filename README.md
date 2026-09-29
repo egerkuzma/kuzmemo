@@ -80,7 +80,7 @@ The interface, the spoken answers and the recognition are available in **English
 Requirements: macOS 26 or later (Apple silicon recommended), Xcode 26 or later (Swift 6.2+), [Claude Code](https://claude.com/claude-code) installed and signed in with `claude auth login` (Kuzmemo calls `claude -p`, so it uses your Claude subscription; there is no API-key mode), and about 2 GB of disk for the speech model.
 
 ```bash
-git clone <this repository> && cd kuzmemo
+git clone https://github.com/egerkuzma/kuzmemo.git && cd kuzmemo
 
 # 1. A code-signing certificate, once. macOS ties the microphone and Input Monitoring permissions to the app's signature;
 #    an ad-hoc build would lose them on every rebuild. Keychain Access > Certificate Assistant > Create a Certificate
