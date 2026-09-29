@@ -19,6 +19,11 @@ struct AppPaths {
     var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }
     /// Phrases made by the Silero voice, deleted as soon as they have been played.
     var speechCache: URL { support.appendingPathComponent("speech-cache", isDirectory: true) }
+    /// The person's own voice for the "My voice" engine: the sample, its codes and the words said in it. The program and
+    /// its weights are shared by both bundles (`OmniVoiceLocator.engineDirectory`); the voice is this bundle's own.
+    var voice: URL { support.appendingPathComponent("voice", isDirectory: true) }
+    /// Lines the "My voice" engine has already made, kept so that a repeated phrase is played at once.
+    var voiceCache: URL { support.appendingPathComponent("voice-cache", isDirectory: true) }
 
     static func resolve() -> AppPaths {
         let environment = ProcessInfo.processInfo.environment

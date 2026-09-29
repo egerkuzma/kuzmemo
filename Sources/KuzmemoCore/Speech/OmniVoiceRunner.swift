@@ -67,8 +67,16 @@ public enum OmniVoiceError: Error, Equatable, Sendable {
     case producedNoAudio
     /// A program started ahead of time was not used soon enough, or was used already.
     case expired
-    /// Turning a recording into a voice did not work; the text says why.
-    case enrollmentFailed(String)
+    /// The recording is too short or too long to be a voice sample (its length in seconds).
+    case sampleLength(seconds: Double)
+    /// The words said in the recording are missing (a sample needs at least two).
+    case sampleWithoutWords
+    /// The file is not a mono 16-bit WAV recording.
+    case sampleUnreadable
+    /// The encoder that turns the recording into codes ended with an error.
+    case encoderFailed(status: Int32)
+    /// The encoder ended well but wrote no codes.
+    case encoderWroteNothing
 }
 
 /// Speaks with the person's own voice by running `omnivoice-tts` once per answer: the sentences go in one per line, and

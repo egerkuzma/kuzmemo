@@ -45,6 +45,13 @@ enum ControlRoutes {
         case ("GET", "/speech/log"): return VoiceRoutes.speechLog(env)
         case ("GET", "/speech/silero"): return SileroRoutes.state(env)
         case ("POST", "/speech/silero/say"): return await SileroRoutes.say(request, env)
+        case ("GET", "/speech/clone"): return CloneRoutes.state(env)
+        case ("POST", "/speech/clone/say"): return await CloneRoutes.say(request, env)
+        case ("POST", "/speech/clone/enroll"): return await CloneRoutes.enroll(request, env)
+        case ("POST", "/speech/clone/choose"): return await CloneRoutes.choose(request, env)
+        case ("POST", "/speech/clone/save"): return await CloneRoutes.save(request, env)
+        case ("POST", "/speech/clone/cancel"): return CloneRoutes.cancel(env)
+        case ("POST", "/speech/clone/forget"): return CloneRoutes.forget(env)
         case ("POST", "/speech/mute"): return VoiceRoutes.mute(request, env)
         default: return .error("no route \(request.method) \(request.path)", status: 404)
         }

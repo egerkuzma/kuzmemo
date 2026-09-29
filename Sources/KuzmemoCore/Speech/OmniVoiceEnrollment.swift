@@ -28,15 +28,11 @@ public struct OmniVoiceEnrollment: Sendable {
     public func enroll(recording: URL, transcript: String) async throws {
         guard locator.isInstalled else { throw OmniVoiceError.notReady(.notInstalled) }
         let words = Self.clean(transcript)
-        guard words.split(separator: " ").count >= 2 else {
-            throw OmniVoiceError.enrollmentFailed("the words said in the recording are missing")
-        }
+        guard words.split(separator: " ").count >= 2 else { throw OmniVoiceError.sampleWithoutWords }
         let info: WAVInfo
-        do { info = try WAVInfo(contentsOf: recording) } catch { throw OmniVoiceError.enrollmentFailed("the recording is not a WAV file") }
-        guard info.channels == 1, info.bitsPerSample == 16 else { throw OmniVoiceError.enrollmentFailed("the recording must be mono 16-bit") }
-        guard Self.allowedSeconds.contains(info.seconds) else {
-            throw OmniVoiceError.enrollmentFailed(String(format: "the recording is %.1f s long; it has to be between %.0f and %.0f s", info.seconds, Self.allowedSeconds.lowerBound, Self.allowedSeconds.upperBound))
-        }
+        do { info = try WAVInfo(contentsOf: recording) } catch { throw OmniVoiceError.sampleUnreadable }
+        guard info.channels == 1, info.bitsPerSample == 16 else { throw OmniVoiceError.sampleUnreadable }
+        guard Self.allowedSeconds.contains(info.seconds) else { throw OmniVoiceError.sampleLength(seconds: info.seconds) }
 
         let files = FileManager.default
         let parent = locator.voiceDirectory.deletingLastPathComponent()
@@ -50,7 +46,7 @@ public struct OmniVoiceEnrollment: Sendable {
         try await encode(wav)
         let codes = staging.appendingPathComponent("ref.rvq")
         let size = (try? files.attributesOfItem(atPath: codes.path)[.size] as? Int) ?? 0
-        guard size > 0 else { throw OmniVoiceError.enrollmentFailed("the encoder wrote no codes") }
+        guard size > 0 else { throw OmniVoiceError.encoderWroteNothing }
 
         if files.fileExists(atPath: locator.voiceDirectory.path) {
             _ = try files.replaceItemAt(locator.voiceDirectory, withItemAt: staging)
@@ -89,7 +85,7 @@ public struct OmniVoiceEnrollment: Sendable {
             }
         }
         if timedOut.value { throw OmniVoiceError.timedOut }
-        guard status == 0 else { throw OmniVoiceError.enrollmentFailed("the encoder ended with status \(status)") }
+        guard status == 0 else { throw OmniVoiceError.encoderFailed(status: status) }
     }
 }
 

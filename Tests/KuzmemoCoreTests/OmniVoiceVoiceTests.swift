@@ -33,14 +33,16 @@ private struct FakeInstall {
     static let encoderThatFails = "#!/bin/sh\nexit 4\n"
     static let encoderThatWritesNothing = "#!/bin/sh\nexit 0\n"
     static let encoderThatHangs = "#!/bin/sh\nexec sleep 60\n"
+    /// A program that only notes its process id (a shell starts far quicker than Python) and waits for text.
+    static let idler = "#!/bin/sh\necho $$ > \"$(dirname \"$0\")/pid.txt\"\nexec cat > /dev/null\n"
 
-    init(encoder: String? = FakeInstall.encoder, voice: Bool = false) throws {
+    init(encoder: String? = FakeInstall.encoder, voice: Bool = false, speaker: String = FakeInstall.speaker) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("omnivoice-voice-test-\(UUID().uuidString)")
         let files = FileManager.default
         try files.createDirectory(at: root.appendingPathComponent("build"), withIntermediateDirectories: true)
         try files.createDirectory(at: root.appendingPathComponent("models"), withIntermediateDirectories: true)
         locator = OmniVoiceLocator(directory: root, voiceDirectory: root.appendingPathComponent("elsewhere/voice"))
-        try Self.speaker.write(to: locator.synthesizer, atomically: true, encoding: .utf8)
+        try speaker.write(to: locator.synthesizer, atomically: true, encoding: .utf8)
         try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locator.synthesizer.path)
         if let encoder {
             try encoder.write(to: locator.encoder, atomically: true, encoding: .utf8)
@@ -268,7 +270,7 @@ struct OmniVoiceEnrollmentTests {
         let before = try Data(contentsOf: install.locator.referenceCodes)
         // an encoder that fails: the old voice stays
         try install.useEncoder(FakeInstall.encoderThatFails)
-        await #expect(throws: OmniVoiceError.enrollmentFailed("the encoder ended with status 4")) {
+        await #expect(throws: OmniVoiceError.encoderFailed(status: 4)) {
             try await OmniVoiceEnrollment(locator: install.locator).enroll(recording: try install.recording(seconds: 8), transcript: "новые слова образца")
         }
         #expect(try Data(contentsOf: install.locator.referenceCodes) == before)
@@ -276,7 +278,7 @@ struct OmniVoiceEnrollmentTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: install.locator.voiceDirectory.deletingLastPathComponent().path) == ["voice"])
         // an encoder that writes nothing
         try install.useEncoder(FakeInstall.encoderThatWritesNothing)
-        await #expect(throws: OmniVoiceError.enrollmentFailed("the encoder wrote no codes")) {
+        await #expect(throws: OmniVoiceError.encoderWroteNothing) {
             try await OmniVoiceEnrollment(locator: install.locator).enroll(recording: try install.recording(seconds: 8), transcript: "новые слова образца")
         }
         #expect(try Data(contentsOf: install.locator.referenceCodes) == before)
@@ -292,12 +294,17 @@ struct OmniVoiceEnrollmentTests {
         defer { install.remove() }
         let enrollment = OmniVoiceEnrollment(locator: install.locator)
         await #expect(throws: OmniVoiceError.self) { try await enrollment.enroll(recording: try install.recording(seconds: 1), transcript: "слишком коротко") }
-        await #expect(throws: OmniVoiceError.self) { try await enrollment.enroll(recording: try install.recording(seconds: 40), transcript: "слишком длинно") }
-        await #expect(throws: OmniVoiceError.self) { try await enrollment.enroll(recording: try install.recording(seconds: 8), transcript: "   ") }
-        await #expect(throws: OmniVoiceError.self) { try await enrollment.enroll(recording: try install.recording(seconds: 8), transcript: "слово") } // one word is not a sample
+        do {
+            try await enrollment.enroll(recording: try install.recording(seconds: 40), transcript: "слишком длинно")
+            Issue.record("a 40 s recording must be refused")
+        } catch let OmniVoiceError.sampleLength(seconds) {
+            #expect(abs(seconds - 40) < 0.01)
+        }
+        await #expect(throws: OmniVoiceError.sampleWithoutWords) { try await enrollment.enroll(recording: try install.recording(seconds: 8), transcript: "   ") }
+        await #expect(throws: OmniVoiceError.sampleWithoutWords) { try await enrollment.enroll(recording: try install.recording(seconds: 8), transcript: "слово") } // one word is not a sample
         let notAudio = install.root.appendingPathComponent("notes.wav")
         try Data("plain text".utf8).write(to: notAudio)
-        await #expect(throws: OmniVoiceError.enrollmentFailed("the recording is not a WAV file")) { try await enrollment.enroll(recording: notAudio, transcript: "два слова") }
+        await #expect(throws: OmniVoiceError.sampleUnreadable) { try await enrollment.enroll(recording: notAudio, transcript: "два слова") }
         #expect(!FileManager.default.fileExists(atPath: install.root.appendingPathComponent("build/codec-args.txt").path), "the encoder must not run for these")
         #expect(install.locator.status == .noVoice)
     }
@@ -349,7 +356,7 @@ struct OmniVoiceSessionTests {
 
     private func pid(_ install: FakeInstall) async throws -> Int32 {
         for _ in 0 ..< 60 { // the stand-in writes its id a moment after it starts
-            if let text = try? String(contentsOf: install.root.appendingPathComponent("build/pid.txt"), encoding: .utf8), let pid = Int32(text) { return pid }
+            if let text = try? String(contentsOf: install.root.appendingPathComponent("build/pid.txt"), encoding: .utf8), let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return pid }
             try await Task.sleep(for: .milliseconds(50))
         }
         throw OmniVoiceError.launchFailed("no pid")
@@ -377,9 +384,9 @@ struct OmniVoiceSessionTests {
     }
 
     @Test func aSessionThatIsNeverUsedStopsItself() async throws {
-        let install = try FakeInstall(voice: true)
+        let install = try FakeInstall(voice: true, speaker: FakeInstall.idler)
         defer { install.remove() }
-        let session = try OmniVoiceRunner(locator: install.locator).begin(idleLimit: 0.4)
+        let session = try OmniVoiceRunner(locator: install.locator).begin(idleLimit: 1.0)
         let program = try await pid(install)
         #expect(try await isGone(program), "the program was still running four seconds after its idle limit")
         #expect(!session.isUsable)
@@ -395,7 +402,7 @@ struct OmniVoiceSessionTests {
     }
 
     @Test func givingUpStopsTheProgram() async throws {
-        let install = try FakeInstall(voice: true)
+        let install = try FakeInstall(voice: true, speaker: FakeInstall.idler)
         defer { install.remove() }
         let session = try OmniVoiceRunner(locator: install.locator).begin()
         let program = try await pid(install)
@@ -405,7 +412,7 @@ struct OmniVoiceSessionTests {
     }
 
     @Test func sayingNothingEndsTheProgram() async throws {
-        let install = try FakeInstall(voice: true)
+        let install = try FakeInstall(voice: true, speaker: FakeInstall.idler)
         defer { install.remove() }
         let session = try OmniVoiceRunner(locator: install.locator).begin()
         let program = try await pid(install)

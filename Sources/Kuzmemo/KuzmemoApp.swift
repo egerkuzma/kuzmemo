@@ -58,10 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The Silero helper is a child process: stop it (briefly) before the app goes away.
+    /// The Silero helper and the program of the cloned voice are child processes: stop them (briefly) before the app goes away.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
             await AppEnvironment.shared.voice.speech.silero.shutDown()
+            AppEnvironment.shared.voice.speech.clone.shutDown()
             try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit
             NSApp.reply(toApplicationShouldTerminate: true)
         }

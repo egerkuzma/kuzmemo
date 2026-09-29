@@ -114,7 +114,7 @@ final class VoiceController {
 
     init(env: AppEnvironment) {
         self.env = env
-        speech = SpeechRouter(cache: env.paths.speechCache)
+        speech = SpeechRouter(cache: env.paths.speechCache, voice: .standard(voice: env.paths.voice), voiceCache: env.paths.voiceCache)
         let transcriber = WhisperKitTranscriber(configuration: .standard())
         self.transcriber = transcriber
         utterances = UtteranceProcessor(
@@ -207,6 +207,10 @@ final class VoiceController {
             if speech.silero.pythonOverride != settings.speech.sileroPython || !speech.silero.isReady {
                 speech.silero.pythonOverride = settings.speech.sileroPython
                 speech.silero.refresh()
+            }
+            if speech.clone.steps != settings.speech.cloneSteps {
+                speech.clone.steps = settings.speech.cloneSteps
+                speech.clone.discardPreparedProgram() // it was started with the old number of steps
             }
             if settings.loaded { speech.prewarm() } // switching to the neural voice loads it now
         case .recording:
@@ -533,6 +537,7 @@ final class VoiceController {
     ) {
         nextJobID += 1
         pendingJobs += 1
+        if env.settings.speech.speakAnswers { speech.prewarmForAnswer() } // the answer may be spoken in a few seconds
         showBackground(modelState == .loading ? .preparingModel : .transcribing)
         jobs.yield(Job(id: nextJobID, utterance: utterance, reply: reply, done: done))
     }

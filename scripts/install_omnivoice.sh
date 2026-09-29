@@ -70,21 +70,32 @@ for file in ${(k)SIZE}; do
 done
 
 # 3. Warm-up. The first run of a newly built program compiles its GPU kernels, which takes 15 to 20 seconds; done here, once,
-# it does not make the first spoken answer slow. (The kernels of the voice encoder are compiled when a voice is recorded.)
+# it does not make the first spoken answer (or the first saving of a voice) slow. Both programs are run: the speaker, and the
+# encoder that turns a recording into a voice (on a short recording made with the system voice; nothing is played).
 WARM="$DIR/.warm"
 if [ "$(cat "$WARM" 2>/dev/null || true)" != "$SRC_SHA" ]; then
-  echo "warm-up: compiling the GPU kernels (about 20 seconds, once)"
+  echo "warm-up: compiling the GPU kernels (about 40 seconds, once)"
   TMP="$(mktemp -d)"
+  spoke=0
   if echo "Проверка." | "$DIR/build/omnivoice-tts" --model "$DIR/models/omnivoice-base-Q8_0.gguf" \
        --codec "$DIR/models/omnivoice-tokenizer-Q8_0.gguf" --lang Russian --steps 4 -o "$TMP/warm.wav" >/dev/null 2>&1 && [ -s "$TMP/warm.wav" ]; then
-    echo "$SRC_SHA" >"$WARM"
+    spoke=1
   else
-    echo "note: the warm-up run failed; the first spoken answer may be slow or fail" >&2
+    echo "note: the warm-up run of the speaker failed; the first spoken answer may be slow or fail" >&2
   fi
+  encoded=0
+  if say -o "$TMP/sample.aiff" "Проверка образца голоса." >/dev/null 2>&1 \
+     && afconvert -f WAVE -d LEI16@24000 -c 1 "$TMP/sample.aiff" "$TMP/sample.wav" >/dev/null 2>&1 \
+     && "$DIR/build/omnivoice-codec" --model "$DIR/models/omnivoice-tokenizer-Q8_0.gguf" -i "$TMP/sample.wav" >/dev/null 2>&1 && [ -s "$TMP/sample.rvq" ]; then
+    encoded=1
+  else
+    echo "note: the warm-up run of the encoder failed; saving the first voice may be slow" >&2
+  fi
+  if [ "$spoke" = 1 ] && [ "$encoded" = 1 ]; then echo "$SRC_SHA" >"$WARM"; fi
   rm -rf "$TMP"
 fi
 
 # 4. A short self-check: the program starts and prints its version.
 "$DIR/build/omnivoice-tts" --help 2>&1 | sed -n 1p || true # prints its version; the help text itself ends with a non-zero status
 echo "done: $DIR"
-echo "next: Kuzmemo → Settings → Speech → My voice (not built yet: this installs the parts)"
+echo "next: Kuzmemo → Settings → Speech → My voice → Choose a recording…"
