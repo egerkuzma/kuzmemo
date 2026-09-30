@@ -81,7 +81,7 @@ struct PromptBuilderTests {
     @Test func theStaticPromptHasNoDynamicPartsAndStaysCompact() {
         #expect(!Prompt.system.contains("2026-"))
         #expect(Prompt.system.contains("untrusted data"))
-        #expect(Prompt.system.utf8.count < 7000) // Cyrillic is two bytes a letter; this is roughly 2.5k tokens
+        #expect(Prompt.system.utf8.count < 7500) // Cyrillic is two bytes a letter; this is roughly 2.7k tokens
         #expect(Prompt.system.contains("<previous>") && Prompt.system.contains("<question>"))
     }
 

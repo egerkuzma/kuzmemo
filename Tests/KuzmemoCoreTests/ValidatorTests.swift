@@ -373,6 +373,30 @@ struct ValidatorTimeAndStartTests {
         #expect(created(saturday).first?.date == LocalDate("2026-10-05"))
     }
 
+    private func weekly(weekday: String, offset: Int = 0, time: String? = "18:00", days: String) -> String {
+        let timePart = time.map { #","time":"\#($0)""# } ?? ""
+        return #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"reminder","title":"Проверять статистику","when":{"mode":"weekday","weekday":"\#(weekday)","week_offset":\#(offset)\#(timePart)},"recurrence":{"freq":"weekly","by_weekday":[\#(days)]}}}]}"#
+    }
+
+    @Test func aWeeklySeriesWhoseTimeIsStillAheadStartsToday() async throws {
+        let weekdays = weekly(weekday: "mon", days: #""mon","tue","wed","thu","fri""#)
+        let monday = try await validate(weekdays, at: "2026-09-28 14:30")
+        #expect(created(monday).first?.date == LocalDate("2026-09-28"), "18:00 is still ahead of 14:30, so the series starts today")
+        let evening = try await validate(weekdays, at: "2026-09-28 19:00")
+        #expect(created(evening).first?.date == LocalDate("2026-09-29"), "today's time has gone: the next matching day")
+        let single = try await validate(weekly(weekday: "mon", days: #""mon""#), at: "2026-09-28 14:30")
+        #expect(created(single).first?.date == LocalDate("2026-09-28"))
+    }
+
+    @Test func aWeeklySeriesWhoseTimeHasGoneOrWhichWasPlacedLaterKeepsItsStart() async throws {
+        let passed = try await validate(weekly(weekday: "mon", time: "10:00", days: #""mon""#), at: "2026-09-28 14:30")
+        #expect(created(passed).first?.date == LocalDate("2026-10-05"))
+        let nextWeek = try await validate(weekly(weekday: "mon", offset: 1, days: #""mon","tue""#), at: "2026-09-28 14:30")
+        #expect(created(nextWeek).first?.date == LocalDate("2026-10-05"), "\"from next week\" is respected")
+        let friday = try await validate(weekly(weekday: "fri", time: nil, days: #""fri""#), at: "2026-09-28 14:30")
+        #expect(created(friday).first?.date == LocalDate("2026-10-02"))
+    }
+
     @Test func aStartTheModelDidGiveIsKept() async throws {
         let json = monthly(25, whenJSON: #","when":{"mode":"absolute","date":"2026-11-25","phrase":"с ноября"}"#)
         let result = try await validate(json, at: "2026-09-28 14:30")

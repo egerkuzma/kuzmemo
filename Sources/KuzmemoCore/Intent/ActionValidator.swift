@@ -214,6 +214,15 @@ public enum ActionValidator {
             }
             var resolved = ResolvedWhen(date: nil, time: nil)
             if let when = parsed.when { resolved = resolveWhen(when) }
+            // "Every weekday at six" said on a Monday morning starts today, not next week: the resolver moves a weekday that is
+            // today to the following week, which is right for a single appointment but not for a series whose first day may
+            // be today (the model has to name one weekday of the rule, and today's is often the one it names).
+            if let rule = parsed.recurrence, rule.freq == .weekly, let days = rule.byWeekday, !days.isEmpty,
+               let when = parsed.when, when.mode == .weekday, (when.weekOffset ?? 0) == 0, let date = resolved.date,
+               let earlier = Self.firstWeeklyStart(days: days, anchor: anchor, time: resolved.time), earlier < date {
+                resolved.date = earlier
+                resolved.issues.removeAll { $0 == .inThePast }
+            }
             // "Every 25th" needs no date from the model: the first day that fits the rule is the start.
             if resolved.date == nil, let rule = parsed.recurrence, let first = Self.firstDay(of: rule, from: anchor.date) {
                 resolved.date = first
@@ -346,6 +355,17 @@ public enum ActionValidator {
                     options: [Wording.dateWithWeekday(early), Wording.dateWithWeekday(literal)]
                 )))
             }
+        }
+
+        /// The first day a weekly series can start on: today when it is one of the weekdays and its time (if any) is still
+        /// ahead, else the next one.
+        static func firstWeeklyStart(days: [Weekday], anchor: LocalDateTime, time: LocalTime?) -> LocalDate? {
+            for offset in 0 ..< 7 {
+                let day = anchor.date.adding(days: offset)
+                guard days.contains(day.weekday) else { continue }
+                if offset > 0 || time == nil || time! > anchor.time { return day }
+            }
+            return nil
         }
 
         /// The first day on or after `today` that a monthly rule with a day of the month, or a weekly rule with weekdays, allows.
