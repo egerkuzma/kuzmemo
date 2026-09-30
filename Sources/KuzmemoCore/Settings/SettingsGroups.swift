@@ -129,6 +129,8 @@ public struct RecordingSettings: SettingsGroup {
     /// The microphone: `nil` is automatic (the built-in one when the system input is a Bluetooth headset), "system" is
     /// whatever macOS has selected, anything else is the UID of one device. See `MicrophonePreference`.
     public var microphone: String?
+    /// The sound of the Mac (headphones or speakers) is turned off while a recording lasts and comes back afterwards.
+    public var muteWhileRecording = true
 
     public init() {}
 
@@ -138,7 +140,7 @@ public struct RecordingSettings: SettingsGroup {
         set { microphone = newValue.stored }
     }
 
-    enum CodingKeys: String, CodingKey { case holdThreshold, handsFreeSilence, maxSeconds, microphone }
+    enum CodingKeys: String, CodingKey { case holdThreshold, handsFreeSilence, maxSeconds, microphone, muteWhileRecording }
 
     public init(from decoder: any Decoder) throws {
         self.init()
@@ -148,5 +150,6 @@ public struct RecordingSettings: SettingsGroup {
         maxSeconds = min(max(try c.decodeIfPresent(Int.self, forKey: .maxSeconds) ?? maxSeconds, 20), 600)
         let stored = try c.decodeIfPresent(String.self, forKey: .microphone)
         microphone = stored?.isEmpty == false ? stored : nil
+        muteWhileRecording = try c.decodeIfPresent(Bool.self, forKey: .muteWhileRecording) ?? muteWhileRecording
     }
 }

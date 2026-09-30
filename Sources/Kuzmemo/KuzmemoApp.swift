@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await AppEnvironment.shared.voice.speech.silero.shutDown()
             AppEnvironment.shared.voice.speech.clone.shutDown()
+            AppEnvironment.shared.voice.output.forceEnd() // the sound is never left off
             try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit
             NSApp.reply(toApplicationShouldTerminate: true)
         }

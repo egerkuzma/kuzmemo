@@ -35,6 +35,10 @@ struct RecordingSettingsTab: View {
                 }
                 Hint(microphoneHint(settings.recording.microphonePreference))
             }
+            Section(tr("Sound")) {
+                Toggle(tr("Turn the sound off while recording"), isOn: $settings.recording.muteWhileRecording)
+                Hint(tr("Music and video in the headphones or speakers go quiet while you speak, so they do not get into the recording, and come back when it ends."))
+            }
             Section(tr("Behavior")) {
                 LabeledContent(tr("Count as a hold after")) {
                     HStack {

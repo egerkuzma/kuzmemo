@@ -54,6 +54,9 @@ final class VoiceController {
     private unowned let env: AppEnvironment
     private let transcriber: WhisperKitTranscriber
     private let utterances: UtteranceProcessor
+    /// Turns the Mac's sound off while a recording lasts. `simulatedOutput` is what it drives in the automation build.
+    @ObservationIgnored let output: OutputMuteGuard
+    @ObservationIgnored let simulatedOutput: SimulatedOutput
     @ObservationIgnored private var policy = HotkeyPolicy()
     @ObservationIgnored private var monitor: ModifierKeyMonitor?
     @ObservationIgnored private var session: Session?
@@ -96,6 +99,8 @@ final class VoiceController {
         var smoothedLevel: Float = 0
         var warnedLimit = false
         var tick: Task<Void, Never>?
+        /// The sound of the Mac was turned off for this recording and has to come back.
+        var mutesOutput = false
 
         init(
             input: any AudioInput, meter: LevelMeter, requestedAt: TimeInterval, startedAt: TimeInterval, spokenAt: LocalDateTime,
@@ -122,6 +127,11 @@ final class VoiceController {
             spool: AudioSpool(directory: env.paths.audioSpool), clock: env.clock
         )
         (jobStream, jobs) = AsyncStream.makeStream(of: Job.self)
+        // The automation build must never touch the Mac's sound; it gets a stand-in that scripts can look at.
+        let simulated = SimulatedOutput()
+        simulatedOutput = simulated
+        let backend: any OutputAudioBackend = AppPaths.isAutomation ? simulated : CoreAudioOutput()
+        output = OutputMuteGuard(backend: backend, journal: FileSilenceJournal(url: env.paths.support.appendingPathComponent("output-mute.json")))
     }
 
     // MARK: - Lifecycle
@@ -129,6 +139,7 @@ final class VoiceController {
     func start() {
         // Automation must never make noise: that build starts muted and scripts opt in explicitly.
         if AppPaths.isAutomation { speech.muted = true; cues.muted = true }
+        output.recoverAfterCrash() // the last run may have been killed while the sound was off
 
         hud.actions = HUDActions(
             cancel: { [weak self] in self?.cancelRecording(note: nil) },
@@ -402,6 +413,9 @@ final class VoiceController {
             hud.show(.recording(handsFree: false))
         }
         let requestedAt = ProcessInfo.processInfo.systemUptime
+        // The sound goes off first, so that speakers do not feed the music into the microphone.
+        let muting = env.settings.recording.muteWhileRecording
+        if muting { output.begin() }
         do {
             try input.start()
         } catch {
@@ -414,6 +428,7 @@ final class VoiceController {
                 do { try fallback.start(); input = fallback; failure = nil } catch let second { failure = second }
             }
             if let failure {
+                if muting { output.end() }
                 policy.recordingEnded()
                 hud.showNote(tr("Could not turn on the microphone: %1$@", "\(failure)"), style: .error, seconds: 6)
                 return
@@ -424,6 +439,7 @@ final class VoiceController {
             input: input, meter: meter, requestedAt: requestedAt, startedAt: ProcessInfo.processInfo.systemUptime,
             spokenAt: env.clock.localNow(), question: question
         )
+        session.mutesOutput = muting
         self.session = session
         phase = .recording(handsFree: question != nil)
         speech.stop()
@@ -473,6 +489,7 @@ final class VoiceController {
         self.session = nil
         session.tick?.cancel()
         let samples = session.input.stop()
+        if session.mutesOutput { output.end() } // the sound comes back before anything is said or played
         lastTiming = Timing(
             held: ProcessInfo.processInfo.systemUptime - session.requestedAt, startSeconds: session.input.startSeconds,
             source: session.input.sourceName

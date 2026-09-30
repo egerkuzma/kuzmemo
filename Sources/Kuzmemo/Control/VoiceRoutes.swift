@@ -15,6 +15,7 @@ enum VoiceRoutes {
             "pendingJobs": voice.pendingJobs, "lastTranscript": voice.lastTranscript ?? NSNull(),
             "hud": ["state": "\(voice.hud.model.state)", "level": voice.hud.model.level, "elapsed": voice.hud.model.elapsed],
             "speech": ["muted": voice.speech.muted, "speaking": voice.speech.isSpeaking, "engine": voice.speech.engine.rawValue],
+            "output": ["silenced": voice.output.isSilencing, "events": voice.simulatedOutput.events],
             "permissions": [
                 "microphone": "\(voice.permissions.microphone)", "inputMonitoring": voice.permissions.inputMonitoring,
             ],
