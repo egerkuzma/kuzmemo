@@ -12,6 +12,12 @@ public struct FollowUp: Equatable, Sendable {
         self.previous = previous
         self.question = question
     }
+
+    /// The question asked at what time something happens (the app's own wording, or the model's in either language). An
+    /// answer such as "no" or "any" to it means the entry has no time, and is not a reason to ask again.
+    public var askedForTime: Bool {
+        question.lowercased().range(of: #"во сколько|в какое время|какое время|на какое время|at what time|what time|which time"#, options: .regularExpression) != nil
+    }
 }
 
 public struct InterpretRequest: Sendable {
@@ -96,7 +102,7 @@ public struct Interpreter: Sendable {
                 let validation = ValidationContext(
                     context: context,
                     resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
-                    store: store, policy: policy, isFollowUp: followUp != nil
+                    store: store, policy: policy, isFollowUp: followUp != nil, timeWasAsked: followUp?.askedForTime ?? false
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)
                 return InterpretResult(

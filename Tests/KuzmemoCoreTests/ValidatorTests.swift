@@ -10,13 +10,13 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
     _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
-    followUp: Bool = false
+    followUp: Bool = false, timeAsked: Bool = false
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
         context: ContextPlan(entries: entries, expanded: false),
-        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp
+        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked
     )
     return await ActionValidator.validate(response, in: context)
 }
@@ -322,5 +322,60 @@ struct ValidatorIntentTests {
         #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"recurring","include_done":true}}"#) == .query(QueryPlan(target: .recurring, includeDone: true)))
         #expect(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"search","text":"  Акме "}}"#) == .query(QueryPlan(target: .search("Акме"))))
         #expect(clarification(try await validate(#"{"intent":"query","confidence":0.9,"query":{"scope":"search"}}"#))?.reason == .unclearSpeech)
+    }
+}
+
+@Suite("ActionValidator: when a time was asked for, or a start is implied")
+struct ValidatorTimeAndStartTests {
+    private let meetingWithoutTime = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"event","title":"Встреча в кафе","when":{"mode":"days_from_today","days_from_today":1,"phrase":"завтра"}}}]}"#
+
+    @Test func anAnswerToTheTimeQuestionThatGivesNoTimeMakesAnAllDayEvent() async throws {
+        let result = try await validate(meetingWithoutTime, followUp: true, timeAsked: true)
+        let new = try #require(created(result).first)
+        #expect(new.kind == .event && new.date == LocalDate("2026-09-29") && new.time == nil)
+    }
+
+    @Test func anAnswerToAnotherQuestionStillGetsTheTimeAsked() async throws {
+        let result = try await validate(meetingWithoutTime, followUp: true, timeAsked: false)
+        #expect(clarification(result)?.reason == .missingTime)
+        let first = try await validate(meetingWithoutTime)
+        #expect(clarification(first)?.reason == .missingTime)
+    }
+
+    @Test func aQuestionAboutTheTimeIsRecognisedInBothLanguages() {
+        #expect(FollowUp(previous: "x", question: "Во сколько завтра встреча в кафе?").askedForTime)
+        #expect(FollowUp(previous: "x", question: "В какое время собеседование?").askedForTime)
+        #expect(FollowUp(previous: "x", question: "At what time: “Meeting” tomorrow?").askedForTime)
+        #expect(!FollowUp(previous: "x", question: "На какую дату напомнить?").askedForTime)
+        #expect(!FollowUp(previous: "x", question: "Какую пятницу имеешь в виду?").askedForTime)
+    }
+
+    private func monthly(_ day: Int, whenJSON: String = #","when":{"mode":"month_part","month_offset":0,"phrase":"каждого двадцать пятого"}"#) -> String {
+        #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"reminder","title":"Оплатить хостинг","recurrence":{"freq":"monthly","by_monthday":\#(day)}\#(whenJSON)}}]}"#
+    }
+
+    @Test func aMonthlyRuleWithoutAUsableStartBeginsOnTheNextMatchingDay() async throws {
+        let later = try await validate(monthly(25), at: "2026-09-28 14:30")
+        #expect(created(later).first?.date == LocalDate("2026-10-25"))
+        let sooner = try await validate(monthly(25), at: "2026-09-20 10:00")
+        #expect(created(sooner).first?.date == LocalDate("2026-09-25"))
+        let today = try await validate(monthly(28), at: "2026-09-28 14:30")
+        #expect(created(today).first?.date == LocalDate("2026-09-28"))
+        let short = try await validate(monthly(31), at: "2026-11-05 10:00")
+        #expect(created(short).first?.date == LocalDate("2026-11-30"), "the 31st of a 30-day month is its last day")
+    }
+
+    @Test func aWeeklyRuleWithoutAStartBeginsOnTheNextMatchingWeekday() async throws {
+        let json = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"reminder","title":"Проверять статистику","recurrence":{"freq":"weekly","by_weekday":["mon","tue","wed","thu","fri"]}}}]}"#
+        let monday = try await validate(json, at: "2026-09-28 14:30")
+        #expect(created(monday).first?.date == LocalDate("2026-09-28"))
+        let saturday = try await validate(json, at: "2026-10-03 10:00")
+        #expect(created(saturday).first?.date == LocalDate("2026-10-05"))
+    }
+
+    @Test func aStartTheModelDidGiveIsKept() async throws {
+        let json = monthly(25, whenJSON: #","when":{"mode":"absolute","date":"2026-11-25","phrase":"с ноября"}"#)
+        let result = try await validate(json, at: "2026-09-28 14:30")
+        #expect(created(result).first?.date == LocalDate("2026-11-25"))
     }
 }

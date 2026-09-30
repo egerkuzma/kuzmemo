@@ -23,16 +23,20 @@ public struct ValidationContext: Sendable {
     /// The transcript answers a question the app already asked: the confirmations and ambiguity guards have
     /// had their say and must not ask again.
     public var isFollowUp: Bool
+    /// The question this transcript answers was about the time: an event that still has none is then an all-day event
+    /// (the person said it does not matter), not a reason to ask once more.
+    public var timeWasAsked: Bool
 
     public init(
         context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
-        isFollowUp: Bool = false
+        isFollowUp: Bool = false, timeWasAsked: Bool = false
     ) {
         self.context = context
         self.resolver = resolver
         self.store = store
         self.policy = policy
         self.isFollowUp = isFollowUp
+        self.timeWasAsked = timeWasAsked
     }
 }
 
@@ -210,6 +214,11 @@ public enum ActionValidator {
             }
             var resolved = ResolvedWhen(date: nil, time: nil)
             if let when = parsed.when { resolved = resolveWhen(when) }
+            // "Every 25th" needs no date from the model: the first day that fits the rule is the start.
+            if resolved.date == nil, let rule = parsed.recurrence, let first = Self.firstDay(of: rule, from: anchor.date) {
+                resolved.date = first
+                resolved.issues.removeAll()
+            }
             let hasDate = resolved.date != nil
 
             switch parsed.kind {
@@ -217,7 +226,7 @@ public enum ActionValidator {
                 if !hasDate {
                     throw Stop(.clarify(Clarification(question: tr("For which date: “%1$@”?", title), reason: .missingDate)))
                 }
-                if resolved.time == nil {
+                if resolved.time == nil, !vc.timeWasAsked {
                     let day = Wording.relativeDay(resolved.date!, today: anchor.date)
                     throw Stop(.clarify(Clarification(question: tr("At what time: “%1$@” %2$@?", title, day), reason: .missingTime)))
                 }
@@ -336,6 +345,25 @@ public enum ActionValidator {
                     reason: .ambiguousDate,
                     options: [Wording.dateWithWeekday(early), Wording.dateWithWeekday(literal)]
                 )))
+            }
+        }
+
+        /// The first day on or after `today` that a monthly rule with a day of the month, or a weekly rule with weekdays, allows.
+        static func firstDay(of rule: Recurrence, from today: LocalDate) -> LocalDate? {
+            switch rule.freq {
+            case .monthly:
+                guard let day = rule.byMonthday, (1 ... 31).contains(day) else { return nil }
+                for offset in 0 ... 12 {
+                    let month = today.firstOfMonth.adding(months: offset)
+                    guard let candidate = LocalDate(year: month.year, month: month.month, day: min(day, month.daysInMonth)) else { continue }
+                    if candidate >= today { return candidate }
+                }
+                return nil
+            case .weekly:
+                guard let days = rule.byWeekday, !days.isEmpty else { return nil }
+                return (0 ..< 7).map { today.adding(days: $0) }.first { days.contains($0.weekday) }
+            case .daily, .yearly:
+                return nil
             }
         }
 
