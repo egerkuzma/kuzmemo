@@ -158,6 +158,28 @@ struct ContextPlannerTests {
         #expect(titles.contains("Встреча с Дмитрием"))  // found by text although it is far away
     }
 
+    /// A repeating series outside the window is found by its words. It must be listed at its next occurrence, not at the day
+    /// it started: "mark the report done" on the start day would write an exception for an occurrence from months ago.
+    @Test func aSeriesFoundByTextIsListedAtItsNextOccurrence() async throws {
+        let store = try makeStore()
+        var monthly = reminder("Ежемесячный отчёт", on: "2026-01-15")
+        monthly.recurrence = Recurrence(freq: .monthly)
+        let series = monthly
+        var ended = reminder("Старый отчёт", on: "2025-01-10")
+        ended.recurrence = Recurrence(freq: .monthly, until: LocalDate("2025-06-10"))
+        let past = ended
+        try await store.perform(label: "seed") { m in
+            try m.insert(series)
+            try m.insert(past)
+        }
+        let plan = try await ContextPlanner().plan(transcript: "отметь отчёт выполненным", anchor: anchor, store: store)
+        let report = try #require(plan.entries.first { $0.item.title == "Ежемесячный отчёт" })
+        #expect(report.date == LocalDate("2026-10-15") && report.occurrenceDate == LocalDate("2026-10-15"))
+        // a series with nothing ahead carries no occurrence, so a "mark it" has to ask which one
+        let old = try #require(plan.entries.first { $0.item.title == "Старый отчёт" })
+        #expect(old.occurrenceDate == nil)
+    }
+
     @Test func theListIsCappedAndKeepsTheEarliestEntries() async throws {
         let store = try makeStore()
         try await store.perform(label: "many") { m in

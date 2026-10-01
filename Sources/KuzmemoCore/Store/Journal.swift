@@ -130,6 +130,11 @@ public final class Mutator {
         try update(id: id) { $0.deletedAt = nowMs }
     }
 
+    /// The per-occurrence override stored for this occurrence, if any.
+    public func exception(itemID: String, occDate: LocalDate) throws -> ItemException? {
+        try ItemException.fetchOne(db, key: ["item_id": itemID, "occ_date": occDate])
+    }
+
     /// Creates or replaces a per-occurrence override of a recurring item.
     public func setException(_ exception: ItemException) throws {
         let key = Mutator.exceptionKey(exception.itemID, exception.occDate)

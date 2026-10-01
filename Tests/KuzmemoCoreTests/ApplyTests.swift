@@ -98,6 +98,71 @@ struct ApplyTests {
         #expect(try await store.agenda(in: range).first?.isDone == true)
     }
 
+    /// The key of an override is the day the rule generated, which is also what a moved entry carries as its occurrence date.
+    /// Ticking off a moved occurrence must keep the move (the entry stays where it is, done), not replace it by a plain
+    /// "done" on the rule's day, which made it vanish from the day it stood on.
+    @Test func aMovedOccurrenceIsTickedOffWhereItStands() async throws {
+        let store = try makeStore()
+        try await seedWeekly(store)
+        let range = day("2026-10-05") ... day("2026-10-26")
+        _ = try await store.apply(MutationPlan(actions: [
+            .moveOccurrence(itemID: "id-1", occurrenceDate: day("2026-10-19"), newDate: day("2026-10-21"), newTime: LocalTime("16:00")),
+        ]), source: .voice, memoID: nil, label: "move")
+
+        let done = try await store.apply(MutationPlan(actions: [.complete(itemID: "id-1", occurrenceDate: day("2026-10-19"))]),
+                                         source: .voice, memoID: nil, label: "complete")
+        var agenda = try await store.agenda(in: range)
+        #expect(agenda.map { $0.date.description } == ["2026-10-05", "2026-10-12", "2026-10-21", "2026-10-26"])
+        #expect(agenda[2].isDone && agenda[2].wasMoved && agenda[2].time == LocalTime("16:00") && agenda[2].occurrenceDate == day("2026-10-19"))
+
+        let reopened = try await store.apply(MutationPlan(actions: [.reopen(itemID: "id-1", occurrenceDate: day("2026-10-19"))]),
+                                             source: .voice, memoID: nil, label: "reopen")
+        agenda = try await store.agenda(in: range)
+        #expect(agenda[2].date == day("2026-10-21") && !agenda[2].isDone && agenda[2].wasMoved) // still moved, open again
+
+        try await store.undo(opID: try #require(reopened.op).id)
+        #expect(try await store.agenda(in: range)[2].isDone)
+        try await store.undo(opID: try #require(done.op).id)
+        agenda = try await store.agenda(in: range)
+        #expect(agenda[2].date == day("2026-10-21") && !agenda[2].isDone && agenda[2].wasMoved)
+    }
+
+    @Test func aDoneOccurrenceStaysDoneWhenItIsMoved() async throws {
+        let store = try makeStore()
+        try await seedWeekly(store)
+        let range = day("2026-10-05") ... day("2026-10-26")
+        _ = try await store.apply(MutationPlan(actions: [.complete(itemID: "id-1", occurrenceDate: day("2026-10-12"))]), source: .voice, memoID: nil, label: "c")
+        let moved = try await store.apply(MutationPlan(actions: [
+            .moveOccurrence(itemID: "id-1", occurrenceDate: day("2026-10-12"), newDate: day("2026-10-14"), newTime: nil),
+        ]), source: .voice, memoID: nil, label: "m")
+        var agenda = try await store.agenda(in: range)
+        #expect(agenda.map { $0.date.description } == ["2026-10-05", "2026-10-14", "2026-10-19", "2026-10-26"])
+        #expect(agenda[1].isDone && agenda[1].wasMoved)
+        try await store.undo(opID: try #require(moved.op).id)
+        agenda = try await store.agenda(in: range)
+        #expect(agenda[1].date == day("2026-10-12") && agenda[1].isDone && !agenda[1].wasMoved)
+    }
+
+    /// An answer can change one entry in two steps ("rename the call and move it to Friday" as two updates). Undo checks a
+    /// row against the last change made to it, so the operation can be undone.
+    @Test func anOperationThatChangedOneRowTwiceCanBeUndone() async throws {
+        let store = try makeStore()
+        try await store.perform(label: "seed") { try $0.insert(Item(id: "", kind: .event, title: "Созвон", date: day("2026-10-01"), time: LocalTime("11:00"), source: .manual)) }
+        let result = try await store.apply(MutationPlan(actions: [
+            .update(itemID: "id-1", changes: ItemChanges(title: "Созвон с Acme")),
+            .update(itemID: "id-1", changes: ItemChanges(date: day("2026-10-02"))),
+        ]), source: .voice, memoID: nil, label: "two steps")
+        let changed = try #require(try await store.item(id: "id-1"))
+        #expect(changed.title == "Созвон с Acme" && changed.date == day("2026-10-02"))
+        try await store.undo(opID: try #require(result.op).id)
+        let back = try #require(try await store.item(id: "id-1"))
+        #expect(back.title == "Созвон" && back.date == day("2026-10-01"))
+        // a later edit of the row still blocks the undo of an earlier operation
+        let again = try await store.apply(MutationPlan(actions: [.update(itemID: "id-1", changes: ItemChanges(title: "Первое"))]), source: .voice, memoID: nil, label: "a")
+        _ = try await store.apply(MutationPlan(actions: [.update(itemID: "id-1", changes: ItemChanges(title: "Второе"))]), source: .voice, memoID: nil, label: "b")
+        await #expect(throws: StoreError.self) { try await store.undo(opID: try #require(again.op).id) }
+    }
+
     @Test func seriesEditsChangeTheWholeSeries() async throws {
         let store = try makeStore()
         try await seedWeekly(store)

@@ -41,8 +41,10 @@ extension Store {
 
                 case let .moveOccurrence(id, occurrence, newDate, newTime):
                     guard let item = try mutator.item(id: id) else { throw StoreError.itemNotFound(id) }
+                    // An occurrence that is done stays done at its new place.
+                    let wasDone = try mutator.exception(itemID: id, occDate: occurrence)?.action == .done
                     try mutator.setException(ItemException(
-                        itemID: id, occDate: occurrence, action: .moved, movedDate: newDate, movedTime: newTime
+                        itemID: id, occDate: occurrence, action: wasDone ? .done : .moved, movedDate: newDate, movedTime: newTime
                     ))
                     applied.append(AppliedChange(
                         kind: .moved, item: item, occurrenceDate: occurrence, newDate: newDate, newTime: newTime
@@ -51,7 +53,12 @@ extension Store {
                 case let .complete(id, occurrence):
                     if let occurrence {
                         guard let item = try mutator.item(id: id) else { throw StoreError.itemNotFound(id) }
-                        try mutator.setException(ItemException(itemID: id, occDate: occurrence, action: .done))
+                        // The key of an override is the day the rule generated. An occurrence that was moved is ticked off
+                        // where it stands now: the move is kept, not replaced by a plain "done" on the rule's day.
+                        let moved = try mutator.exception(itemID: id, occDate: occurrence).flatMap { $0.movedDate == nil ? nil : $0 }
+                        try mutator.setException(ItemException(
+                            itemID: id, occDate: occurrence, action: .done, movedDate: moved?.movedDate, movedTime: moved?.movedTime
+                        ))
                         applied.append(AppliedChange(kind: .completed, item: item, occurrenceDate: occurrence))
                     } else {
                         let stamp = mutator.nowMs
@@ -62,7 +69,16 @@ extension Store {
                 case let .reopen(id, occurrence):
                     if let occurrence {
                         guard let item = try mutator.item(id: id) else { throw StoreError.itemNotFound(id) }
-                        try mutator.removeException(itemID: id, occDate: occurrence)
+                        if let existing = try mutator.exception(itemID: id, occDate: occurrence), existing.movedDate != nil {
+                            // A done occurrence that was moved becomes an open moved one again; the move stays.
+                            if existing.action == .done {
+                                try mutator.setException(ItemException(
+                                    itemID: id, occDate: occurrence, action: .moved, movedDate: existing.movedDate, movedTime: existing.movedTime
+                                ))
+                            }
+                        } else {
+                            try mutator.removeException(itemID: id, occDate: occurrence)
+                        }
                         applied.append(AppliedChange(kind: .reopened, item: item, occurrenceDate: occurrence))
                     } else {
                         let saved = try mutator.update(id: id) { $0.status = .open; $0.doneAt = nil }

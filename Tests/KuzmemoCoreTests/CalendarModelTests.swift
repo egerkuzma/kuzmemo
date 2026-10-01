@@ -45,6 +45,31 @@ struct CalendarModelTests {
         #expect(model.markers[day("2026-09-30")] == nil)
     }
 
+    /// A reload that is cancelled (the next one was scheduled: an arrow key held down) throws inside the database read. That
+    /// used to be turned into "no entries" and blanked the window; now the window keeps what it showed.
+    @Test func aCancelledReloadLeavesTheWindowAsItWas() async throws {
+        let (model, store) = try rig()
+        try await store.create(ItemDraft(kind: .task, title: "Купить молоко", date: day("2026-09-28")))
+        try await store.create(ItemDraft(kind: .task, title: "Без даты"))
+        await model.reload()
+        #expect(model.dayEntries.count == 1 && model.inboxItems.count == 1 && model.markers[day("2026-09-28")]?.open == 1)
+
+        let cancelled = Task { @MainActor in await model.reload() }
+        cancelled.cancel()
+        await cancelled.value
+        #expect(model.dayEntries.map(\.item.title) == ["Купить молоко"])
+        #expect(model.inboxItems.count == 1 && model.markers[day("2026-09-28")]?.open == 1)
+
+        // a search that is cancelled keeps the list too
+        model.setSearchText("молоко")
+        await model.settled()
+        #expect(model.searchResults.map(\.title) == ["Купить молоко"])
+        let search = Task { @MainActor in await model.reload() }
+        search.cancel()
+        await search.value
+        #expect(model.searchResults.map(\.title) == ["Купить молоко"])
+    }
+
     @Test func selectingAnotherDayShowsItsEntries() async throws {
         let (model, store) = try rig()
         try await store.create(ItemDraft(kind: .reminder, title: "Оплатить хостинг", date: day("2026-09-29")))

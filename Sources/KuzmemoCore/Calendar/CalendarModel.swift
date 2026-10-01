@@ -105,15 +105,33 @@ public final class CalendarModel {
     // MARK: - Loading
 
     /// Reloads everything the window shows from the store.
+    ///
+    /// Everything is read first and shown only when it has all arrived. A reload that was cancelled (the next one was
+    /// scheduled before it finished: an arrow key held down) or that failed leaves the window as it was; it used to show an
+    /// empty calendar, because a cancelled read throws and the error was turned into "no entries".
     public func reload() async {
-        today = clock.localNow().date
-        let month = (try? await store.agenda(in: grid.range)) ?? []
+        let now = clock.localNow().date
+        today = now
+        let range = grid.range
+        let shown = selectedDate
+        let month: [AgendaEntry], overdue: [AgendaEntry], inbox: [Item], failed: [Memo]
+        do {
+            month = try await store.agenda(in: range)
+            overdue = shown == now ? try await store.overdue(before: now, limit: 20).map {
+                AgendaEntry(item: $0, date: $0.date ?? now, time: $0.time, isDone: false, occurrenceDate: nil, wasMoved: false)
+            } : []
+            inbox = try await store.inbox()
+            failed = try await store.failedMemos()
+        } catch {
+            return
+        }
+        guard !Task.isCancelled else { return }
         markers = CalendarSummary.markers(month)
         dayEntries = month.filter { $0.date == selectedDate }
-        overdueEntries = selectedDate == today ? await loadOverdue() : []
-        inboxItems = (try? await store.inbox()) ?? []
-        failedMemos = (try? await store.failedMemos()) ?? []
-        if mode == .recurring { recurring = await loadRecurring() }
+        overdueEntries = selectedDate == now ? overdue : []
+        inboxItems = inbox
+        failedMemos = failed
+        if mode == .recurring, let series = await loadRecurring(), !Task.isCancelled { recurring = series }
         await runSearch()
     }
 
@@ -128,14 +146,10 @@ public final class CalendarModel {
         reloadTask = Task { [weak self] in await self?.reload() }
     }
 
-    private func loadOverdue() async -> [AgendaEntry] {
-        let items = (try? await store.overdue(before: today, limit: 20)) ?? []
-        return items.map { AgendaEntry(item: $0, date: $0.date ?? today, time: $0.time, isDone: false, occurrenceDate: nil, wasMoved: false) }
-    }
-
-    private func loadRecurring() async -> [RecurringSeries] {
-        let series = (try? await store.recurringSeries()) ?? []
-        let upcoming = (try? await store.agenda(in: today ... today.adding(days: 366), includeDone: false)) ?? []
+    /// The repeating series with their next occurrence, or `nil` when they could not be read (or the read was cancelled).
+    private func loadRecurring() async -> [RecurringSeries]? {
+        guard let series = try? await store.recurringSeries(),
+              let upcoming = try? await store.agenda(in: today ... today.adding(days: 366), includeDone: false) else { return nil }
         return series.map { item in
             RecurringSeries(item: item, next: upcoming.first { $0.item.id == item.id }?.date)
         }
@@ -143,7 +157,8 @@ public final class CalendarModel {
 
     private func runSearch() async {
         let query = searchText.trimmingCharacters(in: .whitespaces)
-        let found = query.isEmpty ? [] : ((try? await store.search(query, limit: 100)) ?? [])
+        guard !query.isEmpty else { searchResults = []; return }
+        guard let found = try? await store.search(query, limit: 100), !Task.isCancelled else { return } // keep the list on a failed or cancelled search
         searchResults = Self.ordered(found, today: today)
     }
 

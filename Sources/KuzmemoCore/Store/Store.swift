@@ -132,8 +132,13 @@ public struct Store: Sendable {
                 .filter(Column("op_id") == opID)
                 .order(Column("seq").desc)
                 .fetchAll(db)
-            for change in changes where try !Store.currentState(db, matches: change) {
-                throw StoreError.undoConflict("\(change.tbl) \(change.rowID)")
+            // An operation may change one row more than once (an answer that renames and moves the same entry as two
+            // updates): only its last change can match what the row is now, and restoring newest-first walks back through
+            // the earlier ones.
+            var checked = Set<String>()
+            for change in changes {
+                guard checked.insert("\(change.tbl)|\(change.rowID)").inserted else { continue }
+                if try !Store.currentState(db, matches: change) { throw StoreError.undoConflict("\(change.tbl) \(change.rowID)") }
             }
             for change in changes { try Store.restore(db, change) }
             op.undoneAt = stamp

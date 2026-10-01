@@ -75,13 +75,27 @@ public struct ContextPlanner: Sendable {
                 }
                 if hits.count >= searchHitLimit { break }
             }
-            for item in hits.prefix(searchHitLimit) {
-                let date = item.date ?? today
-                let entry = AgendaEntry(
-                    item: item, date: date, time: item.time, isDone: item.status == .done,
-                    occurrenceDate: item.recurrence == nil ? nil : date, wasMoved: false
-                )
-                if !entries.contains(where: { $0.item.id == item.id }), seen.insert(entry.id).inserted { entries.append(entry) }
+            // A series found by its words but outside the window is listed at its next occurrence: its own date is the day it
+            // started, and "complete", "skip" or "move" on that would hit an occurrence from months ago.
+            var upcoming: [String: AgendaEntry]?
+            for item in hits.prefix(searchHitLimit) where !entries.contains(where: { $0.item.id == item.id }) {
+                let entry: AgendaEntry
+                if item.recurrence != nil {
+                    if upcoming == nil {
+                        let year = try await store.agenda(in: today...today.adding(days: 366), includeDone: false)
+                        upcoming = Dictionary(year.map { ($0.item.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    }
+                    // a series with nothing ahead has no occurrence to name: the entry carries none and the validator asks
+                    entry = upcoming?[item.id] ?? AgendaEntry(
+                        item: item, date: item.date ?? today, time: item.time, isDone: false, occurrenceDate: nil, wasMoved: false
+                    )
+                } else {
+                    entry = AgendaEntry(
+                        item: item, date: item.date ?? today, time: item.time, isDone: item.status == .done,
+                        occurrenceDate: nil, wasMoved: false
+                    )
+                }
+                if seen.insert(entry.id).inserted { entries.append(entry) }
             }
         }
 

@@ -38,18 +38,21 @@ public enum RecurrenceExpander {
             case .skip:
                 result.append(Occurrence(originalDate: date, date: date, time: item.time, state: .skipped, wasMoved: false))
             case .done:
-                result.append(Occurrence(originalDate: date, date: date, time: item.time, state: .done, wasMoved: false))
+                // done where it stands: on its own day, or at the place it was moved to (shown below)
+                if overrides[date]?.movedDate == nil {
+                    result.append(Occurrence(originalDate: date, date: date, time: item.time, state: .done, wasMoved: false))
+                }
             case .moved:
                 break // shown at its new date below
             case nil:
                 result.append(Occurrence(originalDate: date, date: date, time: item.time, state: .open, wasMoved: false))
             }
         }
-        for exception in overrides.values where exception.action == .moved {
+        for exception in overrides.values where exception.action == .moved || (exception.action == .done && exception.movedDate != nil) {
             guard let movedDate = exception.movedDate, movedDate >= from, movedDate <= through else { continue }
             result.append(Occurrence(
                 originalDate: exception.occDate, date: movedDate, time: exception.movedTime ?? item.time,
-                state: .open, wasMoved: true
+                state: exception.action == .done ? .done : .open, wasMoved: true
             ))
         }
         return result.sorted {
