@@ -2,7 +2,6 @@
 // Draws the Kuzmemo app icon with Core Graphics and writes:
 //   Resources/AppIcon.icns      the icon of the daily app
 //   Resources/AppIconDev.icns   the same drawing in grey, so the automation build is easy to tell apart
-//   Resources/AppIcon.icon, AppIconDev.icon   the same two as layered Icon Composer documents (macOS 26 notifications)
 //   docs/images/icon.png        1024 px picture for the README
 //
 // The idea: a calendar page (the app's own calendar) whose body is a voice waveform (you talk to it). A macOS icon is
@@ -175,94 +174,10 @@ func makeICNS(named name: String, palette: Palette, in resources: URL) {
     guard process.terminationStatus == 0 else { fatalError("iconutil failed for \(name)") }
 }
 
-// MARK: - The layered icon of macOS 26 (an Icon Composer document, compiled into Assets.car by actool)
-//
-// macOS 26 takes the icon of a notification banner from the new layered format; an .icns file alone showed a blank white
-// square there. The system makes the squircle, the shadow and the light itself, so the layers are the page and the
-// waveform alone, on transparent 1024 px canvases, and the background is a fill the system turns into a gradient.
-
-func renderLayer(_ body: (CGContext) -> Void) -> CGImage {
-    let ctx = CGContext(
-        data: nil, width: 1024, height: 1024, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-    )!
-    ctx.interpolationQuality = .high
-    body(ctx)
-    return ctx.makeImage()!
-}
-
-/// The calendar page: white body, coloured header band, the two binding tabs.
-func drawPageLayer(_ ctx: CGContext, palette: Palette) {
-    let card = CGRect(x: 226, y: 222, width: 572, height: 592)
-    let cardPath = roundedRect(card, radius: 82)
-    ctx.addPath(cardPath)
-    ctx.setFillColor(rgb(0xFFFFFF))
-    ctx.fillPath()
-    ctx.saveGState()
-    ctx.addPath(cardPath)
-    ctx.clip()
-    let header = CGRect(x: card.minX, y: card.maxY - 158, width: card.width, height: 158)
-    ctx.clip(to: header)
-    ctx.drawLinearGradient(gradient([palette.headerLeft, palette.headerRight]), start: CGPoint(x: header.minX, y: header.midY), end: CGPoint(x: header.maxX, y: header.midY), options: [])
-    ctx.restoreGState()
-    let tabWidth: CGFloat = 54, tabHeight: CGFloat = 112
-    for x in [card.minX + 132, card.maxX - 132 - tabWidth] {
-        ctx.addPath(roundedRect(CGRect(x: x, y: card.maxY - 70, width: tabWidth, height: tabHeight), radius: tabWidth / 2))
-        ctx.setFillColor(rgb(0xFFFFFF))
-        ctx.fillPath()
-    }
-}
-
-/// The voice waveform in the body of the page.
-func drawWaveLayer(_ ctx: CGContext, palette: Palette) {
-    let card = CGRect(x: 226, y: 222, width: 572, height: 592)
-    let bodyMidY = card.minY + (card.height - 158) / 2
-    let heights: [CGFloat] = [98, 192, 292, 374, 292, 192, 98]
-    let width: CGFloat = 46, gap: CGFloat = 28
-    let total = CGFloat(heights.count) * width + CGFloat(heights.count - 1) * gap
-    var x = card.midX - total / 2
-    for height in heights {
-        let bar = CGRect(x: x, y: bodyMidY - height / 2, width: width, height: height)
-        ctx.saveGState()
-        ctx.addPath(roundedRect(bar, radius: width / 2))
-        ctx.clip()
-        ctx.drawLinearGradient(gradient([palette.barTop, palette.barBottom]), start: CGPoint(x: bar.midX, y: bar.maxY), end: CGPoint(x: bar.midX, y: bar.minY), options: [])
-        ctx.restoreGState()
-        x += width + gap
-    }
-}
-
-/// Writes `<name>.icon` (icon.json and the two layer images). `fill` is the colour the system turns into the background.
-func makeLayeredIcon(named name: String, palette: Palette, fill: (CGFloat, CGFloat, CGFloat), in resources: URL) {
-    let folder = resources.appendingPathComponent("\(name).icon")
-    try? FileManager.default.removeItem(at: folder)
-    writePNG(renderLayer { drawPageLayer($0, palette: palette) }, to: folder.appendingPathComponent("Assets/page.png"))
-    writePNG(renderLayer { drawWaveLayer($0, palette: palette) }, to: folder.appendingPathComponent("Assets/waveform.png"))
-    let json = """
-    {
-      "fill" : { "automatic-gradient" : "display-p3:\(fill.0),\(fill.1),\(fill.2),1.00000" },
-      "groups" : [
-        {
-          "layers" : [
-            { "image-name" : "waveform.png", "name" : "waveform" },
-            { "image-name" : "page.png", "name" : "page" }
-          ],
-          "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
-          "translucency" : { "enabled" : false, "value" : 0.5 }
-        }
-      ],
-      "supported-platforms" : { "squares" : "shared" }
-    }
-    """
-    try! json.write(to: folder.appendingPathComponent("icon.json"), atomically: true, encoding: .utf8)
-}
-
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let resources = root.appendingPathComponent("Resources")
 try? FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
 makeICNS(named: "AppIcon", palette: daily, in: resources)
 makeICNS(named: "AppIconDev", palette: development, in: resources)
-makeLayeredIcon(named: "AppIcon", palette: daily, fill: (0.31, 0.32, 0.80), in: resources)
-makeLayeredIcon(named: "AppIconDev", palette: development, fill: (0.42, 0.44, 0.50), in: resources)
 writePNG(render(size: 1024, palette: daily), to: root.appendingPathComponent("docs/images/icon.png"))
-print("wrote Resources/AppIcon.icns, AppIcon.icon, AppIconDev.icns, AppIconDev.icon, docs/images/icon.png")
+print("wrote Resources/AppIcon.icns, Resources/AppIconDev.icns, docs/images/icon.png")
