@@ -27,7 +27,15 @@ SHA256[omnivoice-tokenizer-Q8_0.gguf]="75204fa566a8e30984e7a1066da6557184c9fd099
 for tool in git cmake clang++; do
   command -v "$tool" >/dev/null || { echo "missing: $tool (brew install cmake; xcode-select --install)" >&2; exit 1; }
 done
+# This script deletes $DIR/src and $DIR/build when it rebuilds. KUZMEMO_OMNIVOICE_DIR may point anywhere, so a folder that has
+# things in it and was not made by this script (it carries a marker file, or the ".built" note of earlier versions) is refused.
+MARKER="$DIR/.kuzmemo-omnivoice"
+if [ -n "$(ls -A "$DIR" 2>/dev/null)" ] && [ ! -e "$MARKER" ] && [ ! -e "$DIR/.built" ]; then
+  echo "refusing to use $DIR: it is not empty and was not made by this script, which clears its src and build folders. Choose an empty folder." >&2
+  exit 1
+fi
 mkdir -p "$DIR/models"
+: >"$MARKER"
 
 # 1. The program, at a pinned commit, built with Metal.
 if [ ! -x "$DIR/build/tts-server" ] || [ "$(cat "$DIR/.built" 2>/dev/null || true)" != "$SRC_SHA" ]; then
@@ -43,7 +51,7 @@ if [ ! -x "$DIR/build/tts-server" ] || [ "$(cat "$DIR/.built" 2>/dev/null || tru
   command -v ninja >/dev/null && GENERATOR=(-G Ninja)
   echo "program: building (a minute or two)"
   cmake -S "$DIR/src" -B "$DIR/build" "${GENERATOR[@]}" -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON \
-    -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_OSX_ARCHITECTURES=arm64 >"$DIR/build.log" 2>&1
+    -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_OSX_ARCHITECTURES=arm64 >"$DIR/build.log" 2>&1 || { tail -20 "$DIR/build.log" >&2; exit 1; }
   cmake --build "$DIR/build" -j "$(sysctl -n hw.ncpu)" >>"$DIR/build.log" 2>&1 || { tail -20 "$DIR/build.log" >&2; exit 1; }
   echo "$SRC_SHA" >"$DIR/.built"
 fi

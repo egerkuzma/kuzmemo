@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Synthesizes Kuzmemo's own alert chimes (Resources/Sounds/Kuzmemo-<id>.wav) with additive and FM synthesis and the
-standard library only. The files are not committed (*.wav is ignored); scripts/run_app.sh runs this when they are
+standard library only. The files are not committed (*.wav is ignored); scripts/run_app.sh runs this when any of them is
 missing, and it is the place to change them.
 
-    scripts/make_sounds.py
+    scripts/make_sounds.py              makes every chime (and the folder for them)
+    scripts/make_sounds.py --missing    prints the chimes that are not there yet; exit status 1 when there are some
 
 Every chime peaks at about -4 dBFS, starts with a short fade-in (no click) and ends in a fade-out, and is a mono
 44.1 kHz 16-bit WAV, which the system notification sound, NSSound and AVAudioPlayer all accept.
@@ -11,11 +12,26 @@ Every chime peaks at about -4 dBFS, starts with a short fade-in (no click) and e
 import math
 import os
 import struct
+import sys
 import wave
 
 RATE = 44_100
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resources", "Sounds")
 PEAK = 0.62  # about -4 dBFS
+# Every chime this file makes (the names the app's sound catalog asks for).
+CHIMES = ("bell", "drop", "gong", "marimba", "sonar", "glass", "melody", "soft")
+
+
+def missing():
+    return [name for name in CHIMES if not os.path.isfile(os.path.join(OUT, f"Kuzmemo-{name}.wav"))
+            or os.path.getsize(os.path.join(OUT, f"Kuzmemo-{name}.wav")) == 0]
+
+
+if "--missing" in sys.argv[1:]:
+    left = missing()
+    print(" ".join(left))
+    sys.exit(1 if left else 0)
+os.makedirs(OUT, exist_ok=True)  # a fresh clone has no such folder: the files in it are not committed
 
 
 def silence(seconds):
@@ -129,3 +145,5 @@ finish(mix(melody, echo), "melody")
 
 # A soft two-note signal (E - A).
 finish(mix(soft_note(659.25, 0.7), delayed(soft_note(880.0, 0.9), 0.20)), "soft")
+
+assert not missing(), f"chimes not made: {missing()}"

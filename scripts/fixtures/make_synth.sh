@@ -2,8 +2,13 @@
 # Generates synthetic 16 kHz mono WAV fixtures from phrases.txt with a macOS system voice (Milena, a Russian voice),
 # plus digital silence and quiet pink noise for hallucination checks. Output goes to scripts/fixtures/out (gitignored).
 # The files are only for driving the pipeline in tests: synthetic speech is cleaner than a real person's.
+# Needs ffmpeg (brew install ffmpeg) and the voice Milena (System Settings > Accessibility > Spoken Content > System Voice >
+# Manage Voices > Russian).
 set -euo pipefail
 cd "$(dirname "$0")"
+command -v ffmpeg >/dev/null || { echo "ffmpeg is needed for the silence and noise files: brew install ffmpeg" >&2; exit 1; }
+voices="$(say -v '?')" # not piped into grep -q: with pipefail its early exit would look like a failure
+grep -q '^Milena ' <<<"$voices" || { echo "the Russian system voice Milena is needed: System Settings > Accessibility > Spoken Content > System Voice > Manage Voices" >&2; exit 1; }
 mkdir -p out/synth
 while IFS='|' read -r id cat text; do
   [ -z "${id:-}" ] && continue

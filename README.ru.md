@@ -142,7 +142,7 @@ python3 scripts/check_localization.py        # таблицы переводов
 scripts/run_app.sh                           # автоматическая сборка, затем scripts/e2e/*.py управляют настоящим приложением
 ```
 
-Сборка для разработки беззвучна, не реагирует на клавиатуру, не открывает микрофон и открывает управляющий сокет, поэтому сквозные скрипты (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `mute.py`, `data.py`) управляют настоящим приложением без человека; голосовые заготовки создаёт `scripts/fixtures/make_synth.sh`. Интерфейс локализован: ключи на английском, переводы в таблицах на русском. Иконку приложения рисует `scripts/make_icon.swift`, а снимки выше делает `scripts/screenshots.py --readme`.
+Сборка для разработки беззвучна, не реагирует на клавиатуру, не открывает микрофон и открывает управляющий сокет, поэтому сквозные скрипты (`scripts/e2e/voice.py`, `calendar_window.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `mute.py`, `data.py`, `recovery.py`) управляют настоящим приложением без человека; голосовые заготовки создаёт `scripts/fixtures/make_synth.sh` (нужны `ffmpeg` и русский системный голос Milena). Интерфейс локализован: ключи на английском, переводы в таблицах на русском. Иконку приложения рисует `scripts/make_icon.swift`, а снимки выше делает `scripts/screenshots.py --readme`.
 
 Замечания и pull request'ы приветствуются. Код, комментарии, документация и сообщения коммитов — на английском (Conventional Commits); тексты интерфейса проходят через таблицы переводов. Пожалуйста, не добавляйте в примеры и тесты личные данные.
 
@@ -150,4 +150,4 @@ scripts/run_app.sh                           # автоматическая сб
 
 ## Лицензия
 
-MIT, см. [LICENSE](LICENSE). Kuzmemo использует GRDB, WhisperKit и KeyboardShortcuts (все под MIT). Модели речи скачиваются при установке и в репозиторий не входят: Whisper (MIT); необязательная модель голоса Silero распространяется под CC BY-NC-SA 4.0, а модель «Моего голоса» (OmniVoice) — под CC BY-NC, обе только для некоммерческого использования.
+MIT, см. [LICENSE](LICENSE). Kuzmemo использует GRDB, WhisperKit и KeyboardShortcuts (MIT; в пакете WhisperKit есть и код под Apache 2.0). Лицензии всего встроенного собраны в `THIRD-PARTY-NOTICES.txt` внутри приложения и образа диска (его пишет `scripts/make_notices.py`). Модели речи скачиваются при установке и в репозиторий не входят: Whisper (MIT); необязательная модель голоса Silero распространяется под CC BY-NC-SA 4.0, а модель «Моего голоса» (OmniVoice) — под CC BY-NC, обе только для некоммерческого использования.

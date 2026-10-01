@@ -29,6 +29,7 @@ BUNDLE_ID = "app.kuzmemo.dev"
 class Unix(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)  # the default connect() would set it; this one makes its own socket
         self.sock.connect(SOCK)
 
 
@@ -189,4 +190,5 @@ def run():
         os.remove(path)
 
 
-main()
+if __name__ == "__main__":
+    main()

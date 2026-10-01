@@ -35,6 +35,10 @@ for arg in "$@"; do
 done
 
 if [ "$FLAVOR" = dist ]; then LAUNCH=0; ADHOC=1; fi
+if [ "$FLAVOR" = prod ] && [ "$ADHOC" = 1 ]; then
+  echo "--prod needs a stable signing identity: an ad-hoc build loses the microphone and Input Monitoring grants (--adhoc is for --dist and throwaway dev builds)" >&2
+  exit 2
+fi
 
 AUTOMATION=false
 case "$FLAVOR" in
@@ -61,7 +65,8 @@ GIT_HASH="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 # select it by hash.
 IDENTITY="${KUZMEMO_SIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ] && [ -f "$ROOT/signing/identity" ]; then
-  IDENTITY="$(head -n 1 "$ROOT/signing/identity" | tr -d '[:space:]')"
+  # only the ends are trimmed: the name of a certificate may contain spaces
+  IDENTITY="$(head -n 1 "$ROOT/signing/identity" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 fi
 if [ "$ADHOC" = 0 ]; then
   if [ -z "$IDENTITY" ]; then
@@ -72,19 +77,39 @@ if [ "$ADHOC" = 0 ]; then
       *) echo "several code-signing identities found: set KUZMEMO_SIGN_IDENTITY or put one in signing/identity" >&2; exit 1 ;;
     esac
   fi
-  security find-identity -v -p codesigning | grep -q "$IDENTITY" \
+  # A hash is compared whole and without regard to case; a name is compared whole too (a part of a name or a hash would
+  # match some other certificate). The listing goes through a variable: `grep -q` closing the pipe early would fail under pipefail.
+  listing="$(security find-identity -v -p codesigning)"
+  if [[ "$IDENTITY" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+    IDENTITY="$(printf '%s' "$IDENTITY" | tr 'a-f' 'A-F')"
+    grep -q "^ *[0-9]*) $IDENTITY " <<<"$listing" || found=no
+  else
+    grep -qF "\"$IDENTITY\"" <<<"$listing" || found=no
+  fi
+  [ "${found:-yes}" = yes ] \
     || { echo "signing identity $IDENTITY not found (use --adhoc to sign ad hoc; permissions will reset on every build)" >&2; exit 1; }
 else
   IDENTITY="-"
   [ "$FLAVOR" = dist ] || echo "WARNING: ad-hoc signing: the microphone/Input Monitoring grants will not survive a rebuild." >&2
 fi
 
+# --- generated assets -------------------------------------------------------------------------------
+# Made first: they are quick, and a missing tool or folder shows up now and not after the long build. None of them is
+# committed (a fresh clone has none).
+# The app's own alert chimes (all of them: a partial set is made again)
+python3 "$ROOT/scripts/make_sounds.py" --missing >/dev/null 2>&1 || python3 "$ROOT/scripts/make_sounds.py"
+# The app icon is drawn by scripts/make_icon.swift; the automation build gets a grey one
+if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; fi
+{ [ -e "$ROOT/Resources/$ICON" ] && [ -e "$ROOT/Resources/${ICON%.icns}.icon/icon.json" ]; } || swift "$ROOT/scripts/make_icon.swift"
+
 # --- build ------------------------------------------------------------------------------------------
 EXTRA=()
+SCRATCH=""
 APPDIR="$ROOT/.build/app"
 if [ "$FLAVOR" = dist ]; then
   # An own scratch folder (the flags below change every object file), and no path of this machine in what is shipped
-  EXTRA=(--scratch-path "$ROOT/.build/dist" -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/kuzmemo" -Xswiftc -debug-prefix-map -Xswiftc "$ROOT=/kuzmemo")
+  SCRATCH="$ROOT/.build/dist"
+  EXTRA=(--scratch-path "$SCRATCH" -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/kuzmemo" -Xswiftc -debug-prefix-map -Xswiftc "$ROOT=/kuzmemo")
   APPDIR="$ROOT/.build/dist-app"
 fi
 swift build -c release --product Kuzmemo ${EXTRA[@]+"${EXTRA[@]}"}
@@ -101,14 +126,12 @@ for b in "$BINDIR"/*.bundle; do
   [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
-# Alert sounds: the app's own chimes, and copies of the macOS system sounds (the notification system finds a sound
-# by its file name inside the app bundle).
-[ -e "$ROOT/Resources/Sounds/Kuzmemo-bell.wav" ] || python3 "$ROOT/scripts/make_sounds.py" # generated, not committed
+# Alert sounds: the app's own chimes (made above), and copies of the macOS system sounds (the notification system finds a
+# sound by its file name inside the app bundle).
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
-# The app icon is drawn by scripts/make_icon.swift (generated, not committed); the automation build gets a grey one
-{ [ -e "$ROOT/Resources/AppIcon.icns" ] && [ -e "$ROOT/Resources/AppIcon.icon/icon.json" ]; } || swift "$ROOT/scripts/make_icon.swift"
-if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; fi
 cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
+# The licences of what is built in travel with the app (the disk image passes them on)
+python3 "$ROOT/scripts/make_notices.py" "$APP/Contents/Resources/THIRD-PARTY-NOTICES.txt" ${SCRATCH:+--scratch-path "$SCRATCH"}
 # The icon in the layered format of macOS 26 as well, compiled into Assets.car (CFBundleIconName names it). A notification
 # banner takes its icon from there: with only an .icns file the banner showed a blank white square. The layered document
 # (Resources/AppIcon.icon) is drawn by scripts/make_icon.swift; if Xcode's actool cannot compile it, the same pictures go
@@ -211,10 +234,24 @@ if [ "$FLAVOR" = dist ]; then echo "built: $APP"; exit 0; fi
 # --- install and launch -----------------------------------------------------------------------------
 DEST="$HOME/Applications/$APP_NAME.app"
 mkdir -p "$HOME/Applications"
+# The new copy is made and checked beside the installed one, and only then swapped in, the old one kept until the swap
+# has worked: a copy that fails half-way (a full disk) must not leave the person without their app. The names do not end in
+# ".app", so that nothing takes the half-made copy for an application.
+STAGED="$HOME/Applications/.$APP_NAME.installing"
+PREVIOUS="$HOME/Applications/.$APP_NAME.previous"
+rm -rf "$STAGED" "$PREVIOUS"
+cp -R "$APP" "$STAGED"
+codesign --verify --deep --strict "$STAGED"
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$DEST/Contents/MacOS/Kuzmemo" >/dev/null || break; sleep 0.3; done
 pkill -f "$DEST/Contents/MacOS/Kuzmemo" 2>/dev/null || true
-rm -rf "$DEST"
-cp -R "$APP" "$DEST"
+if [ -e "$DEST" ]; then mv "$DEST" "$PREVIOUS"; fi
+if mv "$STAGED" "$DEST"; then
+  rm -rf "$PREVIOUS"
+else
+  if [ -e "$PREVIOUS" ]; then mv "$PREVIOUS" "$DEST"; fi
+  echo "could not put the new app in place; the previous one was put back" >&2
+  exit 1
+fi
 echo "installed: $DEST"
 if [ "$LAUNCH" = 1 ]; then open "$DEST"; echo "launched"; fi

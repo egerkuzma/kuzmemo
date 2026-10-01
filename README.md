@@ -142,7 +142,7 @@ python3 scripts/check_localization.py        # translation tables against the co
 scripts/run_app.sh                           # the automation build, then scripts/e2e/*.py drive the real app
 ```
 
-The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `mute.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
+The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar_window.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `mute.py`, `data.py`, `recovery.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh` (it needs `ffmpeg` and the Russian system voice Milena). The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
 
 Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 
@@ -150,4 +150,4 @@ Status: version 1.0. The voice path, the calendar window, settings, notification
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (all MIT). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0 and the model behind "My voice" (OmniVoice) CC BY-NC, both for non-commercial use.
+MIT, see [LICENSE](LICENSE). Kuzmemo builds on GRDB, WhisperKit and KeyboardShortcuts (MIT; the WhisperKit package also carries Apache 2.0 code). The licences of everything built in are collected in `THIRD-PARTY-NOTICES.txt` inside the app and the disk image (`scripts/make_notices.py` writes it). The speech models are downloaded when you install them and are not part of this repository: Whisper (MIT); the optional Silero voice model is licensed CC BY-NC-SA 4.0 and the model behind "My voice" (OmniVoice) CC BY-NC, both for non-commercial use.

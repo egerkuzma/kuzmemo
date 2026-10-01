@@ -24,6 +24,7 @@ SYNTH = os.path.join(ROOT, "scripts", "fixtures", "out", "synth")
 class Unix(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)  # the default connect() would set it; this one makes its own socket
         self.sock.connect(SOCK)
 
 
@@ -65,6 +66,12 @@ def wait_idle(timeout=60):
 def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
+    try:
+        is_dev = call("GET", "/state").get("app", {}).get("dev")
+    except OSError as error:
+        sys.exit(f"the control socket does not answer ({error}): is the dev app running and listening? (scripts/run_app.sh)")
+    if not is_dev:
+        sys.exit("refusing to run: this is not the dev build, and these checks erase data (scripts/run_app.sh builds the right one)")
     wav = os.path.join(SYNTH, "03.wav")  # "Скажи что на сегодня": a phrase the local router answers
     if not os.path.exists(wav):
         sys.exit("fixtures are missing: run scripts/fixtures/make_synth.sh")

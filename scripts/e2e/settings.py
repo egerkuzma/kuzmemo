@@ -20,6 +20,7 @@ SOCK = os.environ.get("KUZMEMO_SOCK") or os.path.expanduser("~/Library/Applicati
 class Unix(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)  # the default connect() would set it; this one makes its own socket
         self.sock.connect(SOCK)
 
 
@@ -65,6 +66,12 @@ def check(name, condition, detail=""):
 def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
+    try:
+        is_dev = call("GET", "/state").get("app", {}).get("dev")
+    except OSError as error:
+        sys.exit(f"the control socket does not answer ({error}): is the dev app running and listening? (scripts/run_app.sh)")
+    if not is_dev:
+        sys.exit("refusing to run: this is not the dev build, and these checks erase data (scripts/run_app.sh builds the right one)")
     call("POST", "/settings", DEFAULT_SETTINGS)
     call("POST", "/settings", {"interface": {"language": "russian"}})
     try:
@@ -162,4 +169,5 @@ def run():
     check("…and “Open” / “Settings…” can close it", wiring.get("visibleAfterClose") is False, json.dumps(wiring))
 
 
-main()
+if __name__ == "__main__":
+    main()

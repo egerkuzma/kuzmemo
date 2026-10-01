@@ -6,7 +6,7 @@ it is saved or cancelled (keys are typed into the sheet through /window/key).
 Needs the dev app running (scripts/run_app.sh). It erases the dev database and pins the clock to
 2026-09-28 14:30. It never brings the window in front of the person's work.
 
-    scripts/e2e/calendar.py
+    scripts/e2e/calendar_window.py
 """
 import http.client
 import json
@@ -22,6 +22,7 @@ SOCK = os.environ.get("KUZMEMO_SOCK") or os.path.expanduser("~/Library/Applicati
 class Unix(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)  # the default connect() would set it; this one makes its own socket
         self.sock.connect(SOCK)
 
 
@@ -72,6 +73,12 @@ def png(path):
 def main():
     if not os.path.exists(SOCK):
         sys.exit("control socket not found: is the dev app running? (scripts/run_app.sh)")
+    try:
+        is_dev = call("GET", "/state").get("app", {}).get("dev")
+    except OSError as error:
+        sys.exit(f"the control socket does not answer ({error}): is the dev app running and listening? (scripts/run_app.sh)")
+    if not is_dev:
+        sys.exit("refusing to run: this is not the dev build, and these checks erase data (scripts/run_app.sh builds the right one)")
 
     print("demo data")
     call("POST", "/db/reset")
@@ -165,4 +172,5 @@ def main():
     sys.exit(1 if failed else 0)
 
 
-main()
+if __name__ == "__main__":
+    main()
