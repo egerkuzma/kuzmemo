@@ -317,10 +317,14 @@ struct MaintenanceTests {
         #expect(try await store.setting("settings.speech") == "{\"rate\":0.4}")
         #expect(try await store.integrityCheck().isHealthy)
 
-        // The erased words are not left lying in the file either.
-        try await store.checkpoint()
+        // The erased words are not left lying in the file either, nor in its write-ahead log: the erase itself folds the log in
+        // (the test does not do it for the erase; the vacuum alone leaves the old pages in the file and the log).
+        #expect(summary.fileShrunk)
         let bytes = try Data(contentsOf: url)
         #expect(bytes.range(of: Data("кенгуру".utf8)) == nil)
+        let log = (try? Data(contentsOf: URL(fileURLWithPath: url.path + "-wal"))) ?? Data()
+        #expect(log.range(of: Data("кенгуру".utf8)) == nil, "the erased text is still in the write-ahead log")
+        #expect(log.range(of: Data("фиолетовый".utf8)) == nil)
         #expect(bytes.range(of: Data("Notion".utf8)) != nil) // what stays is still there
     }
 

@@ -31,6 +31,9 @@ public struct EraseSummary: Equatable, Sendable {
     public var entries: Int
     public var memos: Int
     public var undoSteps: Int
+    /// The file was shrunk and its log folded in, so that none of the removed text is left in it. `false` when that step
+    /// failed (a full disk, a lock): the rows are gone all the same, and the file is cleaned at the next quit.
+    public var fileShrunk = true
 }
 
 extension Store {
@@ -88,9 +91,14 @@ extension Store {
 
     /// Removes every entry, saved phrase and undo step, then shrinks the file so that the removed text is not left lying in
     /// it. The glossary and the settings stay.
+    ///
+    /// Two steps with different outcomes: once the rows are deleted the erase has happened, and it is reported as such even
+    /// if the shrinking fails (`fileShrunk` says so). In write-ahead mode the vacuum only writes the new file image into the
+    /// log; the old pages (and their text) stay in the file and the log until a checkpoint copies the new image over them, so
+    /// the checkpoint is part of the erase.
     @discardableResult
     public func eraseEntriesAndHistory() async throws -> EraseSummary {
-        let summary = try await writer.write { db -> EraseSummary in
+        var summary = try await writer.write { db -> EraseSummary in
             let summary = EraseSummary(
                 entries: try Item.filter(Column("deleted_at") == nil).fetchCount(db),
                 memos: try Memo.fetchCount(db),
@@ -99,7 +107,12 @@ extension Store {
             for table in Store.contentTables { try db.execute(sql: "DELETE FROM \(table)") }
             return summary
         }
-        try await writer.vacuum()
+        do {
+            try await writer.vacuum()
+            try await checkpoint()
+        } catch {
+            summary.fileShrunk = false
+        }
         return summary
     }
 }

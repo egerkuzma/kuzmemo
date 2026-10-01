@@ -167,6 +167,12 @@ final class DataMaintenance {
             let summary = try await store.eraseEntriesAndHistory()
             let spool = AudioSpool(directory: paths.audioSpool) // recordings still waiting for recognition belong to the erased phrases
             for file in spool.files() { spool.remove(path: file) }
+            // What the voices keep of the phrases they have said: the lines "My voice" made (agenda lines hold the titles of
+            // entries, in the person's own voice, and have no age limit) and any phrase the neural voice has not played yet.
+            OmniVoiceCache(directory: paths.voiceCache).clear()
+            for url in (try? FileManager.default.contentsOfDirectory(at: paths.speechCache, includingPropertiesForKeys: nil)) ?? [] {
+                try? FileManager.default.removeItem(at: url)
+            }
             notice = Notice(
                 style: .success,
                 text: tr(
