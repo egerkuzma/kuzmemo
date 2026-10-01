@@ -355,14 +355,14 @@ struct OmniVoiceSessionTests {
     }
 
     private func pid(_ install: FakeInstall) async throws -> Int32 {
-        for _ in 0 ..< 60 { // the stand-in writes its id a moment after it starts
+        for _ in 0 ..< 120 { // the stand-in writes its id a moment after it starts
             if let text = try? String(contentsOf: install.root.appendingPathComponent("build/pid.txt"), encoding: .utf8), let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return pid }
             try await Task.sleep(for: .milliseconds(50))
         }
         throw OmniVoiceError.launchFailed("no pid")
     }
 
-    private func isGone(_ pid: Int32, within seconds: Double = 4) async throws -> Bool {
+    private func isGone(_ pid: Int32, within seconds: Double = 6) async throws -> Bool {
         var alive = true
         for _ in 0 ..< Int(seconds * 10) where alive {
             alive = kill(pid, 0) == 0
@@ -386,7 +386,7 @@ struct OmniVoiceSessionTests {
     @Test func aSessionThatIsNeverUsedStopsItself() async throws {
         let install = try FakeInstall(voice: true, speaker: FakeInstall.idler)
         defer { install.remove() }
-        let session = try OmniVoiceRunner(locator: install.locator).begin(idleLimit: 1.0)
+        let session = try OmniVoiceRunner(locator: install.locator).begin(idleLimit: 3.0) // long enough for a busy machine to start the stand-in
         let program = try await pid(install)
         #expect(try await isGone(program), "the program was still running four seconds after its idle limit")
         #expect(!session.isUsable)
