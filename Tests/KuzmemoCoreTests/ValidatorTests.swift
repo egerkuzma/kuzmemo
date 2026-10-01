@@ -10,13 +10,14 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
     _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
-    followUp: Bool = false, timeAsked: Bool = false
+    followUp: Bool = false, timeAsked: Bool = false, bulkConfirmed: Bool = false
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
         context: ContextPlan(entries: entries, expanded: false),
-        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked
+        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked,
+        bulkConfirmed: bulkConfirmed
     )
     return await ActionValidator.validate(response, in: context)
 }
@@ -138,8 +139,89 @@ struct ValidatorCreateTests {
         let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
         let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
         #expect(clarification(try await validate(json, entries: entries))?.reason == .destructiveConfirm)
-        guard case let .mutate(plan) = try await validate(json, entries: entries, followUp: true) else { Issue.record("expected the deletions"); return }
+        guard case let .mutate(plan) = try await validate(json, entries: entries, followUp: true, bulkConfirmed: true) else { Issue.record("expected the deletions"); return }
         #expect(plan.actions.count == 3)
+    }
+
+    /// Only the person's yes to the app's own "Delete 3 entries?" lifts the bulk limit. Any other follow-up (the answer to
+    /// "At what time?", or something that has nothing to do with the question) is a new command.
+    @Test func anAnswerToAnotherQuestionMeetsTheBulkLimitAgain() async throws {
+        let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+        let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
+        let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
+        let result = try await validate(json, entries: entries, followUp: true, bulkConfirmed: false)
+        #expect(clarification(result)?.reason == .destructiveConfirm)
+        let updates = (1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# }.joined(separator: ",")
+        let bulkUpdate = #"{"intent":"update","confidence":0.9,"actions":[\#(updates)]}"#
+        #expect(clarification(try await validate(bulkUpdate, entries: entries, followUp: true))?.reason == .destructiveConfirm)
+        guard case .mutate = try await validate(bulkUpdate, entries: entries, followUp: true, bulkConfirmed: true) else { Issue.record("expected the changes"); return }
+    }
+
+    @Test func theAppsOwnBulkQuestionIsRecognisedInBothLanguages() {
+        for question in ["Delete 3 entries?", "Delete 1 entry?", "Change 4 entries?", "Удалить 3 записи?", "Удалить 5 записей?", "Удалить 1 запись?", "Изменить 4 записи?"] {
+            #expect(FollowUp(previous: "x", question: question).askedToConfirmBulk, "question '\(question)'")
+        }
+        for question in ["На какую дату напомнить?", "Во сколько встреча?", "Удалить запись «Созвон»?", "Delete the call with Anna?", "Какую пятницу имеешь в виду?"] {
+            #expect(!FollowUp(previous: "x", question: question).askedToConfirmBulk, "question '\(question)'")
+        }
+    }
+
+    /// Every occurrence of a series is listed under a number of its own, so "delete all the stand-ups" can name one item
+    /// three times: that is one entry (no bulk question), deleted once (a second delete of it would fail the whole plan).
+    @Test func oneEntryNamedSeveralTimesIsDeletedOnce() async throws {
+        let series = item("s1", "Планёрка", "2026-09-28", "10:00", recurrence: Recurrence(freq: .daily))
+        let entries = ["2026-09-29", "2026-09-30", "2026-10-01"].map { entry(series, occurrence: $0) }
+        let json = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected one deletion"); return }
+        #expect(plan.actions == [.delete(itemID: "s1")])
+        #expect(!plan.warnings.isEmpty)
+    }
+
+    @Test func aChangeToAnEntryDeletedInTheSameAnswerIsLeftOut() async throws {
+        let entries = [entry(item("a", "Созвон", "2026-10-01", "11:00")), entry(item("b", "Обед", "2026-10-01", "13:00"))]
+        let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"update","ref":1,"changes":{"title":"Другое"}},{"op":"complete","ref":1},{"op":"update","ref":2,"changes":{"title":"Ланч"}}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected a plan"); return }
+        #expect(plan.actions.count == 2)
+        #expect(plan.actions.first == .delete(itemID: "a"))
+        #expect(plan.actions.last?.targetItemID == "b")
+    }
+
+    @Test func anActionRepeatedInTheSameAnswerIsLeftOut() async throws {
+        let entries = [entry(item("a", "Созвон", "2026-10-01", "11:00"))]
+        let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"complete","ref":1},{"op":"complete","ref":1}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected a plan"); return }
+        #expect(plan.actions == [.complete(itemID: "a", occurrenceDate: nil)])
+    }
+
+    /// A time with no date belongs to nothing: a task or a note that has none keeps no time either.
+    @Test func aTimeWithoutADateIsNotKept() async throws {
+        let json = #"{"intent":"create","confidence":0.9,"actions":[{"op":"create","item":{"kind":"task","title":"Позвонить маме","when":{"mode":"none","time":"17:00"}}}]}"#
+        let new = try #require(created(try await validate(json)).first)
+        #expect(new.date == nil && new.time == nil)
+    }
+
+    /// A second move of an occurrence that was moved before starts from where it stands: "to 18:00" keeps the day it is
+    /// on now, "to Friday" keeps its hour, instead of going back to the rule's day and the series' time.
+    @Test func aSecondMoveStartsFromWhereTheOccurrenceStands() async throws {
+        let series = item("s1", "Планёрка", "2026-09-28", "10:00", recurrence: Recurrence(freq: .weekly))
+        // the Monday 28th stand-up was moved to Wednesday 30th at 16:00 earlier
+        let moved = AgendaEntry(item: series, date: LocalDate("2026-09-30")!, time: LocalTime("16:00")!, isDone: false,
+                                occurrenceDate: LocalDate("2026-09-28"), wasMoved: true)
+        let timeOnly = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"none","time":"18:00"}}}]}"#, entries: [moved])
+        guard case let .mutate(first) = timeOnly else { Issue.record("expected a move"); return }
+        #expect(first.actions == [.moveOccurrence(itemID: "s1", occurrenceDate: LocalDate("2026-09-28")!, newDate: LocalDate("2026-09-30")!, newTime: LocalTime("18:00"))])
+        let dateOnly = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"weekday","weekday":"fri","week_offset":0}}}]}"#, entries: [moved])
+        guard case let .mutate(second) = dateOnly else { Issue.record("expected a move"); return }
+        #expect(second.actions == [.moveOccurrence(itemID: "s1", occurrenceDate: LocalDate("2026-09-28")!, newDate: LocalDate("2026-10-02")!, newTime: LocalTime("16:00"))])
+    }
+
+    /// The entry the model was shown knows the key of its own occurrence; the model's arithmetic is only a fallback.
+    @Test func theListedOccurrenceBeatsTheModelsOccurrenceDate() async throws {
+        let series = item("s1", "Планёрка", "2026-09-28", "10:00", recurrence: Recurrence(freq: .weekly))
+        let listed = entry(series, occurrence: "2026-10-05")
+        let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"skip_occurrence","ref":1,"occurrence_date":"2026-10-06"}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: [listed]) else { Issue.record("expected a skip"); return }
+        #expect(plan.actions == [.skipOccurrence(itemID: "s1", occurrenceDate: LocalDate("2026-10-05")!)])
     }
 
     @Test func recurrenceRulesAreClampedAndNeedAStartDate() async throws {

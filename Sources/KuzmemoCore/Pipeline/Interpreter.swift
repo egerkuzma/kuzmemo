@@ -18,6 +18,12 @@ public struct FollowUp: Equatable, Sendable {
     public var askedForTime: Bool {
         question.lowercased().range(of: #"во сколько|в какое время|какое время|на какое время|at what time|what time|which time"#, options: .regularExpression) != nil
     }
+
+    /// The question was the app's own "Delete 3 entries?" or "Change 4 entries?" (in either language). An answer to it is the
+    /// person's yes; an answer to any other question is a new command and meets the bulk limits again.
+    public var askedToConfirmBulk: Bool {
+        question.range(of: #"^(Delete|Change) \d+ entr(y|ies)\?$|^(Удалить|Изменить) \d+ запис(ь|и|ей)\?$"#, options: .regularExpression) != nil
+    }
 }
 
 public struct InterpretRequest: Sendable {
@@ -102,7 +108,7 @@ public struct Interpreter: Sendable {
                 let validation = ValidationContext(
                     context: context,
                     resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
-                    store: store, policy: policy, isFollowUp: followUp != nil, timeWasAsked: followUp?.askedForTime ?? false
+                    store: store, policy: policy, followUp: followUp
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)
                 return InterpretResult(

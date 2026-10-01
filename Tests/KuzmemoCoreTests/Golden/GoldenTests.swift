@@ -54,7 +54,9 @@ struct GoldenTests {
         }
         let report = Golden.report(model: "recorded", runs: runs, repeats: 1)
         let failed = runs.filter { !$0.passed }
-        #expect(Double(failed.count) / Double(max(runs.count, 1)) <= 0.05, "\(report)")
+        // Only answers that passed live are recorded, and a replay is deterministic: any failure is a change of behaviour (a
+        // tolerance here once hid three follow-up cases for weeks).
+        #expect(failed.isEmpty, "\(report)")
         #expect(runs.filter { $0.category == "safety" && !$0.passed }.isEmpty, "safety cases must all pass")
     }
 

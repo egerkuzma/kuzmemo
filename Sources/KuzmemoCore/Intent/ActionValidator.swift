@@ -20,16 +20,19 @@ public struct ValidationContext: Sendable {
     public var resolver: RelativeDateResolver
     public var store: Store
     public var policy: ValidationPolicy
-    /// The transcript answers a question the app already asked: the confirmations and ambiguity guards have
-    /// had their say and must not ask again.
+    /// The transcript answers a question the app already asked: the ambiguity guards ("next Friday", "tomorrow" after
+    /// midnight) have had their say and must not ask again.
     public var isFollowUp: Bool
     /// The question this transcript answers was about the time: an event that still has none is then an all-day event
     /// (the person said it does not matter), not a reason to ask once more.
     public var timeWasAsked: Bool
+    /// The question this transcript answers was the app's own "Delete 3 entries?" / "Change 4 entries?": the person has
+    /// said yes, so the bulk limits do not ask again. Any other answer is a new command with the limits in force.
+    public var bulkConfirmed: Bool
 
     public init(
         context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
-        isFollowUp: Bool = false, timeWasAsked: Bool = false
+        isFollowUp: Bool = false, timeWasAsked: Bool = false, bulkConfirmed: Bool = false
     ) {
         self.context = context
         self.resolver = resolver
@@ -37,6 +40,16 @@ public struct ValidationContext: Sendable {
         self.policy = policy
         self.isFollowUp = isFollowUp
         self.timeWasAsked = timeWasAsked
+        self.bulkConfirmed = bulkConfirmed
+    }
+
+    /// The flags of an answer to a question come from the question itself, in one place for the pipeline and for the replay
+    /// of recorded answers.
+    public init(context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard, followUp: FollowUp?) {
+        self.init(
+            context: context, resolver: resolver, store: store, policy: policy, isFollowUp: followUp != nil,
+            timeWasAsked: followUp?.askedForTime ?? false, bulkConfirmed: followUp?.askedToConfirmBulk ?? false
+        )
     }
 }
 
@@ -62,7 +75,12 @@ public enum ActionValidator {
 
     private struct Target {
         var item: Item
+        /// The date the rule generated (the key of an override), when the entry the person means was listed.
         var occurrenceDate: LocalDate?
+        /// Where the entry stands now: the date and time the model was shown, which differ from the rule's for an
+        /// occurrence that was moved (a second move starts from there, not from the series).
+        var shownDate: LocalDate? = nil
+        var shownTime: LocalTime? = nil
     }
 
     private struct Run {
@@ -112,15 +130,17 @@ public enum ActionValidator {
                 actions = Array(actions.prefix(policy.maxActions))
                 warnings.append("more than \(policy.maxActions) actions: truncated")
             }
-            let deletes = actions.filter { $0.op == .delete }.count
-            if deletes > policy.maxDeletesWithoutConfirmation && !vc.isFollowUp {
+            // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
+            // stand-ups this week" can name one item three times.
+            let deletes = distinctTargets(actions.filter { $0.op == .delete })
+            if deletes > policy.maxDeletesWithoutConfirmation && !vc.bulkConfirmed {
                 throw Stop(.clarify(Clarification(
                     question: trCount("Delete %lld entries?", deletes),
                     reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")]
                 )))
             }
-            let updates = actions.filter { $0.op == .update }.count
-            if updates > policy.maxUpdatesWithoutConfirmation && !vc.isFollowUp {
+            let updates = distinctTargets(actions.filter { $0.op == .update })
+            if updates > policy.maxUpdatesWithoutConfirmation && !vc.bulkConfirmed {
                 throw Stop(.clarify(Clarification(
                     question: trCount("Change %lld entries?", updates),
                     reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")]
@@ -133,11 +153,50 @@ public enum ActionValidator {
 
             var planned: [PlannedAction] = []
             for action in actions { planned.append(try await plan(action)) }
+            planned = settle(planned)
             guard !planned.isEmpty else { return .unknown("no valid actions") }
             return .mutate(MutationPlan(
                 actions: planned, warnings: warnings,
                 correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1)
             ))
+        }
+
+        /// How many different entries the actions are about (a ref the model was shown, else the words it used to find one).
+        func distinctTargets(_ actions: [ParsedAction]) -> Int {
+            var keys = Set<String>()
+            for (index, action) in actions.enumerated() {
+                if let ref = action.ref, let entry = vc.context.entry(number: ref) {
+                    keys.insert("item:\(entry.item.id)")
+                } else if let hint = clean(action.targetHint) {
+                    keys.insert("hint:\(SearchText.normalize(hint))")
+                } else {
+                    keys.insert("action:\(index)")
+                }
+            }
+            return keys.count
+        }
+
+        /// One answer can name the same entry twice. A second delete of an item, or any later change to an item the plan
+        /// already deletes, would fail inside the transaction and take the whole plan down with it, so it is left out; an
+        /// action on an existing entry that repeats an earlier one is too.
+        mutating func settle(_ planned: [PlannedAction]) -> [PlannedAction] {
+            var deleted = Set<String>()
+            var result: [PlannedAction] = []
+            for action in planned {
+                if let id = action.targetItemID {
+                    if deleted.contains(id) {
+                        warnings.append("an action on an entry that is deleted in the same answer was left out")
+                        continue
+                    }
+                    if case .delete = action { deleted.insert(id) }
+                }
+                if case .create = action {} else if result.contains(action) { // two identical creations are left as they came
+                    warnings.append("an action repeated in the same answer was left out")
+                    continue
+                }
+                result.append(action)
+            }
+            return result
         }
 
         mutating func plan(_ action: ParsedAction) async throws -> PlannedAction {
@@ -160,7 +219,7 @@ public enum ActionValidator {
                 return .delete(itemID: target.item.id)
             case .skipOccurrence:
                 let target = try await resolveTarget(action)
-                guard target.item.recurrence != nil, let date = action.occurrenceDate ?? target.occurrenceDate else {
+                guard target.item.recurrence != nil, let date = target.occurrenceDate ?? action.occurrenceDate else {
                     throw Stop(.clarify(Clarification(question: tr("Which occurrence should I skip?"), reason: .ambiguousTarget)))
                 }
                 return .skipOccurrence(itemID: target.item.id, occurrenceDate: date)
@@ -170,7 +229,7 @@ public enum ActionValidator {
         /// Recurring items are completed per occurrence; one-off items have no occurrence date.
         func occurrence(for target: Target, action: ParsedAction) throws -> LocalDate? {
             guard target.item.recurrence != nil else { return nil }
-            guard let date = action.occurrenceDate ?? target.occurrenceDate else {
+            guard let date = target.occurrenceDate ?? action.occurrenceDate else {
                 throw Stop(.clarify(Clarification(question: tr("Which occurrence should I mark?"), reason: .ambiguousTarget)))
             }
             return date
@@ -181,7 +240,7 @@ public enum ActionValidator {
         mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
             if let ref = action.ref {
                 if let entry = vc.context.entry(number: ref) {
-                    return Target(item: entry.item, occurrenceDate: entry.occurrenceDate)
+                    return Target(item: entry.item, occurrenceDate: entry.occurrenceDate, shownDate: entry.date, shownTime: entry.time)
                 }
                 warnings.append("ref \(ref) is not in the list the model was shown")
             }
@@ -260,7 +319,7 @@ public enum ActionValidator {
                 kind: parsed.kind, title: title,
                 details: clean(parsed.details).map { String($0.prefix(policy.maxDetailsLength)) },
                 keywords: (parsed.keywords ?? []).compactMap { clean($0) }.prefix(6).joined(separator: " "),
-                date: resolved.date, time: resolved.time,
+                date: resolved.date, time: resolved.date == nil ? nil : resolved.time, // a time alone belongs to nothing
                 durationMin: parsed.durationMin.flatMap { (1 ... 1440).contains($0) ? $0 : nil },
                 approximate: resolved.approximate, recurrence: recurrence
             )
@@ -295,10 +354,12 @@ public enum ActionValidator {
 
             let onlyTimingChanged = changes.isEmpty
             if target.item.recurrence != nil, onlyTimingChanged, newDate != nil || newTime != nil,
-               let occurrence = action.occurrenceDate ?? target.occurrenceDate {
+               let occurrence = target.occurrenceDate ?? action.occurrenceDate {
+                // "Move it to 18:00" keeps the day the entry is on now, "to Friday" keeps its time: for an occurrence that was
+                // moved before, that is where it stands, not the rule's day and the series' hour.
                 return .moveOccurrence(
                     itemID: target.item.id, occurrenceDate: occurrence,
-                    newDate: newDate ?? occurrence, newTime: newTime ?? target.item.time
+                    newDate: newDate ?? target.shownDate ?? occurrence, newTime: newTime ?? target.shownTime ?? target.item.time
                 )
             }
             changes.date = newDate
@@ -474,6 +535,17 @@ public enum ActionValidator {
             case .destructiveConfirm: tr("Please confirm.")
             case .other: tr("Please clarify.")
             }
+        }
+    }
+}
+
+extension PlannedAction {
+    /// The entry the action works on (`nil` for a creation).
+    var targetItemID: String? {
+        switch self {
+        case .create: nil
+        case let .update(id, _), let .moveOccurrence(id, _, _, _), let .complete(id, _), let .reopen(id, _), let .delete(id),
+             let .skipOccurrence(id, _): id
         }
     }
 }

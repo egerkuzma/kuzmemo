@@ -145,8 +145,10 @@ enum Golden {
         let planningText = [c.followUp?.previous, transcript].compactMap { $0 }.joined(separator: " ")
         let context = try await ContextPlanner().plan(transcript: planningText, anchor: anchor, store: store)
         let response = try Interpreter.decode(structured)
+        // The same flags the pipeline derives from the question that was asked (a replay must not be easier or harder).
+        let followUp = c.followUp.map { FollowUp(previous: $0.previous, question: $0.question) }
         let interpretation = await ActionValidator.validate(response, in: ValidationContext(
-            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store, isFollowUp: c.followUp != nil
+            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store, followUp: followUp
         ))
         return (interpretation, response)
     }
