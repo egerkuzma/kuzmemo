@@ -27,6 +27,10 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     @ObservationIgnored private var again = false
     @ObservationIgnored private var voice: Task<Void, Never>?
     @ObservationIgnored private var spoken: Set<String> = []
+    /// Alerts this session has already handed to the system. One whose moment has just passed is not pending any more (it
+    /// has fired), and the planner still lists it for half a minute: without this note any sync in that half minute would
+    /// add it again with a one-second trigger and the person would get a second banner and a second sound.
+    @ObservationIgnored private var submitted: Set<String> = []
 
     init(env: AppEnvironment) {
         self.env = env
@@ -88,7 +92,9 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         pendingSync = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            await self?.sync()
+            // The sync is not a child of this task: a later request cancels the one that is waiting, and the database reads of
+            // a cancelled task throw. The old code read that as "no entries" and removed every pending alert and snooze.
+            await Task { @MainActor in await self?.sync() }.value
         }
     }
 
@@ -107,8 +113,16 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         let now = env.clock.now()
         let zone = env.clock.timeZone
         let today = env.clock.localNow().date
-        let entries = (try? await env.store.agenda(in: today ... today.adding(days: settings.horizonDays), includeDone: false)) ?? []
+        // A calendar that cannot be read is not an empty calendar: the system keeps what it holds until a read works.
+        let entries: [AgendaEntry]
+        do {
+            entries = try await env.store.agenda(in: today ... today.adding(days: settings.horizonDays), includeDone: false)
+        } catch {
+            lastError = "\(error)"
+            return
+        }
         planned = AlertPlanner.plan(entries: entries, settings: settings, now: now, timeZone: zone)
+        submitted.formIntersection(planned.map(\.id))
         lastSync = now
         scheduleVoice(settings)
         guard isLive else { return }
@@ -118,12 +132,17 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
 
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
+        let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
         let diff = AlertDiff(planned: planned, pendingIDs: Set(pending.map(\.identifier)))
         if !diff.toRemove.isEmpty { center.removePendingNotificationRequests(withIdentifiers: diff.toRemove) }
         lastError = nil
         for alert in diff.toAdd {
+            // An alert whose moment has come and that was handed over already (or is on screen) has fired: it is not pending
+            // for that reason, and adding it again would show it again.
+            if alert.fireAt <= now.addingTimeInterval(1), submitted.contains(alert.id) || delivered.contains(alert.id) { continue }
             do {
                 try await center.add(NotificationRequestBuilder.request(for: alert, now: now, timeZone: zone))
+                submitted.insert(alert.id)
             } catch {
                 lastError = "\(error)"
             }
@@ -137,7 +156,10 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         for request in pending where request.identifier.hasPrefix(NotificationRequestBuilder.snoozePrefix) {
             let info = request.content.userInfo
             guard let itemID = info["itemID"] as? String else { continue }
-            guard let item = try? await env.store.item(id: itemID) else { stale.append(request.identifier); continue }
+            // "No such entry" ends the snooze; a read that failed says nothing, and the snooze stays.
+            let found: Item?
+            do { found = try await env.store.item(id: itemID) } catch { continue }
+            guard let item = found else { stale.append(request.identifier); continue }
             if item.recurrence == nil, item.status == .done { stale.append(request.identifier) }
         }
         if !stale.isEmpty { UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: stale) }
@@ -190,6 +212,8 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             try? await Task.sleep(for: .seconds(max(0, next.fireAt.timeIntervalSince(now))))
             guard !Task.isCancelled, let self else { return }
             spoken.insert(next.id)
+            // The sleep runs on the clock that stops while the Mac sleeps: a title due an hour ago must not be read out at wake.
+            guard env.clock.now().timeIntervalSince(next.fireAt) < 60 else { return }
             let glossary = (try? await env.store.glossary()) ?? []
             let title = Glossary.spokenForm(of: next.title, terms: glossary)
             let phrase: String = switch next.kind {
@@ -237,8 +261,11 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             }
         case let name where name.hasPrefix("snooze-"):
             let minutes = Int(name.dropFirst(7)) ?? 10
+            // A snooze that lands inside the quiet hours is silent, like every other alert there.
+            let settings = env.settings.notifications
+            let rings = !settings.quietHours.contains(env.clock.localNow().adding(minutes: minutes).time)
             let request = NotificationRequestBuilder.snooze(
-                title: title, subtitle: subtitle, thread: thread, info: info, minutes: minutes, sound: env.settings.notifications.atTimeSound
+                title: title, subtitle: subtitle, thread: thread, info: info, minutes: minutes, sound: rings ? settings.atTimeSound : .silent
             )
             UNUserNotificationCenter.current().add(request) { _ in }
         case UNNotificationDefaultActionIdentifier:

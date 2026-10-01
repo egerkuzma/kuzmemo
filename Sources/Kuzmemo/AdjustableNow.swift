@@ -8,7 +8,9 @@ nonisolated final class AdjustableNow: NowProvider, @unchecked Sendable {
     private var pinned: Date?
     private let zone: TimeZone
 
-    init(timeZone: TimeZone = .current) { zone = timeZone }
+    /// The zone follows the system setting while the app runs (a Mac that flies from Moscow to Lisbon): `.current` is a
+    /// snapshot taken at launch, and alerts, "today" and the anchor of every phrase would stay in the old zone.
+    init(timeZone: TimeZone = .autoupdatingCurrent) { zone = timeZone }
 
     var timeZone: TimeZone { zone }
 

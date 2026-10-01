@@ -15,7 +15,7 @@ extension NowProvider {
 public struct SystemNow: NowProvider {
     public init() {}
     public func now() -> Date { Date() }
-    public var timeZone: TimeZone { TimeZone.current }
+    public var timeZone: TimeZone { TimeZone.autoupdatingCurrent }
 }
 
 public struct FixedNow: NowProvider {

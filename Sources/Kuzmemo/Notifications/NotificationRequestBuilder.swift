@@ -65,7 +65,10 @@ enum NotificationRequestBuilder {
         if fireAt.timeIntervalSince(now) <= 1 { return UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false) }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireAt)
+        var parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireAt)
+        // Components carry their calendar: without it the system reads year 2026 in the person's own calendar (Buddhist,
+        // Japanese ...) and the alert never fires. The time zone is left out on purpose: a "15:00" stays 15:00 wherever the Mac is.
+        parts.calendar = Calendar(identifier: .gregorian)
         return UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
     }
 

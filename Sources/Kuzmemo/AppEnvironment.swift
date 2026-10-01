@@ -91,6 +91,7 @@ final class AppEnvironment {
     private(set) var notifications: NotificationScheduler!
     @ObservationIgnored private var controlServer: ControlServer?
     @ObservationIgnored private var observer: Task<Void, Never>?
+    @ObservationIgnored private var timeZoneObserver: (any NSObjectProtocol)?
     @ObservationIgnored private var questionExpiry: Task<Void, Never>?
     @ObservationIgnored private var toastDismissal: Task<Void, Never>?
     /// Registered by a SwiftUI view that is always alive (the menu-bar label): opens the main window's scene.
@@ -130,6 +131,16 @@ final class AppEnvironment {
         start()
     }
 
+    /// The system time zone changed (a flight, or the automatic setting): "today", the alerts and the calendar are worked out
+    /// again. The clock follows the system zone, but nothing else would notice that a day had begun somewhere else.
+    private func timeZoneChanged() {
+        notifications?.requestSync(after: .seconds(1))
+        Task {
+            await calendar.rolloverIfNeeded()
+            await reloadToday()
+        }
+    }
+
     private func start() {
         observer = Task { [weak self] in
             guard let store = self?.store else { return }
@@ -144,6 +155,9 @@ final class AppEnvironment {
             for outcome in await processor.recoverUnfinished() { await present(outcome, announce: false) }
         }
         calendar.startObserving()
+        timeZoneObserver = NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.timeZoneChanged() }
+        }
         voice = VoiceController(env: self)
         voice.start()
         notifications = NotificationScheduler(env: self)
