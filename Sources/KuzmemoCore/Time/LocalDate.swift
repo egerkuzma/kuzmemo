@@ -38,7 +38,14 @@ public struct LocalDate: Hashable, Comparable, Sendable, CustomStringConvertible
         return era * 146_097 + doe - 719_468
     }
 
+    /// The first and the last day a `LocalDate` can hold (years 1 to 9999: the stored form is `YYYY-MM-DD`).
+    public static let earliest = LocalDate(year: 1, month: 1, day: 1)!
+    public static let latest = LocalDate(year: 9999, month: 12, day: 31)!
+
+    /// A day that is out of range (a model's or a transcript's huge number) saturates at the first or last valid day instead
+    /// of becoming a date that cannot be written down or read back.
     public init(epochDay: Int) {
+        let epochDay = min(max(epochDay, LocalDate.earliest.epochDay), LocalDate.latest.epochDay)
         let z = epochDay + 719_468
         let era = (z >= 0 ? z : z - 146_096) / 146_097
         let doe = z - era * 146_097
@@ -78,11 +85,14 @@ public struct LocalDate: Hashable, Comparable, Sendable, CustomStringConvertible
 
     // MARK: Arithmetic
 
-    public func adding(days: Int) -> LocalDate { LocalDate(epochDay: epochDay + days) }
+    public func adding(days: Int) -> LocalDate {
+        let (sum, overflow) = epochDay.addingReportingOverflow(days)
+        return LocalDate(epochDay: overflow ? (days > 0 ? Int.max : Int.min) : sum)
+    }
 
     /// Adds calendar months and clamps the day to the length of the target month (Jan 31 + 1 month = Feb 28/29).
     public func adding(months: Int) -> LocalDate {
-        let total = year * 12 + (month - 1) + months
+        let total = year * 12 + (month - 1) + min(max(months, -120_000), 120_000)
         let newYear = Int((Double(total) / 12).rounded(.down))
         let newMonth = total - newYear * 12 + 1
         let clamped = min(day, LocalDate.daysInMonth(year: newYear, month: newMonth))

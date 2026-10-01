@@ -32,6 +32,13 @@ public struct RelativeDateResolver: Sendable {
         self.dayParts = dayParts
     }
 
+    /// The model's numbers are not trusted: a date further from today than a person plans (a hundred years) is read as
+    /// "no usable date", which makes the app ask, instead of being computed (an overflow, or a year that cannot be stored).
+    static let maxDays = 36_500
+    static let maxWeeks = 5_200
+    static let maxMonths = 1_200
+    static let maxMinutes = 52_560_000
+
     public func resolve(_ when: When) -> ResolvedWhen {
         var date: LocalDate?
         var time = explicitTime(of: when)
@@ -44,19 +51,23 @@ public struct RelativeDateResolver: Sendable {
         case .absolute:
             if let d = when.date { date = d } else { issues.append(.incomplete("date")) }
         case .daysFromToday:
-            if let n = when.daysFromToday { date = anchor.date.adding(days: n) } else { issues.append(.incomplete("days_from_today")) }
+            if let n = when.daysFromToday, (-Self.maxDays ... Self.maxDays).contains(n) {
+                date = anchor.date.adding(days: n)
+            } else {
+                issues.append(.incomplete("days_from_today"))
+            }
         case .weekday:
-            if let weekday = when.weekday {
+            if let weekday = when.weekday, (-Self.maxWeeks ... Self.maxWeeks).contains(when.weekOffset ?? 0) {
                 // `week_offset` counts calendar weeks (Monday first) from the current one. With 0 the weekday of
                 // this week is used only while it is still ahead; today or a passed day rolls to next week.
                 let offset = when.weekOffset ?? 0
                 let inWeek = anchor.date.startOfWeek.adding(days: weekday.rawValue - 1 + 7 * offset)
                 date = (offset == 0 && inWeek <= anchor.date) ? inWeek.adding(days: 7) : inWeek
             } else {
-                issues.append(.incomplete("weekday"))
+                issues.append(.incomplete(when.weekday == nil ? "weekday" : "week_offset"))
             }
         case .minutesFromNow:
-            if let n = when.minutesFromNow {
+            if let n = when.minutesFromNow, (-Self.maxMinutes ... Self.maxMinutes).contains(n) {
                 let moment = anchor.adding(minutes: n)
                 date = moment.date
                 time = moment.time
@@ -64,17 +75,39 @@ public struct RelativeDateResolver: Sendable {
                 issues.append(.incomplete("minutes_from_now"))
             }
         case .monthPart:
-            if let part = when.monthPart {
+            if let part = when.monthPart, (-Self.maxMonths ... Self.maxMonths).contains(when.monthOffset ?? 0) {
                 let base = anchor.date.firstOfMonth.adding(months: when.monthOffset ?? 0)
                 date = part == .start ? base : base.lastOfMonth
                 if when.approximate == nil { approximate = true }
             } else {
-                issues.append(.incomplete("month_part"))
+                issues.append(.incomplete(when.monthPart == nil ? "month_part" : "month_offset"))
             }
+        }
+
+        // "This evening" said at 20:00 is not a moment in the past: the default hour of the part (19:00) has gone, the part
+        // has not. Such a reminder is set for a little later in the part instead of asking for another date.
+        if let date, date == anchor.date, when.time == nil, let part = when.dayPart, let current = time, current < anchor.time,
+           let later = laterInThePart(part) {
+            time = later
         }
 
         if let date, isPast(date: date, time: time) { issues.append(.inThePast) }
         return ResolvedWhen(date: date, time: time, approximate: approximate, issues: issues)
+    }
+
+    /// A time inside the part of the day that is going on now (an hour from now, on a quarter, not past the part's end),
+    /// or `nil` when the part is over (or has no fixed end, like the night).
+    private func laterInThePart(_ part: When.DayPart) -> LocalTime? {
+        let end: Int
+        switch part {
+        case .morning: end = 12 * 60
+        case .day: end = 17 * 60
+        case .evening: end = 23 * 60
+        case .night: return nil
+        }
+        let now = anchor.time.minutesSinceMidnight
+        guard now < end else { return nil }
+        return LocalTime(minutesSinceMidnight: min((now + 60 + 14) / 15 * 15, end))
     }
 
     private func explicitTime(of when: When) -> LocalTime? {

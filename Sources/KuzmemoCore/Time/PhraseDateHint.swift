@@ -7,12 +7,26 @@ public enum PhraseDateHint {
         word.hasPrefix("следующ") || word.hasPrefix("ближаиш") || word == "next"
     }
 
-    /// Whether the words say "tomorrow" (1) or "the day after tomorrow" (2); `nil` for neither.
+    /// Whether `first` is directly followed by `second` ("after tomorrow").
+    private static func hasPair(_ words: [String], _ first: String, _ second: String) -> Bool {
+        zip(words, words.dropFirst()).contains { $0 == first && $1 == second }
+    }
+
+    /// Whether the words say "tomorrow" (1) or "the day after tomorrow" (2); `nil` for neither. Only "after" right before
+    /// "tomorrow" makes it the second day: "tomorrow after lunch" is tomorrow.
     static func daysAhead(words: [String]) -> Int? {
-        if words.contains("послезавтра") { return 2 }
-        if words.contains("завтра") { return 1 }
-        if words.contains("tomorrow") { return words.contains("after") ? 2 : 1 }
+        if words.contains("послезавтра") || hasPair(words, "после", "завтра") || hasPair(words, "after", "tomorrow") { return 2 }
+        if words.contains("завтра") || words.contains("tomorrow") { return 1 }
         return nil
+    }
+
+    /// Month names (Russian in any case, English in full): a phrase that has one names its date itself.
+    static func isMonthName(_ word: String) -> Bool {
+        let prefixes = ["январ", "феврал", "март", "апрел", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"]
+        if prefixes.contains(where: word.hasPrefix) { return true }
+        if word == "мая" || word == "мае" || word == "маи" { return true } // "май" is folded to "маи"
+        return ["january", "february", "march", "april", "may", "june", "july", "august", "september", "sept", "october", "november", "december"]
+            .contains(word)
     }
 
     public static func date(for phrase: String, anchor: LocalDateTime) -> LocalDate? {
@@ -20,6 +34,13 @@ public enum PhraseDateHint {
         guard !words.isEmpty else { return nil }
         // Words are normalised (й → и), so the prefixes below are written the same way.
         if words.contains(where: isNextMarker) { return nil }
+        // A phrase that names the date itself ("пятница, девятого октября", "Friday, October 9") is the person's explicit
+        // choice, and so is an answer that repeats an option the app offered: the weekday in it must not pull the date to the
+        // nearest such weekday.
+        if words.contains(where: isMonthName) { return nil }
+        // Two cues that do not add up ("в пятницу через две недели", "Friday in two weeks": a weekday and an offset) are
+        // not what either says alone ("Friday in the afternoon" has no offset and keeps its weekday reading).
+        if words.contains(where: { weekday(for: $0) != nil }), hasOffset(words) { return nil }
         if let english = englishDate(words: words, anchor: anchor) { return english }
 
         if let index = words.firstIndex(of: "через"), let offset = relativeOffset(words: Array(words[(index + 1)...])) {
@@ -30,8 +51,7 @@ public enum PhraseDateHint {
             }
         }
 
-        if words.contains("послезавтра") { return anchor.date.adding(days: 2) }
-        if words.contains("завтра") { return anchor.date.adding(days: 1) }
+        if let ahead = daysAhead(words: words), !words.contains("tomorrow") { return anchor.date.adding(days: ahead) }
         if words.contains("сегодня") { return anchor.date }
         if words.contains("позавчера") { return anchor.date.adding(days: -2) }
         if words.contains("вчера") { return anchor.date.adding(days: -1) }
@@ -44,6 +64,13 @@ public enum PhraseDateHint {
         return nil
     }
 
+    /// Whether the words hold "через …" or "in …" followed by an amount of time.
+    private static func hasOffset(_ words: [String]) -> Bool {
+        if let index = words.firstIndex(of: "через"), relativeOffset(words: Array(words[(index + 1)...])) != nil { return true }
+        if let index = words.firstIndex(of: "in"), englishOffset(words: Array(words[(index + 1)...])) != nil { return true }
+        return false
+    }
+
     /// "in two hours", "in 3 days", "tomorrow", "on Friday", "end of the month".
     private static func englishDate(words: [String], anchor: LocalDateTime) -> LocalDate? {
         if let index = words.firstIndex(of: "in"), let offset = englishOffset(words: Array(words[(index + 1)...])) {
@@ -53,7 +80,7 @@ public enum PhraseDateHint {
             case let .months(n): return anchor.date.adding(months: n)
             }
         }
-        if let ahead = daysAhead(words: words), words.contains("tomorrow") { return anchor.date.adding(days: ahead) }
+        if words.contains("tomorrow"), let ahead = daysAhead(words: words) { return anchor.date.adding(days: ahead) }
         if words.contains("today") { return anchor.date }
         if words.contains("yesterday") { return anchor.date.adding(days: -1) }
         if let weekday = words.lazy.compactMap(englishWeekday(for:)).first { return anchor.date.next(weekday) }
@@ -66,7 +93,7 @@ public enum PhraseDateHint {
         var consumed = 0
         if words.starts(with: ["half", "an", "hour"]) || words.starts(with: ["half", "hour"]) { return .minutes(30) }
         for word in words {
-            if let digits = Int(word) { amount += digits; consumed += 1; continue }
+            if let digits = Int(word) { amount = min(amount + min(digits, maxAmount), maxAmount); consumed += 1; continue }
             if let value = englishNumbers[word] { amount += value; consumed += 1; continue }
             break
         }
@@ -103,6 +130,10 @@ public enum PhraseDateHint {
         case minutes(Int), days(Int), months(Int)
     }
 
+    /// A spoken amount is capped (a hundred thousand of anything is already "never"): multiplying a huge number from the
+    /// transcript into minutes or days must not overflow, and the date it gives is clamped by `LocalDate` anyway.
+    private static let maxAmount = 100_000
+
     /// Parses what follows "через" ("in"): "два часа", "3 дня", "полчаса", "неделю", "двадцать пять минут"
     /// (two hours, 3 days, half an hour, a week, twenty-five minutes).
     private static func relativeOffset(words: [String]) -> Offset? {
@@ -113,7 +144,7 @@ public enum PhraseDateHint {
         var amount = 0
         var consumed = 0
         for word in words {
-            if let digits = Int(word) { amount += digits; consumed += 1; continue }
+            if let digits = Int(word) { amount = min(amount + min(digits, maxAmount), maxAmount); consumed += 1; continue }
             if let value = numberWords[word] { amount += value; consumed += 1; continue }
             break
         }

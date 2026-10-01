@@ -77,6 +77,28 @@ struct ResolverTests {
         #expect(resolver().resolve(When(mode: .daysFromToday, daysFromToday: 1, time: LocalTime("08:15"), dayPart: .evening)).time == LocalTime("08:15"))
     }
 
+    /// "This evening" at 20:00: the default hour of the evening (19:00) has gone but the evening has not, so it is not a
+    /// past moment; the reminder goes a little later in the part.
+    @Test func aDayPartThatIsStillGoingOnIsNotInThePast() {
+        let evening = When(mode: .daysFromToday, daysFromToday: 0, dayPart: .evening)
+        let at20 = resolver("2026-09-28 20:00").resolve(evening)
+        #expect(at20.time == LocalTime("21:00") && at20.issues.isEmpty)
+        let at2230 = resolver("2026-09-28 22:30").resolve(evening)
+        #expect(at2230.time == LocalTime("23:00") && at2230.issues.isEmpty) // never past the end of the part
+        let at2310 = resolver("2026-09-28 23:10").resolve(evening)
+        #expect(at2310.issues == [.inThePast]) // the evening is over
+        let morning = When(mode: .daysFromToday, daysFromToday: 0, dayPart: .morning)
+        #expect(resolver("2026-09-28 10:05").resolve(morning).time == LocalTime("11:15"))
+        #expect(resolver("2026-09-28 12:30").resolve(morning).issues == [.inThePast])
+        let day = When(mode: .daysFromToday, daysFromToday: 0, dayPart: .day)
+        #expect(resolver("2026-09-28 14:30").resolve(day).time == LocalTime("15:30"))
+        // before the default hour nothing changes, and other days are not touched
+        #expect(resolver("2026-09-28 08:00").resolve(evening).time == LocalTime("19:00"))
+        #expect(resolver("2026-09-28 20:00").resolve(When(mode: .daysFromToday, daysFromToday: 1, dayPart: .evening)).time == LocalTime("19:00"))
+        // an exact time is never moved
+        #expect(resolver("2026-09-28 20:00").resolve(When(mode: .daysFromToday, daysFromToday: 0, time: LocalTime("19:00"), dayPart: .evening)).issues == [.inThePast])
+    }
+
     @Test func monthParts() {
         let end = resolver().resolve(When(mode: .monthPart, monthPart: .end, monthOffset: 0))
         #expect(end.date == date("2026-09-30") && end.approximate)
@@ -95,6 +117,26 @@ struct ResolverTests {
         #expect(resolver().resolve(When(mode: .daysFromToday, daysFromToday: 0, time: LocalTime("09:00"))).issues == [.inThePast])
         #expect(resolver().resolve(When(mode: .daysFromToday, daysFromToday: 0, time: LocalTime("15:00"))).issues.isEmpty)
         #expect(resolver().resolve(When(mode: .daysFromToday, daysFromToday: 0)).issues.isEmpty) // all-day today is fine
+    }
+
+    /// The model's integers are bare numbers in the schema. A date a person does not mean (a hundred years away, an
+    /// overflow) reads as "no usable date", which makes the app ask; it must never trap or reach the database.
+    @Test func numbersFromTheModelAreBounded() {
+        let r = resolver()
+        for n in [Int.max, Int.min, 3_000_000, -3_000_000, 36_501, -36_501] {
+            let result = r.resolve(When(mode: .daysFromToday, daysFromToday: n))
+            #expect(result.date == nil && result.issues == [.incomplete("days_from_today")], "days \(n)")
+        }
+        #expect(r.resolve(When(mode: .daysFromToday, daysFromToday: 36_500)).date != nil)
+        let weeks = r.resolve(When(mode: .weekday, weekday: .fri, weekOffset: Int.max))
+        #expect(weeks.date == nil && weeks.issues == [.incomplete("week_offset")])
+        let minutes = r.resolve(When(mode: .minutesFromNow, minutesFromNow: Int.max))
+        #expect(minutes.date == nil && minutes.issues == [.incomplete("minutes_from_now")])
+        let months = r.resolve(When(mode: .monthPart, monthPart: .end, monthOffset: Int.min))
+        #expect(months.date == nil && months.issues == [.incomplete("month_offset")])
+        // whatever is resolved can be stored and read back
+        let far = r.resolve(When(mode: .daysFromToday, daysFromToday: 36_500))
+        #expect(far.date.flatMap { LocalDate($0.description) } == far.date)
     }
 
     @Test func monthAndYearBoundariesAtTheEndOfTheYear() {
@@ -169,6 +211,45 @@ struct CrossCheckTests {
         for phrase in ["в следующую пятницу", "на следующей неделе", "ближайшую среду", "как-нибудь потом", "", "созвон"] {
             #expect(PhraseDateHint.date(for: phrase, anchor: anchor) == nil, "phrase '\(phrase)'")
         }
+    }
+
+    /// The local reading must never overrule a date the person named: after "next Friday" the app offers "пятница, 2 октября"
+    /// and "пятница, 9 октября", and the answer repeats one of them.
+    @Test func aPhraseThatNamesItsDateIsNotOverridden() {
+        for phrase in ["пятница, девятого октября", "в пятницу, 9 октября", "Friday, October 9", "в субботу десятого октября", "во вторник 29 сентября"] {
+            #expect(PhraseDateHint.date(for: phrase, anchor: anchor) == nil, "phrase '\(phrase)'")
+        }
+        let r = RelativeDateResolver(anchor: anchor)
+        let chosen = When(mode: .absolute, phrase: "пятница, девятого октября", date: LocalDate("2026-10-09"))
+        #expect(r.crossCheck(chosen, resolved: r.resolve(chosen)) == .noHint)
+    }
+
+    @Test func twoCuesThatDoNotAddUpGiveNoHint() {
+        for phrase in ["в пятницу через две недели", "в субботу через неделю", "Friday in two weeks"] {
+            #expect(PhraseDateHint.date(for: phrase, anchor: anchor) == nil, "phrase '\(phrase)'")
+        }
+        // a weekday with "in the afternoon" is still a weekday
+        #expect(PhraseDateHint.date(for: "Friday in the afternoon", anchor: anchor) == LocalDate("2026-10-02"))
+        #expect(PhraseDateHint.date(for: "в пятницу вечером", anchor: anchor) == LocalDate("2026-10-02"))
+    }
+
+    @Test func tomorrowAfterSomethingIsStillTomorrow() {
+        #expect(PhraseDateHint.date(for: "tomorrow after lunch", anchor: anchor) == LocalDate("2026-09-29"))
+        #expect(PhraseDateHint.date(for: "remind me tomorrow after work", anchor: anchor) == LocalDate("2026-09-29"))
+        #expect(PhraseDateHint.date(for: "завтра после работы", anchor: anchor) == LocalDate("2026-09-29"))
+        #expect(PhraseDateHint.date(for: "the day after tomorrow", anchor: anchor) == LocalDate("2026-09-30"))
+        #expect(PhraseDateHint.date(for: "after tomorrow", anchor: anchor) == LocalDate("2026-09-30"))
+        #expect(PhraseDateHint.date(for: "после завтра", anchor: anchor) == LocalDate("2026-09-30")) // "послезавтра" split by the recognizer
+        // the late-night guard reads the same words
+        #expect(PhraseDateHint.daysAhead(words: SearchText.tokens("tomorrow after work")) == 1)
+        #expect(PhraseDateHint.daysAhead(words: SearchText.tokens("day after tomorrow")) == 2)
+    }
+
+    @Test func hugeSpokenAmountsDoNotTrap() {
+        for phrase in ["через 9223372036854775807 дней", "через 99999999999999999999 часов", "in 9223372036854775807 weeks", "через 100000 месяцев", "in 50000 years"] {
+            _ = PhraseDateHint.date(for: phrase, anchor: anchor)
+        }
+        #expect(PhraseDateHint.date(for: "через 9223372036854775807 дней", anchor: anchor).map { LocalDate($0.description) } != nil)
     }
 
     @Test func hoursAcrossMidnightMoveTheDate() {

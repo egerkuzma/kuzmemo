@@ -41,6 +41,29 @@ struct LocalDateTests {
         #expect(LocalDate("2026-03-01")?.adding(days: -1) == LocalDate("2026-02-28"))
     }
 
+    /// A number from a model or a transcript must never make a date that cannot be written down (a five-digit year) or an
+    /// overflow: out-of-range days saturate at the first and the last day that can be stored.
+    @Test func daysOutOfRangeSaturate() {
+        #expect(LocalDate(epochDay: Int.max) == LocalDate.latest)
+        #expect(LocalDate(epochDay: Int.min) == LocalDate.earliest)
+        let today = LocalDate("2026-09-28")!
+        #expect(today.adding(days: Int.max) == LocalDate.latest)
+        #expect(today.adding(days: Int.min) == LocalDate.earliest)
+        #expect(today.adding(days: 3_000_000) == LocalDate.latest)
+        #expect(LocalDate(LocalDate.latest.description) == LocalDate.latest) // what is saturated can be read back
+        #expect(LocalDate(LocalDate.earliest.description) == LocalDate.earliest)
+        #expect(today.adding(months: Int.max).year <= 9999)
+        #expect(today.adding(months: Int.min).year >= 1)
+    }
+
+    @Test func minutesOutOfRangeSaturate() {
+        let now = LocalDateTime(date: LocalDate("2026-09-28")!, time: LocalTime("14:30")!)
+        #expect(now.adding(minutes: Int.max).date == LocalDate.latest)
+        #expect(now.adding(minutes: Int.min).date == LocalDate.earliest)
+        #expect(LocalDateTime(epochMinutes: Int.max).time.minutesSinceMidnight < 1440)
+        #expect(LocalDateTime(epochMinutes: Int.min).time.minutesSinceMidnight >= 0)
+    }
+
     @Test func addingMonthsClampsTheDay() {
         #expect(LocalDate("2026-01-31")?.adding(months: 1) == LocalDate("2026-02-28"))
         #expect(LocalDate("2028-01-31")?.adding(months: 1) == LocalDate("2028-02-29"))
