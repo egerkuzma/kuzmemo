@@ -14,7 +14,7 @@ final class FakeClaude: @unchecked Sendable {
 
     var recordDir: URL { dir.appendingPathComponent("rec") }
 
-    init(body: String, flags: [String] = FakeClaude.allFlags, auth: String = "echo '{\"loggedIn\":true}'") throws {
+    init(body: String, flags: [String] = FakeClaude.allFlags, auth: String = "echo '{\"loggedIn\":true}'", helpPrelude: String = "") throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("fake-claude-\(UUID().uuidString)")
         dir = root
         try FileManager.default.createDirectory(at: root.appendingPathComponent("rec"), withIntermediateDirectories: true)
@@ -25,6 +25,7 @@ final class FakeClaude: @unchecked Sendable {
         REC="$FAKE_DIR"
         if [ "$1" = "--help" ]; then
         echo x >> "$REC/help-count.txt"
+        \#(helpPrelude)
         cat <<'HELP'
         Usage: claude [options] [prompt]
         \#(help)
@@ -170,16 +171,42 @@ struct ClaudeProviderTests {
     }
 
     @Test func missingRequiredFlagsAreReportedAndOptionalOnesSkipped() async throws {
-        let old = try FakeClaude(body: FakeClaude.okBody, flags: ["-p, --print", "--output-format", "--system-prompt", "--model"])
+        let isolation = ["--safe-mode", "--tools"]
+        let old = try FakeClaude(body: FakeClaude.okBody, flags: ["-p, --print", "--output-format", "--system-prompt", "--model"] + isolation)
         await #expect(throws: LLMError.unsupportedCLI(missing: ["--json-schema"])) { try await old.provider().complete(request()) }
 
         let minimal = try FakeClaude(
-            body: FakeClaude.okBody, flags: ["-p, --print", "--output-format", "--json-schema", "--system-prompt", "--model"]
+            body: FakeClaude.okBody, flags: ["-p, --print", "--output-format", "--json-schema", "--system-prompt", "--model"] + isolation
         )
         _ = try await minimal.provider().complete(request())
         let args = minimal.arguments()
-        #expect(!args.contains("--safe-mode") && !args.contains("--tools") && !args.contains("--effort"))
+        #expect(args.contains("--safe-mode") && args.contains("--tools"))
+        #expect(!args.contains("--effort") && !args.contains("--no-session-persistence") && !args.contains("--strict-mcp-config"))
         #expect(args.contains("--json-schema"))
+    }
+
+    /// The model reads text that others control, so it never runs without the flags that take its tools and the user's
+    /// customizations away: a CLI that stops listing one is refused (the phrase waits) rather than called without it.
+    @Test func aCLIWithoutItsIsolationFlagsIsRefusedNotRunWithoutThem() async throws {
+        for dropped in ["--safe-mode", "--tools"] {
+            let fake = try FakeClaude(body: FakeClaude.okBody, flags: FakeClaude.allFlags.filter { $0 != dropped })
+            await #expect(throws: LLMError.unsupportedCLI(missing: [dropped])) { try await fake.provider().complete(request()) }
+            #expect(fake.read("args.bin").isEmpty, "the CLI was started without \(dropped)")
+        }
+        #expect(!LLMError.unsupportedCLI(missing: ["--tools"]).isTransient)
+    }
+
+    /// A probe that failed (it was slow, crashed, printed nothing) must not be remembered: it used to leave the app with empty
+    /// capabilities, so every later phrase failed with a non-transient error until the app restarted.
+    @Test func aFailedHelpProbeIsNotRemembered() async throws {
+        let fake = try FakeClaude(body: FakeClaude.okBody, helpPrelude: #"if [ ! -f "$REC/probed" ]; then touch "$REC/probed"; echo "starting up" >&2; exit 7; fi"#)
+        let provider = fake.provider()
+        await #expect(throws: LLMError.processFailed(exitCode: 7, stderr: "starting up\n")) { try await provider.complete(request()) }
+        _ = try await provider.complete(request()) // the probe is repeated, and this time it works
+        #expect(fake.read("help-count.txt").split(separator: "\n").count == 2)
+        _ = try await provider.complete(request())
+        #expect(fake.read("help-count.txt").split(separator: "\n").count == 2) // and now it is remembered
+        #expect(LLMError.processFailed(exitCode: 7, stderr: "").isTransient)
     }
 
     @Test func haikuNeverGetsAnEffortFlag() async throws {
@@ -225,6 +252,25 @@ struct ClaudeProviderTests {
         let response = try await fake.provider().complete(request(timeout: 60, message: big))
         #expect(response.structuredJSON.utf8.count > 1_400_000)
         #expect(response.structuredJSON.contains("\"bytes\":3000000"))
+    }
+
+    /// A child that exits at once with output used to lose it: the termination handler waited for the readers before they
+    /// had been started, so it saw an empty group and answered with whatever had arrived (nothing). Each run must also give
+    /// its pipes back.
+    @Test func quickChildrenKeepTheirOutputAndLeaveNoDescriptorsBehind() async throws {
+        func openDescriptors() -> Int { (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? 0 }
+        for _ in 0 ..< 5 { _ = try await ProcessRunner.run(executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["warm-up"], stdin: nil, environment: [:], workingDirectory: nil, timeout: 10) }
+        let before = openDescriptors()
+        for index in 0 ..< 150 {
+            let result = try await ProcessRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo out-\(index); echo err-\(index) >&2"],
+                stdin: nil, environment: [:], workingDirectory: nil, timeout: 10
+            )
+            #expect(String(decoding: result.stdout, as: UTF8.self) == "out-\(index)\n", "run \(index) lost its output")
+            #expect(String(decoding: result.stderr, as: UTF8.self) == "err-\(index)\n", "run \(index) lost its error text")
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(openDescriptors() <= before + 4, "descriptors grew from \(before) to \(openDescriptors())")
     }
 
     @Test func capabilitiesAreProbedOncePerExecutable() async throws {

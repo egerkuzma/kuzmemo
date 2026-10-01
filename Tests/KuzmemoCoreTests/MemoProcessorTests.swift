@@ -81,6 +81,69 @@ struct MemoProcessorTests {
         #expect(provider.callCount == 1)
     }
 
+    /// Two triggers for one memo (the Retry button and the timer, a double click) used to pass the "not in flight" check while
+    /// the first was still reading the memo, and the phrase was interpreted and applied twice.
+    @Test func severalSimultaneousRetriesApplyThePhraseOnce() async throws {
+        let store = try makeStore()
+        let provider = GatedProvider(ScriptedProvider([.json(createAnswer), .json(createAnswer), .json(createAnswer), .json(createAnswer)]))
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        try await store.save(memo: Memo(id: "failed", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                                        status: .failed, transcriptRaw: "напомни мне послезавтра сказать Дмитрию", nextRetryAt: 1))
+        let tries = (0 ..< 4).map { _ in Task { await processor.retry(memoID: "failed") } }
+        while provider.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(100)) // time for the others to pass a check, if it let them
+        await provider.gate.open()
+        var results: [ProcessOutcome?] = []
+        for attempt in tries { results.append(await attempt.value) }
+        #expect(results.compactMap { $0 }.count == 1, "only one retry may run")
+        #expect(provider.callCount == 1)
+        #expect(try await store.items(on: LocalDate("2026-09-30")!).count == 1)
+    }
+
+    @Test func aDoubleClickOnSaveAsANoteMakesOneNote() async throws {
+        let (processor, store, _) = try processor([.json(ParserResponseTests.clarify)])
+        let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
+        async let first = processor.keepAsNote(memoID: asked.memo.id)
+        async let second = processor.keepAsNote(memoID: asked.memo.id)
+        let outcomes = await [first, second].compactMap { $0 }
+        #expect(outcomes.count == 1)
+        #expect(try await store.inbox().count == 1)
+        #expect(await processor.keepAsNote(memoID: asked.memo.id) == nil) // and a later click finds the note already made
+        #expect(try await store.inbox().count == 1)
+    }
+
+    /// Recovery reads the list of unfinished memos once and then works through it, and a model call takes seconds. A memo
+    /// that a live call has finished by its turn must be left alone; the stale copy used to be run again and applied twice.
+    @Test func recoveryLooksAtEachMemoAsItIsWhenItsTurnComes() async throws {
+        let store = try makeStore()
+        let provider = GatedProvider(ScriptedProvider([.json(createAnswer), .json(createAnswer)]))
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        func memo(_ id: String, at: Int64) -> Memo {
+            Memo(id: id, createdAt: at, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                 status: .transcribed, transcriptRaw: "напомни мне послезавтра сказать Дмитрию")
+        }
+        try await store.save(memo: memo("first", at: 1))
+        try await store.save(memo: memo("second", at: 2))
+        let recovery = Task { await processor.recoverUnfinished() }
+        while provider.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        // while the first is being interpreted, something else finishes the second
+        var finished = memo("second", at: 2)
+        finished.status = .applied
+        try await store.save(memo: finished)
+        await provider.gate.open()
+        let outcomes = await recovery.value
+        #expect(outcomes.map(\.memo.id) == ["first"])
+        #expect(provider.callCount == 1)
+        #expect(try await store.memo(id: "second")?.status == .applied)
+        #expect(try await store.items(on: LocalDate("2026-09-30")!).count == 1)
+    }
+
     @Test func anAnswerIsReadWithTheQuestionFromTheMomentItWasAsked() async throws {
         let clarify = ParserResponseTests.clarify
         let (processor, store, provider) = try processor([.json(clarify), .json(createAnswer)], now: "2026-09-28 14:30")

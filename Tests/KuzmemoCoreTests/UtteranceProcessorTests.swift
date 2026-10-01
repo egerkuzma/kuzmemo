@@ -125,6 +125,61 @@ struct UtteranceProcessorTests {
         #expect(memo.status == .answered && memo.llmModel == "local-router" && memo.transcriptRaw == "Скажи, что на сегодня")
     }
 
+    /// The transcript is written before the recording is deleted. When the write fails, the recording must survive and the
+    /// memo must stay where recovery finds it; the old order deleted the audio first, so a failed write lost the phrase.
+    @Test func aTranscriptThatCannotBeStoredDoesNotCostTheRecording() async throws {
+        let r = try rig(stt: ScriptedTranscriber([.reply("напомни мне послезавтра сказать Дмитрию про доступ в Нотион"), .reply("напомни мне послезавтра сказать Дмитрию про доступ в Нотион")]))
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        // the store refuses to record a transcript, as a full disk would
+        try await r.store.writer.write { db in
+            try db.execute(sql: "CREATE TRIGGER refuse_transcripts BEFORE UPDATE ON memos WHEN NEW.status = 'transcribed' BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+        }
+        let result = await r.utterances.process(Utterance(samples: recording()))
+        guard case let .recognitionFailed(message, needsUser, retryAt) = result.kind else { Issue.record("expected a failure: \(result.kind)"); return }
+        #expect(message.contains("could not be stored") && !needsUser && retryAt != nil)
+        #expect(r.spool.files().count == 1, "the recording must still be there")
+        let waiting = try #require(try await r.store.memo(id: result.memoID))
+        #expect(waiting.status == .transcribing && waiting.audioPath != nil && waiting.transcriptRaw == nil)
+
+        // the store works again: recovery recognises the kept recording and the phrase goes through
+        try await r.store.writer.write { db in try db.execute(sql: "DROP TRIGGER refuse_transcripts") }
+        let recovered = await r.utterances.recoverUnfinished(includeBlocked: false)
+        #expect(recovered.count == 1)
+        guard case let .processed(outcome)? = recovered.first?.kind, case .applied = outcome.kind else { Issue.record("expected the phrase to be applied: \(String(describing: recovered.first?.kind))"); return }
+        #expect(r.spool.files().isEmpty)
+    }
+
+    /// The list of unfinished recordings is read once, and recognising one takes a while. A recording that something else has
+    /// finished by its turn must be left alone: the stale copy used to be saved as "the recording is missing" over the
+    /// finished memo and wiped its transcript.
+    @Test func recoveryLeavesAMemoThatWasFinishedMeanwhile() async throws {
+        let stt = BlockingTranscriber()
+        let r = try rig(stt: stt, claude: [.json(ParserResponseTests.create), .json(ParserResponseTests.create)])
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        func memo(_ id: String, at: Int64, path: String?) -> Memo {
+            Memo(id: id, createdAt: at, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                 status: .recorded, audioPath: path)
+        }
+        let firstPath = try r.spool.write(recording(), name: "first")
+        let secondPath = try r.spool.write(recording(), name: "second")
+        try await r.store.save(memo: memo("first", at: 1, path: firstPath))
+        try await r.store.save(memo: memo("second", at: 2, path: secondPath))
+
+        let recovery = Task { await r.utterances.recoverUnfinished(includeBlocked: false) }
+        while stt.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        // while the first is being recognised, the second is finished by someone else and its recording is deleted
+        var finished = memo("second", at: 2, path: nil)
+        finished.status = .applied
+        finished.transcriptRaw = "напомни позвонить"
+        try await r.store.save(memo: finished)
+        r.spool.remove(path: secondPath)
+        await stt.gate.open()
+        _ = await recovery.value
+
+        let kept = try #require(try await r.store.memo(id: "second"))
+        #expect(kept.status == .applied && kept.transcriptRaw == "напомни позвонить", "the finished memo was overwritten: \(kept.status) \(kept.failReason ?? "")")
+    }
+
     @Test func silenceIsDiscardedAndNeverReachesTheEngine() async throws {
         let stt = ScriptedTranscriber([.reply("Продолжение следует...")])
         let r = try rig(stt: stt, claude: [])

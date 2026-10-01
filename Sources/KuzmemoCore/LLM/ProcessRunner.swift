@@ -70,7 +70,13 @@ enum ProcessRunner {
         func start(stdin: Data?, timeout: TimeInterval) async throws -> ProcessResult {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ProcessResult, any Error>) in
                 let readers = DispatchGroup()
+                // Both readers are counted before the child can start, so the termination handler of a child that exits at
+                // once still waits for them (it used to see an empty group and answer with an empty output).
+                readers.enter()
+                readers.enter()
                 process.terminationHandler = { [self] finished in
+                    // The process holds this handler and the job holds the process: let go of it, or neither is ever freed.
+                    process.terminationHandler = nil
                     // Give the readers a moment to reach EOF; a stray grandchild holding a pipe must not hang us.
                     DispatchQueue.global().async { [self] in
                         _ = readers.wait(timeout: .now() + 0.5)
@@ -93,6 +99,12 @@ enum ProcessRunner {
                 do {
                     try process.run()
                 } catch {
+                    process.terminationHandler = nil
+                    readers.leave()
+                    readers.leave()
+                    for handle in [inPipe.fileHandleForReading, inPipe.fileHandleForWriting, outPipe.fileHandleForReading, errPipe.fileHandleForReading] {
+                        try? handle.close()
+                    }
                     lock.lock(); resumed = true; lock.unlock()
                     continuation.resume(throwing: error)
                     return
@@ -100,13 +112,13 @@ enum ProcessRunner {
                 _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
 
                 for (handle, buffer) in [(outPipe.fileHandleForReading, out), (errPipe.fileHandleForReading, err)] {
-                    readers.enter()
                     DispatchQueue.global().async {
                         while true {
                             let chunk = handle.availableData
                             if chunk.isEmpty { break }
                             buffer.append(chunk)
                         }
+                        try? handle.close() // the only thread that uses this end gives it back
                         readers.leave()
                     }
                 }

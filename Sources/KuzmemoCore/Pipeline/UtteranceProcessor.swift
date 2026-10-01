@@ -114,17 +114,20 @@ public actor UtteranceProcessor {
     ) async -> [UtteranceResult] {
         guard let memos = try? await store.unfinishedMemos() else { return [] }
         var results: [UtteranceResult] = []
-        var keep = Set<String>()
-        for memo in memos {
-            guard let path = memo.audioPath else { continue }
-            guard !inFlight.contains(memo.id) else { keep.insert(path); continue }
+        for listed in memos where listed.audioPath != nil {
+            guard inFlight.insert(listed.id).inserted else { continue }
+            defer { inFlight.remove(listed.id) }
+            // The list was read before the loop began, and recognising a recording takes a while: by the time a memo's turn
+            // comes, a live call may have finished it. The memo as it is now decides (the stale copy once overwrote a
+            // finished memo with "the recording is missing" and wiped its transcript).
+            guard let memo = try? await store.memo(id: listed.id), let path = memo.audioPath else { continue }
             let due: Bool
             switch memo.status {
             case .recorded, .transcribing: due = true
             case .failed where memo.failStage == "stt": due = memo.nextRetryAt.map { $0 <= nowMs } ?? includeBlocked
             default: due = false
             }
-            guard due else { keep.insert(path); continue }
+            guard due else { continue }
             guard let samples = try? spool.read(path: path) else {
                 var lost = memo
                 lost.status = .discarded
@@ -133,14 +136,14 @@ public actor UtteranceProcessor {
                 try? await store.save(memo: lost)
                 continue
             }
-            keep.insert(path)
-            inFlight.insert(memo.id)
             results.append(await transcribe(memo, samples: samples, onStage: onStage))
-            inFlight.remove(memo.id)
         }
         // Leftovers of finished memos. Files younger than a few minutes may belong to a recording whose memo is
-        // still being saved, so they are left alone.
-        for path in spool.files(olderThan: 600) where !keep.contains(path) { spool.remove(path: path) }
+        // still being saved, so they are left alone; what still belongs to a memo is read again here, not taken from the
+        // list above (which is old by now), and nothing is swept when it cannot be read.
+        guard let current = try? await store.unfinishedMemos() else { return results }
+        let wanted = Set(current.compactMap(\.audioPath))
+        for path in spool.files(olderThan: 600) where !wanted.contains(path) { spool.remove(path: path) }
         return results
     }
 
@@ -148,10 +151,10 @@ public actor UtteranceProcessor {
     public func retry(
         memoID: String, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
     ) async -> UtteranceResult? {
-        guard !inFlight.contains(memoID), let memo = try? await store.memo(id: memoID), memo.status == .failed || memo.status == .recorded,
-              let path = memo.audioPath, let samples = try? spool.read(path: path) else { return nil }
-        inFlight.insert(memoID)
+        guard inFlight.insert(memoID).inserted else { return nil } // claimed before the first await
         defer { inFlight.remove(memoID) }
+        guard let memo = try? await store.memo(id: memoID), memo.status == .failed || memo.status == .recorded,
+              let path = memo.audioPath, let samples = try? spool.read(path: path) else { return nil }
         return await transcribe(memo, samples: samples, onStage: onStage)
     }
 
@@ -192,9 +195,21 @@ public actor UtteranceProcessor {
             memo.failReason = nil
             memo.nextRetryAt = nil
             memo.status = .transcribed
-            spool.remove(path: memo.audioPath)
+            // The transcript is stored first and the recording deleted only once that has worked: a failed write (a full
+            // disk, a lock that timed out) used to leave a memo without its text and without its audio, and recovery then
+            // discarded the phrase. Now the recording stays, the memo stays "transcribing", and recovery recognises it again.
+            let recording = memo.audioPath
             memo.audioPath = nil
-            try? await store.save(memo: memo)
+            do {
+                try await store.save(memo: memo)
+            } catch {
+                let delay = retryPolicy.delay(afterAttempts: memo.attempts + 1) ?? 30
+                return UtteranceResult(
+                    kind: .recognitionFailed("the transcript could not be stored: \(error)", needsUser: false, retryAt: clock.now().addingTimeInterval(delay)),
+                    memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
+                )
+            }
+            spool.remove(path: recording)
 
             if let asker = memo.parentMemoID { await processor.supersede(asker) } // the answer carries the phrase on
             onStage(.interpreting(output.text))

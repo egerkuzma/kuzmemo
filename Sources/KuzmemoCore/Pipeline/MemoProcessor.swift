@@ -112,7 +112,10 @@ public actor MemoProcessor {
 
     /// Saves the words that started a conversation as a note without a date, for when a question got no answer.
     public func keepAsNote(memoID: String) async -> ProcessOutcome? {
-        guard var memo = try? await store.memo(id: memoID) else { return nil }
+        // Claimed before the first await: a double click on "Save as a note" must make one note, not two.
+        guard inFlight.insert(memoID).inserted else { return nil }
+        defer { inFlight.remove(memoID) }
+        guard var memo = try? await store.memo(id: memoID), memo.status != .applied, memo.opID == nil else { return nil }
         let words = await chainTranscripts(endingAt: memo).first ?? memo.transcriptRaw
         guard let text = words?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         let title = text.count <= 80 ? text : String(text.prefix(77)) + "…"
@@ -196,14 +199,24 @@ public actor MemoProcessor {
 
     /// Runs a saved memo again (manual "Retry" or the automatic retry).
     public func retry(memoID: String) async -> ProcessOutcome? {
-        guard !inFlight.contains(memoID), let memo = try? await store.memo(id: memoID) else { return nil }
+        // The memo is claimed before the first await. Checking and claiming apart let two triggers (the button and the
+        // timer) both pass the check while the first one was still reading the memo, and the phrase was applied twice.
+        guard inFlight.insert(memoID).inserted else { return nil }
+        guard let memo = try? await store.memo(id: memoID), !Self.finalStatuses.contains(memo.status) else {
+            inFlight.remove(memoID)
+            return nil
+        }
         return await process(memo)
     }
 
     /// The person corrected the words of a failed memo (the Inbox card): replace the text and interpret it again.
     public func editAndRetry(memoID: String, text: String) async -> ProcessOutcome? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !inFlight.contains(memoID), var memo = try? await store.memo(id: memoID) else { return nil }
+        guard !trimmed.isEmpty, inFlight.insert(memoID).inserted else { return nil }
+        guard var memo = try? await store.memo(id: memoID) else {
+            inFlight.remove(memoID)
+            return nil
+        }
         memo.transcriptRaw = trimmed
         memo.transcriptCorrected = nil
         memo.status = .transcribed
@@ -219,18 +232,29 @@ public actor MemoProcessor {
     public func recoverUnfinished() async -> [ProcessOutcome] {
         guard let memos = try? await store.unfinishedMemos() else { return [] }
         var outcomes: [ProcessOutcome] = []
-        for memo in memos where memo.transcriptRaw != nil && !inFlight.contains(memo.id) {
+        for listed in memos where listed.transcriptRaw != nil {
+            guard inFlight.insert(listed.id).inserted else { continue }
+            // The list was read before the loop began and a model call takes seconds: by the time a memo's turn comes, a
+            // live call may have finished it (or the person undone it). Look at the memo as it is now, and never run one
+            // that has reached a final state.
+            guard let memo = try? await store.memo(id: listed.id), memo.transcriptRaw != nil else {
+                inFlight.remove(listed.id)
+                continue
+            }
             switch memo.status {
             case .transcribed, .thinking, .interpreted:
                 outcomes.append(await process(memo))
-            case .failed:
-                if let due = memo.nextRetryAt, due <= nowMs { outcomes.append(await process(memo)) }
+            case .failed where memo.nextRetryAt.map({ $0 <= nowMs }) == true:
+                outcomes.append(await process(memo))
             default:
-                continue
+                inFlight.remove(listed.id)
             }
         }
         return outcomes
     }
+
+    /// States a memo does not leave: what became of it is final, and running it again would repeat (or undo) that.
+    static let finalStatuses: Set<MemoStatus> = [.applied, .answered, .discarded, .superseded]
 
     // MARK: - Processing
 

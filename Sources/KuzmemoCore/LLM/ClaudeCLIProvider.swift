@@ -182,21 +182,31 @@ public actor ClaudeCLIProvider: LLMProvider {
             executable: executable, arguments: ["--help"], stdin: nil, environment: environment(),
             workingDirectory: configuration.workingDirectory, timeout: 15
         )
+        // A probe that failed says nothing about the CLI, and remembering it would shut the app out until it restarts: a cold
+        // start after a silent update, or a wake from sleep, can make `--help` slow. These errors are transient (the memo is
+        // tried again); the answer is remembered only when the CLI really described itself.
+        if result.timedOut { throw LLMError.timedOut(seconds: 15) }
+        if result.exitCode != 0 || result.killedBySignal {
+            throw LLMError.processFailed(exitCode: result.exitCode, stderr: Self.tail(result.stderr))
+        }
         let capabilities = ClaudeCapabilities(helpText: String(decoding: result.stdout + result.stderr, as: UTF8.self))
+        guard !capabilities.flags.isEmpty else { throw LLMError.invalidEnvelope("`claude --help` listed no options") }
         capabilityCache[key] = capabilities
         return capabilities
     }
 
     /// The argument list, built only from flags the installed CLI supports. The prompt travels on stdin.
     static func arguments(for request: LLMRequest, capabilities: ClaudeCapabilities) throws -> [String] {
-        let required = ["--output-format", "--json-schema", "--system-prompt", "--model"]
+        // The model reads text the person (or a title in the calendar) controls, so it runs with no tools and without the
+        // user's customizations. If a CLI update renames either flag, the call is refused and the phrase waits: dropping the
+        // flag would leave the model with the default tools, hooks and MCP servers.
+        let required = ["--output-format", "--json-schema", "--system-prompt", "--model", "--safe-mode", "--tools"]
         let missing = required.filter { !capabilities.supports($0) }
         guard missing.isEmpty else { throw LLMError.unsupportedCLI(missing: missing) }
 
-        var args = ["-p", "--output-format", "json"]
-        if capabilities.supports("--safe-mode") { args.append("--safe-mode") }
+        var args = ["-p", "--output-format", "json", "--safe-mode"]
         if capabilities.supports("--no-session-persistence") { args.append("--no-session-persistence") }
-        if capabilities.supports("--tools") { args += ["--tools", ""] }
+        args += ["--tools", ""]
         if capabilities.supports("--strict-mcp-config") { args.append("--strict-mcp-config") }
         args += ["--model", request.model]
         if let effort = request.effort, capabilities.supports("--effort"), !request.model.lowercased().contains("haiku") {
