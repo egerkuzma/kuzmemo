@@ -80,27 +80,45 @@ struct WAVStreamSplitterTests {
         var splitter = WAVStreamSplitter()
         var segments = splitter.feed(Data("warming up…\n".utf8) + header() + samples(300, seed: 7) + header().prefix(30))
         segments += splitter.finish()
-        // the cut-off header ends the line before it (which stays whole) and is itself dropped, as a line with no audio
+        // the cut-off header ends the line before it (which stays whole); it is not a complete header, so it is no line
         #expect(segments.count == 1 && segments[0].pcm.count == 600)
         var empty = WAVStreamSplitter()
         #expect(empty.feed(Data()).isEmpty && empty.finish().isEmpty)
     }
 
-    @Test func aStreamThatIsNotMonoSixteenBitIsNotPlayed() {
+    /// Nothing is played from a stream that is not mono 16-bit, but the line keeps its place as an empty segment.
+    @Test func aStreamThatIsNotMonoSixteenBitIsNotPlayedButKeepsItsPlace() {
         var splitter = WAVStreamSplitter()
         var segments = splitter.feed(header(channels: 2) + samples(300, seed: 8))
         segments += splitter.finish()
-        #expect(segments.isEmpty)
+        #expect(segments.count == 1 && segments[0].pcm.isEmpty)
         var other = WAVStreamSplitter()
         var eight = other.feed(header(bits: 8) + samples(300, seed: 8))
         eight += other.finish()
-        #expect(eight.isEmpty)
+        #expect(eight.count == 1 && eight[0].pcm.isEmpty)
     }
 
-    @Test func anEmptyLineProducesNoSegment() {
+    /// Whoever pairs the segments with the sentences by position needs the k-th segment to be the k-th line: a line that made
+    /// no sound used to be dropped, which moved every later sentence under the sound of the one before it.
+    @Test func aLineThatMadeNoSoundKeepsItsPlace() {
         var splitter = WAVStreamSplitter()
-        var segments = splitter.feed(header() + header() + samples(100, seed: 1))
+        var segments = splitter.feed(header() + samples(100, seed: 1) + header() + header() + samples(50, seed: 2) + header())
         segments += splitter.finish()
-        #expect(segments.count == 1 && segments[0].pcm.count == 200)
+        #expect(segments.map(\.pcm.count) == [200, 0, 100, 0]) // the last header is a line that has no samples yet
+        #expect(segments[1].pcm.isEmpty && segments[1].seconds == 0)
+        // whatever the chunking, the places are the same
+        let all = header() + samples(10, seed: 1) + header() + header(channels: 2) + samples(10, seed: 3) + header() + samples(5, seed: 4)
+        for size in [1, 5, 44, all.count] {
+            var chunked = WAVStreamSplitter()
+            var got: [SpokenSegment] = []
+            var index = 0
+            while index < all.count {
+                let end = min(index + size, all.count)
+                got += chunked.feed(all[index ..< end])
+                index = end
+            }
+            got += chunked.finish()
+            #expect(got.map(\.pcm.count) == [20, 0, 0, 10], "chunk size \(size)")
+        }
     }
 }

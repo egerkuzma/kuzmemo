@@ -26,6 +26,32 @@ struct OmniVoiceRunnerTests {
         """#
     }
 
+    /// A stand-in whose behaviour per line comes from `plan`: "whole" (a header and samples), "empty" (a header and nothing)
+    /// or "cut" (a header, half the samples, and the program is killed). After the last line it exits with 0, or with
+    /// `then` ("none": it runs on).
+    private static func scripted(_ plan: [String], extra: Int = 0) -> String {
+        let steps = plan.map { "\"\($0)\"" }.joined(separator: ", ")
+        return #"""
+        #!/usr/bin/env python3
+        import os, signal, struct, sys, time
+        here = os.path.dirname(os.path.abspath(__file__))
+        open(os.path.join(here, "pid.txt"), "w").write(str(os.getpid()))
+        def header():
+            return b"RIFF" + struct.pack("<I", 0x7FFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16) + b"data" + struct.pack("<I", 0x7FFFFFFF)
+        plan = [\#(steps)]
+        lines = [l for l in sys.stdin.buffer]
+        out = sys.stdout.buffer
+        for index in range(max(len(lines), len(plan)) + \#(extra)):
+            step = plan[index] if index < len(plan) else "whole"
+            out.write(header()); out.flush()
+            if step == "whole":
+                out.write(bytes([index + 1]) * 4000); out.flush()
+            elif step == "cut":
+                out.write(bytes([index + 1]) * 2000); out.flush()
+                os.kill(os.getpid(), signal.SIGKILL)
+        """#
+    }
+
     private static let failing = "#!/bin/sh\ncat > /dev/null\nexit 3\n"
     private static let silent = "#!/bin/sh\ncat > /dev/null\nexit 0\n"
     private static let hanging = "#!/bin/sh\nexec sleep 60\n"
@@ -102,6 +128,87 @@ struct OmniVoiceRunnerTests {
         let (silent, silentRoot) = try install(Self.silent)
         defer { try? FileManager.default.removeItem(at: silentRoot) }
         await #expect(throws: OmniVoiceError.producedNoAudio) { try await collect(OmniVoiceRunner(locator: silent).speak(["Привет."])) }
+    }
+
+    /// Everything the stream yields, and how it ended.
+    private func collectAll(_ stream: AsyncThrowingStream<SpokenSegment, any Error>) async -> (segments: [SpokenSegment], error: (any Error)?) {
+        var segments: [SpokenSegment] = []
+        do {
+            for try await segment in stream { segments.append(segment) }
+            return (segments, nil)
+        } catch {
+            return (segments, error)
+        }
+    }
+
+    /// An engine that dies in the middle of a sentence leaves the start of it in the stream. That stump is not a sentence:
+    /// it must not be played as if it were whole, and it must not be kept in the cache as that sentence.
+    @Test func aSentenceCutOffByACrashIsNotHandedOut() async throws {
+        let (locator, root) = try install(Self.scripted(["whole", "cut"]))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (segments, error) = await collectAll(OmniVoiceRunner(locator: locator).speak(["Раз.", "Два.", "Три."]))
+        #expect(segments.map(\.pcm.count) == [4000], "only the sentence that was whole may come out: \(segments.map(\.pcm.count))")
+        #expect(error as? OmniVoiceError == .failed(status: 9))
+    }
+
+    /// A line that made no sound keeps its place, so that sentences are never paired with the sound of their neighbour.
+    @Test func aSentenceThatMadeNoSoundKeepsItsPlace() async throws {
+        let (locator, root) = try install(Self.scripted(["whole", "empty", "whole"]))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (segments, error) = await collectAll(OmniVoiceRunner(locator: locator).speak(["Раз.", "Два.", "Три."]))
+        #expect(error == nil)
+        #expect(segments.map(\.pcm.count) == [4000, 0, 4000])
+    }
+
+    /// More segments than sentences must never come out: the app pairs them with its sentences by position.
+    @Test func neverMoreSegmentsThanSentences() async throws {
+        let (locator, root) = try install(Self.scripted(["whole"], extra: 3))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (segments, error) = await collectAll(OmniVoiceRunner(locator: locator).speak(["Раз.", "Два."]))
+        #expect(error == nil && segments.count == 2)
+    }
+
+    @Test func fewerSegmentsThanSentencesIsAnError() async throws {
+        let (locator, root) = try install(#"""
+        #!/usr/bin/env python3
+        import struct, sys
+        sys.stdin.buffer.read()
+        header = b"RIFF" + struct.pack("<I", 0x7FFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16) + b"data" + struct.pack("<I", 0x7FFFFFFF)
+        sys.stdout.buffer.write(header + bytes([5]) * 3000)
+        """#)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (segments, error) = await collectAll(OmniVoiceRunner(locator: locator).speak(["Раз.", "Два.", "Три."]))
+        #expect(segments.count == 1) // the one that was made is played, the rest is for the fallback voice
+        #expect(error as? OmniVoiceError == .producedNoAudio)
+    }
+
+    /// A program stuck in a GPU call may ignore the request to stop; it is then ended, because it is a process of a gigabyte
+    /// or more and a reader thread (or the enrollment) waits for it.
+    @Test func aProgramThatIgnoresTheRequestToStopIsKilled() async throws {
+        let (locator, root) = try install(#"""
+        #!/usr/bin/env python3
+        import os, signal, time
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        here = os.path.dirname(os.path.abspath(__file__))
+        open(os.path.join(here, "pid.txt"), "w").write(str(os.getpid()))
+        time.sleep(120)
+        """#)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try OmniVoiceRunner(locator: locator).begin(idleLimit: 60)
+        var pid: Int32?
+        for _ in 0 ..< 100 where pid == nil {
+            pid = (try? String(contentsOf: root.appendingPathComponent("build/pid.txt"), encoding: .utf8)).flatMap { Int32($0) }
+            if pid == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        let target = try #require(pid)
+        try await Task.sleep(for: .milliseconds(300)) // the script has installed its handler
+        session.cancel()
+        var alive = true
+        for _ in 0 ..< 60 where alive {
+            alive = kill(target, 0) == 0
+            if alive { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        #expect(!alive, "a program that ignores the request to stop was still running six seconds later")
     }
 
     @Test func nothingToSayStartsNothing() async throws {

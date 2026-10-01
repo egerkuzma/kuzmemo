@@ -125,7 +125,9 @@ final class OmniVoiceSpeechOutput {
     func speak(_ text: String) async throws {
         refresh()
         guard status == .ready else {
-            throw OmniVoiceSpeechFailure(underlying: OmniVoiceError.notReady(status), unspoken: OmniVoiceText.lines(for: text))
+            // The fallback voice gets the words as they were written: the lines are spelled out for the neural voice (digits as
+            // words, Latin letters in Cyrillic), which the system voice does not need.
+            throw OmniVoiceSpeechFailure(underlying: OmniVoiceError.notReady(status), unspoken: [text])
         }
         let lines = OmniVoiceText.lines(for: text)
         guard !lines.isEmpty else { return }
@@ -223,9 +225,10 @@ final class OmniVoiceSpeechOutput {
                 prepared = nil
                 var position = 0
                 for try await segment in session.speak(missing.map(\.line)) {
+                    guard position < missing.count else { break } // the runner never gives more than it was asked for
                     let (index, line) = missing[position]
                     position += 1
-                    if useCache, let voice { cache.store(segment, for: line, voice: voice) }
+                    if useCache, let voice, segment.seconds > 0.2 { cache.store(segment, for: line, voice: voice) }
                     readyAt[index] = Date().timeIntervalSince(began)
                     ready[index] = segment
                     try handOver()
@@ -241,17 +244,23 @@ final class OmniVoiceSpeechOutput {
         let madeIn = Date().timeIntervalSince(began)
         if failure == nil { try? handOver() }
 
+        var heard = next
         if let player {
             player.seal()
             // Waits for the last sentence to be heard, but never for longer than it can last.
             await player.waitUntilFinished(timeout: player.remainingSeconds + 5)
             try Task.checkCancellation()
+            if player.cutShort {
+                // The device never reported the end of what was queued (it went away mid-answer): the rest is not heard.
+                failure = failure ?? SegmentPlayer.Problem.noOutput("the sound stopped before the end of the answer")
+                heard = min(heard, player.playedCount)
+            }
         }
         pruneCounter += 1
         if pruneCounter % 20 == 0 { cache.prune() }
 
         if let failure {
-            throw OmniVoiceSpeechFailure(underlying: failure, unspoken: Array(lines[min(next, lines.count)...]))
+            throw OmniVoiceSpeechFailure(underlying: failure, unspoken: Array(lines[min(heard, lines.count)...]))
         }
         return Report(
             lines: lines.count, cachedLines: cached, firstSoundSeconds: firstSound, madeInSeconds: madeIn, audioSeconds: audio,

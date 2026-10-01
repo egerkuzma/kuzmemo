@@ -23,7 +23,13 @@ final class SegmentPlayer {
     private var running = false
     private var pending = 0
     private var sealed = false
+    private var stopped = false
     private var waiter: CheckedContinuation<Void, Never>?
+    /// Segments handed to the player (a sentence that made no sound counts) that have been heard to the end.
+    private(set) var playedCount = 0
+    /// The playback was stopped while sound was still queued: a device that went away mid-answer never reports the end, and
+    /// the watchdog ended the wait. What was not played is for the fallback voice.
+    private(set) var cutShort = false
 
     /// When the audio queued so far would end if nothing more were added (an estimate from the lengths).
     private var endsAt: Date?
@@ -38,13 +44,20 @@ final class SegmentPlayer {
     /// drops the first syllables of what it is sent while it does) is awake when the first sentence arrives, and a Mac with no
     /// output is found out at once, not after the sentences have been made.
     func prepare(sampleRate: Double) throws {
+        guard !stopped else { return }
         if !running { try start(sampleRate: sampleRate) }
     }
 
     func enqueue(_ segment: SpokenSegment) throws {
+        // An answer that was stopped stays stopped: a sentence that arrives late (the loop that makes them is cancelled at
+        // its next await) must not wake the sound output again and be heard after the person interrupted.
+        guard !stopped else { return }
         if !running { try start(sampleRate: Double(segment.sampleRate)) }
         guard let format, format.sampleRate == Double(segment.sampleRate) else { throw Problem.noOutput("unexpected sample rate \(segment.sampleRate)") }
-        guard let buffer = Self.buffer(for: segment, format: format) else { return }
+        guard let buffer = Self.buffer(for: segment, format: format) else {
+            playedCount += 1 // a sentence that made no sound is over at once
+            return
+        }
         let now = Date()
         if firstQueuedAt == nil { firstQueuedAt = now }
         if let endsAt, now > endsAt { silences.append(now.timeIntervalSince(endsAt)) }
@@ -86,6 +99,8 @@ final class SegmentPlayer {
     }
 
     func stop() {
+        if pending > 0 { cutShort = true }
+        stopped = true
         renderer?.cancel()
         renderer = nil
         if running {
@@ -128,6 +143,8 @@ final class SegmentPlayer {
     }
 
     private func played() {
+        guard !stopped else { return } // what a stop cut off is not "heard", whatever the engine reports for it
+        playedCount += 1
         pending = max(0, pending - 1)
         finishIfDone()
     }

@@ -192,26 +192,31 @@ public final class OmniVoiceSession: @unchecked Sendable {
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 var splitter = WAVStreamSplitter()
                 var made = 0
-                while true {
-                    let chunk = output.fileHandleForReading.availableData
-                    if chunk.isEmpty { break }
-                    for segment in splitter.feed(chunk) {
+                // Never more segments than lines: whoever pairs them with the sentences by position must not run past the end.
+                func hand(_ segments: [SpokenSegment]) {
+                    for segment in segments where made < lines.count {
                         made += 1
                         continuation.yield(segment)
                     }
                 }
-                for segment in splitter.finish() {
-                    made += 1
-                    continuation.yield(segment)
+                while true {
+                    let chunk = output.fileHandleForReading.availableData
+                    if chunk.isEmpty { break }
+                    hand(splitter.feed(chunk))
                 }
                 process.waitUntilExit()
                 try? output.fileHandleForReading.close()
+                let failedStatus = process.terminationStatus != 0
+                // The segment that was in progress when the stream ended is whole only if the program ended well. After a crash,
+                // a kill under memory pressure or the timeout it is a sentence cut off in the middle, which must be neither
+                // played as if it were complete nor kept in the cache.
+                if !didTimeOut, !failedStatus { hand(splitter.finish()) }
                 if didTimeOut {
                     continuation.finish(throwing: OmniVoiceError.timedOut)
-                } else if process.terminationStatus != 0 {
+                } else if failedStatus {
                     continuation.finish(throwing: OmniVoiceError.failed(status: process.terminationStatus))
-                } else if made == 0 {
-                    continuation.finish(throwing: OmniVoiceError.producedNoAudio)
+                } else if made < lines.count {
+                    continuation.finish(throwing: OmniVoiceError.producedNoAudio) // some sentence got no sound (none, or too few)
                 } else {
                     continuation.finish()
                 }
@@ -234,8 +239,14 @@ public final class OmniVoiceSession: @unchecked Sendable {
         if !stopped { stopped = true }
         if byTimeout && process.isRunning { timedOut = true }
         let running = process.isRunning
+        let pid = process.processIdentifier
         lock.unlock()
-        if running { process.terminate() }
+        if running {
+            process.terminate()
+            // A program stuck in a GPU call may ignore the request: it is a process of a gigabyte or more, and a reader
+            // thread waits for it. The Silero helper escalates the same way.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [process] in if process.isRunning { kill(pid, SIGKILL) } }
+        }
         if !wasSpoken { // nobody reads the streams of a program that never spoke: close them here
             try? input.fileHandleForWriting.close()
             try? output.fileHandleForReading.close()

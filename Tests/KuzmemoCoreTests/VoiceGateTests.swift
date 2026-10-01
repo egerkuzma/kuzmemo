@@ -54,6 +54,23 @@ struct EnergyGateTests {
         #expect(!gate.analyze(blip).hasSpeech)
     }
 
+    /// An answer to a question is often one short word ("да", "нет"): a quarter of a second of voice. A command that short is
+    /// taken for a cough, an answer is not.
+    @Test func aShortWordIsAnAnswerButNotACommand() async throws {
+        let word = silence(1) + speechLike(0.3) + silence(1)
+        #expect(!EnergyGate().analyze(word).hasSpeech)
+        let engine = FakeTranscriber(reply: "Да")
+        let asCommand = try await Recognizer(transcriber: engine).recognize(word)
+        #expect(asCommand == .noSpeech(reason: "no speech in the recording") && engine.callSizes.isEmpty)
+        let asReply = try await Recognizer(transcriber: engine).recognize(word, isReply: true)
+        guard case let .speech(output) = asReply else { Issue.record("expected the answer to be heard: \(asReply)"); return }
+        #expect(output.text == "Да")
+        // a click is still not an answer, and neither is quiet noise
+        let click = silence(1) + speechLike(0.06) + silence(1)
+        #expect(try await Recognizer(transcriber: FakeTranscriber(reply: "Да")).recognize(click, isReply: true) == .noSpeech(reason: "no speech in the recording"))
+        #expect(try await Recognizer(transcriber: FakeTranscriber(reply: "Да")).recognize(noise(4, amplitude: 0.02), isReply: true) == .noSpeech(reason: "no speech in the recording"))
+    }
+
     @Test func trimmingKeepsPaddingAroundTheSpeech() throws {
         let gate = EnergyGate()
         let recording = silence(2) + speechLike(1.5) + silence(2)
@@ -96,9 +113,18 @@ struct HallucinationFilterTests {
         "Скажи что на сегодня",
         "Позвонить маме",
         "Что у меня завтра?",
+        "Корректор пришлёт правки в среду",
+        "Корректор завтра в десять",
+        "5", "2", "1",
     ])
     func keepsRealCommands(text: String) {
         #expect(HallucinationFilter.clean(text) == text.trimmingCharacters(in: .whitespaces))
+    }
+
+    @Test func creditLinesStillGoWhenTheyAreCreditLines() {
+        for text in ["Корректор", "Корректор А.Егорова", "Корректор А Егорова", "Редактор субтитров А.Семкин", "а", "я", "?"] {
+            #expect(HallucinationFilter.clean(text) == nil, "text '\(text)'")
+        }
     }
 
     @Test func removesSoundTagsButKeepsTheRealText() {

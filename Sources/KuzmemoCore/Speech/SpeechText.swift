@@ -12,6 +12,8 @@ public enum SpeechText {
         result = result.replacingMatches(#"\bт\.\s?е\."#) { _, _ in "то есть" }
         result = result.replacingMatches(#"\bт\.\s?д\."#) { _, _ in "и так далее" }
         result = separateLatinFromDigits(result)
+        result = mergeDigitGroups(result)
+        result = spellNegatives(result) // before the number is spelled: after it, no digit is left for the sign to touch
         result = spellTimes(result)
         result = spellMoneyAndPercent(result)
         result = spellDates(result)
@@ -39,6 +41,20 @@ public enum SpeechText {
     /// letter name do not run together ("кьючетыре").
     static func separateLatinFromDigits(_ text: String) -> String {
         text.replacingMatches(#"(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])"#) { _, _ in " " }
+    }
+
+    /// "10 000" and "1 000 000" (groups of three) are one number. This runs before the money and percent rules, which read
+    /// only the digits next to the symbol: "10 000 ₽" came out as "десять ноль рублей".
+    static func mergeDigitGroups(_ text: String) -> String {
+        text.replacingMatches(#"(?<![\d.,])(\d{1,3}(?:[ \x{00A0}\x{202F}]\d{3})+)(?![\d])"#) { match, source in
+            source.group(1, of: match).filter(\.isNumber)
+        }
+    }
+
+    /// "-5" and "−5" are "минус пять": the sign was left for the voice, which skips it and says "пять". A hyphen that
+    /// follows a letter or a digit ("SU-123", "5-10", "2026-10-02") is not a sign.
+    static func spellNegatives(_ text: String) -> String {
+        text.replacingMatches(#"(?<![\p{L}\d])[-\x{2212}](?=\d)"#) { _, _ in "минус " }
     }
 
     // MARK: - Times: 15:30 → "пятнадцать тридцать" (fifteen thirty), 10:00 → "десять часов" (ten o'clock)
@@ -125,11 +141,8 @@ public enum SpeechText {
     // MARK: - Plain numbers
 
     static func spellNumbers(_ text: String) -> String {
-        // "10 000" and "1 000 000" (groups of three) are one number
-        let grouped = text.replacingMatches(#"(?<![\d.,])(\d{1,3}(?:[ \x{00A0}\x{202F}]\d{3})+)(?![\d])"#) { match, source in
-            source.group(1, of: match).filter(\.isNumber)
-        }
-        return grouped.replacingMatches(#"(?<![\d.,])(\d+)(?:[.,](\d+))?(?![\d])"#) { match, source in
+        // digit groups are merged earlier (`mergeDigitGroups`); a call on its own still gets them merged
+        return mergeDigitGroups(text).replacingMatches(#"(?<![\d.,])(\d+)(?:[.,](\d+))?(?![\d])"#) { match, source in
             let whole = source.group(1, of: match)
             let decimals = source.group(2, of: match)
             guard whole.count <= 12, let value = Int(whole) else { return RussianNumberWords.digitByDigit(whole) }

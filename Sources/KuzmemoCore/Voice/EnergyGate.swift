@@ -18,6 +18,8 @@ public struct EnergyGate: Sendable {
     public var frameSeconds = 0.02
     /// Total voiced time required to call a recording speech.
     public var minSpeechSeconds = 0.5
+    /// The least voiced time that is still an answer to a question ("да", "нет").
+    public static let shortestReplySeconds = 0.2
     /// A frame is voiced when its RMS is above `noiseFloor × ratio` and above `absoluteMin`.
     public var ratio: Float = 4
     public var absoluteMin: Float = 0.008

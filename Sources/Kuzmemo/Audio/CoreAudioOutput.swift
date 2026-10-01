@@ -91,10 +91,16 @@ final class CoreAudioOutput: OutputAudioBackend {
         return nil
     }
 
-    func isStillSilenced(_ token: SilenceToken) -> Bool {
-        guard let device = device(forUID: token.deviceUID) else { return false }
-        if token.usedVolume { return (volume(device) ?? 1) <= 0.001 }
-        return muted(device) == true
+    func isStillSilenced(_ token: SilenceToken) -> Bool { state(of: token) == .silenced }
+
+    func state(of token: SilenceToken) -> SilenceState {
+        guard let device = device(forUID: token.deviceUID) else { return .deviceUnavailable }
+        if token.usedVolume {
+            guard let level = volume(device) else { return .deviceUnavailable }
+            return level <= 0.001 ? .silenced : .changedByPerson
+        }
+        guard let isMuted = muted(device) else { return .deviceUnavailable }
+        return isMuted ? .silenced : .changedByPerson
     }
 
     func restore(_ token: SilenceToken) {

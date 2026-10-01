@@ -81,7 +81,11 @@ public struct OmniVoiceEnrollment: Sendable {
                 return
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if process.isRunning { timedOut.set(); process.terminate() }
+                guard process.isRunning else { return }
+                timedOut.set()
+                process.terminate()
+                // an encoder stuck in a GPU call may ignore the request, and enrolling would wait for it for ever
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
             }
         }
         if timedOut.value { throw OmniVoiceError.timedOut }

@@ -8,6 +8,8 @@ private final class FakeOutput: OutputAudioBackend {
     var muted = false
     var volume: Float = 0.6
     var canBeControlled = true
+    /// A device that has dropped out (a headset that was switched off): nothing about it can be read.
+    var available = true
     private(set) var silenceCalls = 0
     private(set) var restoreCalls = 0
 
@@ -26,6 +28,10 @@ private final class FakeOutput: OutputAudioBackend {
     }
 
     func isStillSilenced(_ token: SilenceToken) -> Bool { token.usedVolume ? volume <= 0.001 : muted }
+
+    func state(of token: SilenceToken) -> SilenceState {
+        available ? (isStillSilenced(token) ? .silenced : .changedByPerson) : .deviceUnavailable
+    }
 
     func restore(_ token: SilenceToken) {
         restoreCalls += 1
@@ -64,6 +70,40 @@ struct OutputMuteTests {
         #expect(!guardian.isSilencing && journal.token == nil)
         guardian.end()
         #expect(output.muted, "their own mute must not be undone")
+    }
+
+    /// A headset that drops out mid-recording may come back still muted. The note of the silence must survive until it can be
+    /// settled, or the mute is later taken for the person's own and never undone.
+    @Test func aDeviceThatWasAwayIsPutRightWhenItIsBack() {
+        let (guardian, output, journal) = make()
+        guardian.begin()
+        output.available = false // the headset dropped out
+        guardian.end()
+        #expect(output.muted && output.restoreCalls == 0 && journal.token != nil, "the note must stay while the device cannot be read")
+        output.available = true // it is back, still muted
+        guardian.recoverAfterCrash()
+        #expect(!output.muted && output.restoreCalls == 1 && journal.token == nil)
+    }
+
+    @Test func theNextRecordingSettlesWhatTheLastCouldNot() {
+        let (guardian, output, journal) = make()
+        guardian.begin()
+        output.available = false
+        guardian.end()
+        output.available = true
+        guardian.begin() // the device is back: the old mute is undone, then this recording silences it afresh
+        #expect(output.muted && output.restoreCalls == 1 && output.silenceCalls == 2 && journal.token != nil)
+        guardian.end()
+        #expect(!output.muted && journal.token == nil)
+    }
+
+    @Test func aDeviceThatStaysAwayKeepsTheNoteForTheNextLaunch() {
+        let (guardian, output, journal) = make()
+        guardian.begin()
+        output.available = false
+        guardian.end()
+        guardian.recoverAfterCrash() // the launch: still away
+        #expect(journal.token != nil && output.restoreCalls == 0)
     }
 
     @Test func aPersonWhoUnmutesDuringTheRecordingIsNotMutedAgain() {

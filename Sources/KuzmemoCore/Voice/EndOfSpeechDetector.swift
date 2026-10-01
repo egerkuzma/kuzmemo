@@ -52,13 +52,18 @@ public struct EndOfSpeechDetector: Sendable {
         guard !finished else { return nil }
         let step = min(0.25, max(0, time - (lastTime ?? time)))
 
-        let floor = noiseFloor ?? level
-        let voiced = level > max(floor * configuration.ratio, configuration.absoluteMin)
-        if voiced {
-            voicedSeconds += step
-            lastVoicedAt = time
+        // A reading of exactly 0 means that no new audio arrived since the last one (the app's meter reports its peak per tick,
+        // and a tick can fall between two buffers). It says nothing about the room: taking it for a quiet moment dropped the
+        // noise floor to zero, so ordinary room noise counted as speech and a hands-free recording started and ended on it.
+        if level > 0 {
+            let floor = noiseFloor ?? level
+            let voiced = level > max(floor * configuration.ratio, configuration.absoluteMin)
+            if voiced {
+                voicedSeconds += step
+                lastVoicedAt = time
+            }
+            noiseFloor = level < floor ? level : floor + (level - floor) * min(1, configuration.floorRisePerSecond * Float(step))
         }
-        noiseFloor = level < floor ? level : floor + (level - floor) * min(1, configuration.floorRisePerSecond * Float(step))
 
         if !hasSpeech {
             if voicedSeconds >= configuration.minVoiced {

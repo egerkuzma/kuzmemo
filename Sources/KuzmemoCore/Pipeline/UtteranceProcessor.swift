@@ -171,7 +171,7 @@ public actor UtteranceProcessor {
 
         let recognition: Recognition
         do {
-            recognition = try await recognizer.recognize(samples)
+            recognition = try await recognizer.recognize(samples, isReply: memo.parentMemoID != nil)
         } catch {
             return await recognitionFailed(memo, error, seconds: seconds)
         }

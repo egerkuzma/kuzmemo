@@ -43,7 +43,9 @@ public struct SpokenSegment: Equatable, Sendable {
     }
 }
 
-/// Splits the bytes that `omnivoice-tts -o - --stream-by-line` writes into one segment per line.
+/// Splits the bytes that `omnivoice-tts -o - --stream-by-line` writes into one segment per line. A line that made no
+/// sound (a header with no samples, or one that is not mono 16-bit) still gets its place as an empty segment, so the k-th
+/// segment is always the k-th line: whoever pairs segments with sentences by position stays in step.
 ///
 /// Every line of text starts with its own 44-byte WAV header whose sizes say "unknown" (0x7FFFFFFF), followed by the
 /// samples of that line, so the only way to find where a line ends is to see the next header: `RIFF`, four size bytes,
@@ -67,9 +69,7 @@ public struct WAVStreamSplitter: Sendable {
                 continue
             }
             guard let next = headerIndex(from: first + Self.headerSize) else { break }
-            if let segment = Self.segment(header: buffer[first ..< first + Self.headerSize], samples: buffer[(first + Self.headerSize) ..< next]) {
-                done.append(segment)
-            }
+            done.append(Self.segment(header: buffer[first ..< first + Self.headerSize], samples: buffer[(first + Self.headerSize) ..< next]) ?? Self.silent)
             buffer.removeSubrange(buffer.startIndex ..< next)
         }
         return done
@@ -80,9 +80,11 @@ public struct WAVStreamSplitter: Sendable {
         defer { buffer = Data(); started = false }
         guard started, buffer.count >= Self.headerSize else { return [] }
         let start = buffer.startIndex
-        let segment = Self.segment(header: buffer[start ..< start + Self.headerSize], samples: buffer[(start + Self.headerSize)...])
-        return segment.map { [$0] } ?? []
+        return [Self.segment(header: buffer[start ..< start + Self.headerSize], samples: buffer[(start + Self.headerSize)...]) ?? Self.silent]
     }
+
+    /// What a line that made no sound is: no samples at all.
+    private static let silent = SpokenSegment(sampleRate: 24_000, pcm: Data())
 
     /// The index of the next `RIFF????WAVE` at or after `from`, when all twelve bytes are in the buffer.
     private func headerIndex(from: Int) -> Int? {

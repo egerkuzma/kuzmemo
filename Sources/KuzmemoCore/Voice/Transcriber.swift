@@ -49,7 +49,13 @@ public struct Recognizer: Sendable {
         self.gate = gate
     }
 
-    public func recognize(_ samples: [Float]) async throws -> Recognition {
+    /// An answer to a question the app asked is often one short word ("да", "нет", "второе": a quarter of a second of voice),
+    /// which the gate for a command would take for a cough. The person is expected to speak, so a short stretch of clear
+    /// voice is enough: `isReply` lowers the gate's minimum to 0.2 s. A noise that gets through is only an answer the
+    /// question does not understand.
+    public func recognize(_ samples: [Float], isReply: Bool = false) async throws -> Recognition {
+        var gate = gate
+        if isReply { gate.minSpeechSeconds = min(gate.minSpeechSeconds, EnergyGate.shortestReplySeconds) }
         guard let trimmed = gate.trimmed(samples) else { return .noSpeech(reason: "no speech in the recording") }
         var output = try await transcriber.transcribe(trimmed)
         guard let clean = HallucinationFilter.clean(output.text) else {

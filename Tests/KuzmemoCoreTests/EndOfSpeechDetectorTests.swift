@@ -62,6 +62,22 @@ struct EndOfSpeechDetectorTests {
         #expect(stream.kinds.isEmpty)
     }
 
+    /// The app's meter reports its peak per 50 ms tick, and a tick that falls between two audio buffers reads exactly 0. That is
+    /// "no new audio", not a silent room: the noise floor must not follow it down to zero (it used to, and room noise of 0.02
+    /// then counted as speech).
+    @Test func aTickWithoutNewAudioIsNotAQuietMoment() {
+        var stream = Stream(.init(speechWait: 7))
+        stream.play(0.05) { _ in 0 } // the first tick comes before any audio
+        stream.play(8) { t in Int((t / 0.05).rounded()) % 2 == 0 ? 0 : 0.02 } // steady noise, every other tick empty
+        #expect(stream.kinds == [.noSpeech], "room noise was taken for speech: \(stream.kinds)")
+        var spoken = Stream()
+        spoken.play(0.05) { _ in 0 }
+        spoken.silence(1)
+        spoken.speak(2)
+        spoken.silence(4)
+        #expect(spoken.kinds == [.speechStarted, .endOfSpeech])
+    }
+
     @Test func waitingForSpeechGivesUpOnce() {
         var stream = Stream(.init(speechWait: 7))
         stream.silence(10)
