@@ -109,6 +109,30 @@ cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
 [ -e "$ROOT/Resources/AppIcon.icns" ] || swift "$ROOT/scripts/make_icon.swift"
 if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; fi
 cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
+# The same icon as an asset catalog as well: macOS 26 takes the icon of a notification banner (and of the Dock) from
+# Assets.car through CFBundleIconName, and showed a blank white square for an app that only has an .icns file.
+ASSETS="$APPDIR/icon-assets"
+rm -rf "$ASSETS"
+mkdir -p "$ASSETS/Assets.xcassets/AppIcon.appiconset" "$ASSETS/out"
+iconutil -c iconset "$ROOT/Resources/$ICON" -o "$ASSETS/AppIcon.iconset"
+cp "$ASSETS"/AppIcon.iconset/*.png "$ASSETS/Assets.xcassets/AppIcon.appiconset/"
+python3 - "$ASSETS/Assets.xcassets" <<'PY'
+import json, sys
+root = sys.argv[1]
+images = [{"filename": "icon_%dx%d%s.png" % (s, s, "@2x" if k == 2 else ""), "idiom": "mac", "scale": "%dx" % k, "size": "%dx%d" % (s, s)}
+          for s in (16, 32, 128, 256, 512) for k in (1, 2)]
+json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, open(root + "/AppIcon.appiconset/Contents.json", "w"), indent=2)
+json.dump({"info": {"author": "xcode", "version": 1}}, open(root + "/Contents.json", "w"))
+PY
+if xcrun actool "$ASSETS/Assets.xcassets" --compile "$ASSETS/out" --platform macosx --minimum-deployment-target 26.0 \
+     --app-icon AppIcon --output-partial-info-plist "$ASSETS/out/partial.plist" >/dev/null 2>&1 && [ -s "$ASSETS/out/Assets.car" ]; then
+  cp "$ASSETS/out/Assets.car" "$APP/Contents/Resources/Assets.car"
+  ICON_NAME_ENTRY="    <key>CFBundleIconName</key><string>AppIcon</string>
+"
+else
+  echo "note: the asset catalog of the icon could not be made (Xcode's actool is needed); notifications may show a blank icon" >&2
+  ICON_NAME_ENTRY=""
+fi
 # The Silero voice runs in a small Python helper (see scripts/install_silero.sh)
 cp "$ROOT/Resources/Silero/silero_helper.py" "$APP/Contents/Resources/"
 if [ "$FLAVOR" = dist ]; then
@@ -131,7 +155,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key><string>$APP_NAME</string>
     <key>CFBundleExecutable</key><string>Kuzmemo</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
+$ICON_NAME_ENTRY    <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
