@@ -27,14 +27,19 @@ struct AppPaths {
 
     static func resolve() -> AppPaths {
         let environment = ProcessInfo.processInfo.environment
-        let bundleID = Bundle.main.bundleIdentifier ?? "app.kuzmemo"
+        // A binary that is not an app bundle (`swift run`) has no identifier: it is a development run and must never open the
+        // person's own database, which is what the old default ("app.kuzmemo") did.
+        let bundleID = Bundle.main.bundleIdentifier ?? "app.kuzmemo.dev"
         let isDev = bundleID.hasSuffix(".dev")
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let daily = support.appendingPathComponent("Kuzmemo", isDirectory: true)
         let base: URL
-        if let override = environment["KUZMEMO_DATA_DIR"], !override.isEmpty {
+        if let override = environment["KUZMEMO_DATA_DIR"], !override.isEmpty,
+           !(isDev && URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL.path == daily.standardizedFileURL.path) {
             base = URL(fileURLWithPath: override, isDirectory: true)
         } else {
-            base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(isDev ? "Kuzmemo-Dev" : "Kuzmemo", isDirectory: true)
+            // (a development run is refused the person's folder even when it is named: scripts wipe a dev database at will)
+            base = isDev ? support.appendingPathComponent("Kuzmemo-Dev", isDirectory: true) : daily
         }
         return AppPaths(support: base, isDev: isDev)
     }

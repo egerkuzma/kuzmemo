@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import KuzmemoCore
 
 /// Control-channel access to the real main window (dev bundle only): open it without stealing focus, describe it,
 /// close it, and capture what it really draws (including an attached sheet) from inside the process, which needs no

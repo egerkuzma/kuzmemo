@@ -5,8 +5,17 @@ import KuzmemoCore
 /// The dev control channel's routes. Everything here runs on the main actor and talks to the same
 /// `AppEnvironment` the UI uses, so a check through the socket exercises the real code path.
 enum ControlRoutes {
+    /// A build that is not the dev bundle can have the channel on (`KUZMEMO_CONTROL=1`), to look at a window or a banner on the
+    /// real app. Only what changes nothing of the person's is open then: reading, rendering, opening and closing windows,
+    /// moving around the UI. Settings, the clock, transcripts, keys, the voice sample and undo belong to the dev bundle, where
+    /// scripts reset things at will; before this, a handful of routes checked it one by one and the rest did not.
+    private static let openToEveryBuild: Set<String> = ["/ui", "/window/open", "/window/close", "/popover/wiring"]
+
     static func handle(_ request: HTTPRequest) async -> HTTPResponse {
         let env = AppEnvironment.shared
+        if request.method != "GET", !env.paths.isDev, !openToEveryBuild.contains(request.path) {
+            return .error("this route changes things: it is open on the dev bundle only", status: 409)
+        }
         switch (request.method, request.path) {
         case ("GET", "/state"): return await state(request, env)
         case ("POST", "/memo/transcript"): return await submit(request, env)
@@ -259,14 +268,21 @@ enum ControlRoutes {
         }
     }
 
+    /// A number from the query, kept inside `range`; a missing one, or one that is not a finite number ("nan", "inf" would trap
+    /// when the picture size is made an integer), is the default.
+    private static func number(_ text: String?, default fallback: Double, in range: ClosedRange<Double>) -> Double {
+        guard let text, let value = Double(text), value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
     private static func render(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         let dark = request.query["scheme"] == "dark"
-        let width = CGFloat(Double(request.query["width"] ?? "") ?? 380)
+        let width = CGFloat(number(request.query["width"], default: 380, in: 100 ... 4000))
         let data: Data?
         switch request.query["view"] ?? "popover" {
         case "popover": data = Snapshot.png(PopoverView(env: env), width: width, dark: dark)
         case "main":
-            let height = CGFloat(Double(request.query["height"] ?? "") ?? 660)
+            let height = CGFloat(number(request.query["height"], default: 660, in: 100 ... 6000))
             data = Snapshot.png(MainWindowView(env: env), width: max(width, 860), height: height, dark: dark)
         case "settings":
             env.settingsTab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
@@ -275,12 +291,12 @@ enum ControlRoutes {
             // One tab on its own, as tall as asked, so the whole form is visible (the window scrolls it).
             let tab = SettingsView.Tab(rawValue: request.query["tab"] ?? "") ?? env.settingsTab
             if tab == .data { await env.data.refresh() }
-            let height = CGFloat(Double(request.query["height"] ?? "") ?? 1500)
+            let height = CGFloat(number(request.query["height"], default: 1500, in: 100 ... 6000))
             data = Snapshot.png(SettingsView.page(tab, env: env).environment(\.locale, DateBridge.locale), width: SettingsView.size.width, height: height, dark: dark)
         case "live":
             return await WindowRoutes.capture(
                 name: request.query["name"] ?? "main", sheet: request.query["sheet"] == "1", front: request.query["front"] == "1",
-                chrome: request.query["chrome"] == "1", scale: CGFloat(Double(request.query["scale"] ?? "") ?? 2), scheme: request.query["scheme"]
+                chrome: request.query["chrome"] == "1", scale: CGFloat(number(request.query["scale"], default: 2, in: 0.5 ... 4)), scheme: request.query["scheme"]
             )
         case "editor":
             let title = request.query["title"] ?? "new"

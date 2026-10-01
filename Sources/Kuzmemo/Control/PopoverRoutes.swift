@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import KuzmemoCore
 
 /// Checks the popover's close path without touching the person's screen or keyboard: the real popover cannot be
 /// opened from a script (its menu-bar item cannot be clicked from inside the process), so a stand-in panel, kept far
