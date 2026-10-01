@@ -48,7 +48,7 @@ if [ "$FLAVOR" = dev ] && [ "$FORCE" = 0 ] && [ "$LAUNCH" = 1 ] \
   exit 3
 fi
 VERSION="${KUZMEMO_VERSION:-$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)}"
-# A build number that changes with every commit: system caches (the icon in notifications, for one) are keyed by it
+# A build number that changes with every commit, so that two builds of the same version can be told apart
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 GIT_HASH="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
