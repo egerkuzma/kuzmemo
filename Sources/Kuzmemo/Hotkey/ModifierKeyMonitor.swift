@@ -39,12 +39,15 @@ nonisolated final class ModifierKeyMonitor: @unchecked Sendable {
         self.handlers = handlers
     }
 
+    /// The tap's callback holds this object without owning it: a tap that outlived it would call into freed memory.
+    deinit { stop() }
+
     var isActive: Bool { tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false }
 
     /// Creates the tap. Returns false when Input Monitoring has not been granted.
     @discardableResult
     func start() -> Bool {
-        guard tap == nil else { return true }
+        guard tap == nil else { return isActive }
         let mask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let created = CGEvent.tapCreate(
@@ -64,7 +67,10 @@ nonisolated final class ModifierKeyMonitor: @unchecked Sendable {
 
     func stop() {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap) // the documented way to remove a tap: no callback can come after this
+        }
         source = nil
         tap = nil
         triggerDown = false

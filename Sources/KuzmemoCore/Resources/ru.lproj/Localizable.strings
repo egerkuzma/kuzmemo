@@ -527,6 +527,7 @@
 "USB" = "USB";
 "virtual" = "виртуальный";
 "“%1$@” is a Bluetooth headset. Its microphone needs a few seconds to switch the headset to call mode (the first words would be lost) and makes it sound worse, so “%2$@” is used instead. The headset keeps playing sound as usual." = "«%1$@» — Bluetooth-гарнитура. Её микрофон включается несколько секунд (гарнитура переключается в режим звонка, первые слова теряются) и ухудшает звук, поэтому используется «%2$@». Звук в гарнитуре идёт как обычно.";
+"The microphone is off in this build (it is used for automated checks)." = "В этой сборке микрофон выключен (для автоматических проверок).";
 "The microphone you picked is not connected now, so the automatic choice is used." = "Выбранный микрофон сейчас не подключён, поэтому используется автоматический выбор.";
 "A Bluetooth microphone needs a few seconds to start: hold the key a little longer, or choose the built-in microphone." = "Bluetooth-микрофон включается несколько секунд: подержи клавишу подольше или выбери встроенный микрофон.";
 "Recording from “%1$@”." = "Запись идёт с «%1$@».";

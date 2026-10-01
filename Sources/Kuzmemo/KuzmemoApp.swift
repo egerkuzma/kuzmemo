@@ -61,10 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Silero helper and the program of the cloned voice are child processes: stop them (briefly) before the app goes away.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
-            await AppEnvironment.shared.voice.speech.silero.shutDown()
-            AppEnvironment.shared.voice.speech.clone.shutDown()
-            AppEnvironment.shared.voice.output.forceEnd() // the sound is never left off
+            let voice = AppEnvironment.shared.voice!
+            voice.beginTermination() // the sound comes back before the slow part, and no new recording can start during it
+            await voice.speech.silero.shutDown()
+            voice.speech.clone.shutDown()
             try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit
+            voice.output.forceEnd() // the sound is never left off
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

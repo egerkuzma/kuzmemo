@@ -221,7 +221,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             case .atTime: tr("Now: %1$@", title)
             case .allDay: tr("Reminder for today: %1$@", title)
             }
-            await env.voice.speech.speak(phrase)
+            await env.voice.speakUnprompted(phrase) // not over a recording: its microphone would hear it
             requestSync(after: .seconds(1))
         }
     }

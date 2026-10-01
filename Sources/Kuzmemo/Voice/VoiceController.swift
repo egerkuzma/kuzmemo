@@ -67,6 +67,11 @@ final class VoiceController {
     @ObservationIgnored private var nextJobID = 0
     @ObservationIgnored private var activeJob: Int?
     @ObservationIgnored private var workers: [Task<Void, Never>] = []
+    /// Looks for the Input Monitoring grant (one at a time: each one would start a key tap of its own when it appears).
+    @ObservationIgnored private var inputMonitoringWatcher: Task<Void, Never>?
+    /// The app is quitting: nothing new starts (the quit waits for helper programs, and a key pressed meanwhile would
+    /// begin a recording that dies unsaved, with the sound of the Mac off).
+    @ObservationIgnored private var terminating = false
 
     /// How the last recording went, for the log and for explaining a short one.
     private struct Timing {
@@ -249,7 +254,14 @@ final class VoiceController {
 
     /// Says a sample with the current voice and speed (the settings window's "Listen").
     func previewSpeech(_ text: String) {
-        Task { @MainActor in await speech.speak(text) }
+        Task { @MainActor in await speakUnprompted(text) }
+    }
+
+    /// Something nobody has just asked for (an alert's title, a sample): it never talks over a recording, whose microphone
+    /// would hear it, and is dropped while the app quits.
+    func speakUnprompted(_ text: String) async {
+        guard session == nil, !terminating else { return }
+        await speech.speak(text)
     }
 
     /// Recognises a short test recording without creating a memo (the settings window's check).
@@ -271,7 +283,12 @@ final class VoiceController {
     // MARK: - Trigger
 
     private func startTrigger() {
+        // The automation build never listens to the person's keys: it would fight their own copy of the app.
+        guard !AppPaths.isAutomation, !terminating else { return }
         permissions.refresh()
+        if monitor?.isActive == true { triggerRunning = true; return }
+        monitor?.stop() // a tap the system took away is removed before another is made, never left to fire into a dead object
+        monitor = nil
         guard permissions.inputMonitoring else {
             triggerRunning = false
             problem = .inputMonitoringMissing
@@ -304,13 +321,16 @@ final class VoiceController {
 
     /// The grant is made in System Settings, outside the app, so look for it until it appears.
     private func waitForInputMonitoring() {
-        workers.append(Task { @MainActor [weak self] in
+        guard inputMonitoringWatcher == nil else { return }
+        inputMonitoringWatcher = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled, !self.permissions.inputMonitoring {
                 try? await Task.sleep(for: .seconds(2))
                 self.permissions.refresh()
             }
-            self?.startTrigger()
-        })
+            guard let self else { return }
+            inputMonitoringWatcher = nil
+            startTrigger()
+        }
     }
 
     func requestInputMonitoring() {
@@ -369,9 +389,10 @@ final class VoiceController {
         EndOfSpeechDetector(configuration: .init(silenceAfterSpeech: 30, speechWait: 30))
     }
 
-    /// The microphone for a new recording: what Settings → Recording says, with the built-in one standing in for a
-    /// Bluetooth headset (whose microphone takes seconds to start; see `MicrophoneChoice`).
-    private func makeMicrophone() -> any AudioInput {
+    /// The microphone for a new recording or a check: what Settings → Recording says, with the built-in one standing in for a
+    /// Bluetooth headset (whose microphone takes seconds to start; see `MicrophoneChoice`). The automation build must not get
+    /// here: it never opens the real microphone (callers refuse first; see `microphoneIsOff`).
+    func makeMicrophone() -> any AudioInput {
         let pick = MicrophoneChoice.pick(env.settings.recording.microphonePreference, among: InputDevices.all())
         if let device = pick.device, let captureDevice = AVCaptureDevice(uniqueID: device.uid) {
             return DeviceMicCapture(device: captureDevice)
@@ -379,13 +400,42 @@ final class VoiceController {
         return MicCapture()
     }
 
+    /// The automation build never opens the real microphone by itself, nor asks for the permission: a script arms an input
+    /// first (`/voice/input`).
+    static var microphoneIsOff: Bool { AppPaths.isAutomation }
+
+    static var microphoneIsOffMessage: String { tr("The microphone is off in this build (it is used for automated checks).") }
+
+    /// Starts `input` and reports its levels. A microphone picked by name may be gone (unplugged, the lid closed): the
+    /// system's input stands in for it. Returns what is running.
+    func start(_ input: any AudioInput, level: @escaping @Sendable (Float) -> Void) throws -> any AudioInput {
+        input.onLevel = level
+        do {
+            try input.start()
+            return input
+        } catch {
+            guard input is DeviceMicCapture else { throw error }
+            Self.log.error("microphone did not start (\(String(describing: error), privacy: .public)); using the system input")
+            let fallback = MicCapture()
+            fallback.onLevel = level
+            try fallback.start()
+            return fallback
+        }
+    }
+
     private func startRecording() {
         guard session == nil else { return }
-        var input: any AudioInput
+        guard !terminating else { policy.recordingEnded(); return }
+        let candidate: any AudioInput
         if let scripted = scriptedInput {
-            input = scripted
+            candidate = scripted
             scriptedInput = nil
         } else {
+            guard !Self.microphoneIsOff else {
+                policy.recordingEnded()
+                hud.showNote(Self.microphoneIsOffMessage, style: .warning, seconds: 4)
+                return
+            }
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
             case .authorized:
                 break
@@ -400,12 +450,11 @@ final class VoiceController {
                 hud.showNote(tr("No microphone access. Allow it: System Settings → Privacy & Security → Microphone."), style: .error, seconds: 8)
                 return
             }
-            input = makeMicrophone()
+            candidate = makeMicrophone()
         }
         if problem == .microphoneDenied { problem = nil }
 
         let meter = LevelMeter()
-        input.onLevel = { level in meter.record(level) }
         let question = env.pendingQuestion // a recording made while a question is open is its answer
         if let question {
             hud.show(.listening(env.toast ?? AppEnvironment.Toast(style: .question, lines: [question.question], options: question.options)))
@@ -416,23 +465,14 @@ final class VoiceController {
         // The sound goes off first, so that speakers do not feed the music into the microphone.
         let muting = env.settings.recording.muteWhileRecording
         if muting { output.begin() }
+        let input: any AudioInput
         do {
-            try input.start()
+            input = try start(candidate) { level in meter.record(level) }
         } catch {
-            // A microphone picked by name may be gone (unplugged, the lid closed): the system's input is the fallback.
-            var failure: (any Error)? = error
-            if input is DeviceMicCapture {
-                Self.log.error("microphone did not start (\(String(describing: error), privacy: .public)); using the system input")
-                let fallback = MicCapture()
-                fallback.onLevel = { level in meter.record(level) }
-                do { try fallback.start(); input = fallback; failure = nil } catch let second { failure = second }
-            }
-            if let failure {
-                if muting { output.end() }
-                policy.recordingEnded()
-                hud.showNote(tr("Could not turn on the microphone: %1$@", "\(failure)"), style: .error, seconds: 6)
-                return
-            }
+            if muting { output.end() }
+            policy.recordingEnded()
+            hud.showNote(tr("Could not turn on the microphone: %1$@", "\(error)"), style: .error, seconds: 6)
+            return
         }
 
         let session = Session(
@@ -754,8 +794,20 @@ final class VoiceController {
     }
 
     private func reviveTrigger() {
+        guard !AppPaths.isAutomation, !terminating else { return } // waking up must not give the automation build the person's keys
         permissions.refresh()
         if monitor?.revive() == false || monitor == nil { startTrigger() }
+    }
+
+    // MARK: - Quitting
+
+    /// The app is quitting: what is being recorded or said stops, the sound of the Mac comes back at once and nothing new starts.
+    /// The quit itself waits for the helper programs, and the person may still press a key meanwhile.
+    func beginTermination() {
+        terminating = true
+        speech.stop()
+        if session != nil { cancelRecording(note: nil) }
+        output.forceEnd()
     }
 
     // MARK: - Automation (control channel)

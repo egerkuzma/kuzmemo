@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks that the sound of the Mac goes off while a recording lasts and comes back on every way a recording can end: a
 hold, a tap that is then stopped with Esc, and a recording made with the setting switched off. The automation build never
-touches the real sound: a stand-in output records what would have been done, and /voice shows it.
+touches the real sound: a stand-in output records what would have been done, and /voice shows it. It also checks that a key
+press with no scripted input armed is refused (the automation build never opens the real microphone).
 
 Needs the dev app running (scripts/run_app.sh) and the fixtures from scripts/fixtures/make_synth.sh.
 
@@ -130,6 +131,22 @@ def run(wav):
         wait_idle()
     events = output()["events"][base:]
     check("each is silenced and restored once", events == ["silence", "restore", "silence", "restore"] and output()["silenced"] is False, str(events))
+
+    print("no scripted input")
+    # The automation build must never open the real microphone (nor ask for the permission) when a key is pressed: a script
+    # has to arm an input first. Nothing is armed here, so the press is refused before anything is touched.
+    base = len(output()["events"])
+    permission = call("GET", "/voice")["permissions"]["microphone"]
+    call("POST", "/hotkey/down")
+    time.sleep(0.4)
+    state = call("GET", "/voice")
+    check("a key press without an armed input starts no recording", state["phase"] == "idle", json.dumps(state["phase"]))
+    check("…says that the microphone is off in this build", "выключен" in state["hud"]["state"], str(state["hud"]))
+    check("…and leaves the sound alone", output()["silenced"] is False and len(output()["events"]) == base, json.dumps(output()))
+    call("POST", "/hotkey/up")
+    state = call("GET", "/voice")
+    check("the release changes nothing", state["phase"] == "idle" and state["policy"] == "idle", json.dumps(state))
+    check("the microphone permission is left as it was", state["permissions"]["microphone"] == permission, json.dumps(state["permissions"]))
 
 
 if __name__ == "__main__":

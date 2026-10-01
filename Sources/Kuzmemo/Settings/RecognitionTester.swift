@@ -29,6 +29,10 @@ final class RecognitionTester {
 
     func run(env: AppEnvironment, seconds: Double = 5) async {
         guard !isBusy else { return }
+        guard !VoiceController.microphoneIsOff else {
+            state = .failed(VoiceController.microphoneIsOffMessage)
+            return
+        }
         guard !env.voice.isRecording else {
             state = .failed(tr("A regular recording is in progress: wait for it to finish."))
             return
@@ -41,10 +45,10 @@ final class RecognitionTester {
             return
         }
 
-        let mic = MicCapture()
+        // The microphone a recording would use, so that the check says something about real recordings.
         let meter = LevelMeter()
-        mic.onLevel = { meter.record($0) }
-        do { try mic.start() } catch {
+        let mic: any AudioInput
+        do { mic = try env.voice.start(env.voice.makeMicrophone()) { meter.record($0) } } catch {
             state = .failed(tr("Could not turn on the microphone: %1$@", "\(error)"))
             return
         }
