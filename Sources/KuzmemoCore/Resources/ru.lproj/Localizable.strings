@@ -86,6 +86,7 @@
 "check the notion access" = "проверить доступ в нотион";
 "Check which microphone is selected in System Settings → Sound → Input. (%1$@)" = "Проверь, какой микрофон выбран в Системных настройках → Звук → Ввод. (%1$@)";
 "Checking…" = "Проверяю…";
+"Could not check just now" = "Не удалось проверить прямо сейчас";
 "Choose a sound file" = "Выбери звуковой файл";
 "Choose Python…" = "Указать Python…";
 "Choose the python of an environment that has torch installed (for example venv/bin/python)." = "Выбери python из окружения (например, venv/bin/python), где стоит torch.";
@@ -672,3 +673,5 @@
 "Turn the sound off while recording" = "Выключать звук на время записи";
 "Music and video in the headphones or speakers go quiet while you speak, so they do not get into the recording, and come back when it ends." = "Музыка и видео в наушниках или колонках затихают, пока ты говоришь, чтобы не попасть в запись, и возвращаются, когда она закончится.";
 "The model arrived incomplete. Try again." = "Модель скачалась не полностью. Попробуй ещё раз.";
+"Kuzmemo cannot open its database" = "Kuzmemo не может открыть свою базу данных";
+"The file %1$@ could not be opened: %2$@. Nothing was changed. Check that the disk has room and that the folder is not locked, then start Kuzmemo again." = "Файл %1$@ не удалось открыть: %2$@. Ничего не изменилось. Проверь, что на диске есть место и папка не заблокирована, и запусти Kuzmemo снова.";

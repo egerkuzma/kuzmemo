@@ -62,6 +62,7 @@ enum DataRoutes {
             "bytes": data.databaseBytes,
             "dailyDue": await data.backups.isDailyDue(),
             "hasProblem": data.hasProblem,
+            "checkCouldNotRun": data.checkCouldNotRun,
             "copies": data.copies.map(copy),
             "recovery": describe(data.recovery),
             "keep": ["daily": BackupService.dailyKeep, "other": BackupService.otherKeep],

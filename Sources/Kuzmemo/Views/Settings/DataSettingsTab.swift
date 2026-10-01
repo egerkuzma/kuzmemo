@@ -119,6 +119,8 @@ struct DataSettingsTab: View {
                 ProgressView().controlSize(.small)
                 Text(tr("Checking…")).foregroundStyle(.secondary)
             }
+        } else if data.checkCouldNotRun {
+            Label(tr("Could not check just now"), systemImage: "questionmark.circle").foregroundStyle(.secondary)
         } else if let report = data.integrity {
             if report.isHealthy {
                 let time = Wording.time(LocalDateTime(date: report.checkedAt, in: env.clock.timeZone).time)

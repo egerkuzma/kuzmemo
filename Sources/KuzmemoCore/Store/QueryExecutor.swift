@@ -13,17 +13,31 @@ public struct QueryResult: Equatable, Sendable {
 
 extension Store {
     /// A stream that yields whenever calendar rows (items, per-occurrence overrides) or memos change, so views can
-    /// reload. The first value arrives immediately.
-    public func changes() -> AsyncStream<Void> {
+    /// reload. The first value arrives immediately. A read that fails ends GRDB's observation, and a stream that ended with
+    /// it would leave every window frozen on what it last showed until the app was restarted: the observation is started
+    /// again after a pause (doubling up to half a minute), and its first value makes the views read afresh.
+    public func changes(retryAfter: Duration = .seconds(1)) -> AsyncStream<Void> {
         let writer = self.writer
         return AsyncStream { continuation in
-            let observation = ValueObservation.tracking { db -> Int in
-                try Item.fetchCount(db) + ItemException.fetchCount(db) + Memo.fetchCount(db)
-            }
             let task = Task {
-                do {
-                    for try await _ in observation.values(in: writer) { continuation.yield() }
-                } catch {}
+                var pause = retryAfter
+                while !Task.isCancelled {
+                    let observation = ValueObservation.tracking { db -> Int in
+                        try Item.fetchCount(db) + ItemException.fetchCount(db) + Memo.fetchCount(db)
+                    }
+                    do {
+                        for try await _ in observation.values(in: writer) {
+                            continuation.yield()
+                            pause = retryAfter
+                        }
+                        break // the database was closed: nothing more will change
+                    } catch is CancellationError {
+                        break
+                    } catch {
+                        try? await Task.sleep(for: pause)
+                        pause = min(pause * 2, .seconds(30))
+                    }
+                }
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }

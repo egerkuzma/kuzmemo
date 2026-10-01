@@ -54,12 +54,26 @@ final class AppSettings {
         saves[index] = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled, let self else { return }
-            switch group {
-            case .speech: try? await store.save(settings: speech)
-            case .recognition: try? await store.save(settings: recognition)
-            case .recording: try? await store.save(settings: recording)
-            case .notifications: try? await store.save(settings: notifications)
-            }
+            await save(group)
         }
+    }
+
+    private func save(_ group: Group) async {
+        switch group {
+        case .speech: try? await store.save(settings: speech)
+        case .recognition: try? await store.save(settings: recognition)
+        case .recording: try? await store.save(settings: recording)
+        case .notifications: try? await store.save(settings: notifications)
+        }
+    }
+
+    /// The app is quitting: whatever was changed in the last moment and is still waiting for its save goes to the database now
+    /// (a preference changed and the app quit within the delay used to be lost). Nothing is saved before the stored values
+    /// have been read, or the defaults would replace them.
+    func flush() async {
+        guard loaded, !saves.isEmpty else { return }
+        for task in saves.values { task.cancel() }
+        saves = [:]
+        for group in Group.allCases { await save(group) }
     }
 }

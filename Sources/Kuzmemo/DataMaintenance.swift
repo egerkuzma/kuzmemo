@@ -26,6 +26,8 @@ final class DataMaintenance {
     private(set) var overview: DataOverview?
     private(set) var databaseBytes: Int64 = 0
     private(set) var integrity: IntegrityReport?
+    /// The last check could not be carried out (the file was busy, a read failed). That is no verdict on the database.
+    private(set) var checkCouldNotRun = false
     private(set) var copies: [BackupFile] = []
     private(set) var isChecking = false
     private(set) var isBackingUp = false
@@ -103,7 +105,9 @@ final class DataMaintenance {
 
     func runScheduled() async {
         let today = clock.localNow().date
-        if lastCheckDay != today {
+        // Once a day, and again at every tick while the last answer was "damaged": a false alarm (the check can be fooled) must
+        // not stay on screen until tomorrow, and a real problem is worth knowing about as soon as it goes.
+        if lastCheckDay != today || integrity?.isHealthy == false {
             lastCheckDay = today
             await check()
         }
@@ -130,8 +134,15 @@ final class DataMaintenance {
         do {
             report = try await store.integrityCheck()
         } catch {
-            report = IntegrityReport(checkedAt: clock.now(), problems: ["\(error)"])
+            // Not an answer about the file (it was busy, a read failed, the task was cancelled): what was known stays as it
+            // was, and the next tick asks again. Calling this a problem would alarm over a database that may be fine, and a
+            // damaged-looking state would hold back the daily copy.
+            Self.log.error("integrity check could not be carried out: \(String(describing: error), privacy: .public)")
+            checkCouldNotRun = true
+            lastCheckDay = nil
+            return
         }
+        checkCouldNotRun = false
         integrity = report
         if !report.isHealthy {
             Self.log.fault("integrity check failed: \(report.problems.joined(separator: " | "), privacy: .public)")
@@ -139,8 +150,9 @@ final class DataMaintenance {
                 reportedProblem = true
                 onProblem?()
             }
-        } else if report.searchIndexRebuilt {
-            Self.log.notice("the search index did not match the entries and was rebuilt")
+        } else {
+            reportedProblem = false // a problem that comes later is announced again
+            if report.searchIndexRebuilt { Self.log.notice("the search index did not match the entries and was rebuilt") }
         }
     }
 

@@ -129,4 +129,24 @@ struct QueryExecutorTests {
         #expect(count.withLock { $0 } > initial)
         observer.cancel()
     }
+
+    /// A read that fails ends GRDB's observation. The stream used to end with it, and every window stayed frozen on what it
+    /// last showed until the app was restarted.
+    @Test func theStreamOfChangesComesBackAfterAFailedRead() async throws {
+        let store = try makeStore()
+        try await store.writer.write { try $0.execute(sql: "ALTER TABLE memos RENAME TO memos_away") } // the observation cannot read
+        let delivered = Mutex(0)
+        let ended = Mutex(false)
+        let observer = Task {
+            for await _ in store.changes(retryAfter: .milliseconds(40)) { delivered.withLock { $0 += 1 } }
+            ended.withLock { $0 = true }
+        }
+        try await Task.sleep(for: .milliseconds(300)) // it has failed by now, and again after each pause
+        #expect(delivered.withLock { $0 } == 0)
+        #expect(!ended.withLock { $0 }, "the stream ended with the failed read")
+        try await store.writer.write { try $0.execute(sql: "ALTER TABLE memos_away RENAME TO memos") }
+        for _ in 0 ..< 100 where delivered.withLock({ $0 }) == 0 { try await Task.sleep(for: .milliseconds(30)) }
+        #expect(delivered.withLock { $0 } >= 1, "nothing arrived once the read worked again")
+        observer.cancel()
+    }
 }

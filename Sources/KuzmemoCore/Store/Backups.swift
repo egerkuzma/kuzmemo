@@ -50,10 +50,23 @@ public actor BackupService {
 
     private let store: Store
     public nonisolated let directory: URL
+    /// Copies are made one at a time. The actor alone does not see to that: a copy waits for the database and the file system
+    /// part-way, and another would start right there, sweep away the first one's unfinished file and pick the same name.
+    private var busy = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     public init(store: Store, directory: URL) {
         self.store = store
         self.directory = directory
+    }
+
+    private func acquire() async {
+        if !busy { busy = true; return }
+        await withCheckedContinuation { waiting.append($0) } // the turn is handed over by `release`; `busy` stays set
+    }
+
+    private func release() {
+        if waiting.isEmpty { busy = false } else { waiting.removeFirst().resume() }
     }
 
     // MARK: Reading
@@ -84,9 +97,15 @@ public actor BackupService {
     /// Makes a copy now, checks that it can be read, and removes copies beyond what is kept.
     @discardableResult
     public func run(_ reason: BackupReason) async throws -> BackupFile {
+        await acquire()
+        defer { release() }
+        return try await makeCopy(reason)
+    }
+
+    private func makeCopy(_ reason: BackupReason) async throws -> BackupFile {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        // Leftovers of a copy that was interrupted (a crash, a power cut). Runs are serialized, so none is in progress.
+        // Leftovers of a copy that was interrupted (a crash, a power cut). Copies are made one at a time, so none is in progress.
         for name in (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasSuffix(".partial") {
             try? fileManager.removeItem(at: directory.appendingPathComponent(name))
         }
@@ -112,11 +131,14 @@ public actor BackupService {
         return made
     }
 
-    /// The automatic copy: made if today's has not been made yet.
+    /// The automatic copy: made if today's has not been made yet (asked again once it is this one's turn: the copy that was
+    /// ahead may have been today's).
     @discardableResult
     public func runDailyIfDue() async throws -> BackupFile? {
+        await acquire()
+        defer { release() }
         guard isDailyDue() else { return nil }
-        return try await run(.daily)
+        return try await makeCopy(.daily)
     }
 
     private func prune() {

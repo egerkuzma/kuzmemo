@@ -198,6 +198,42 @@ struct BackupTests {
         #expect(shop.filesInBackupsFolder() == ["kuzmemo-2026-09-28-143000-manual.sqlite"])
     }
 
+    /// A copy waits for the database and the file system part-way, so a second one used to start in the middle of the first:
+    /// it swept away the first one's unfinished file and chose the same name. The Data page's button and the daily copy can
+    /// well be asked for at the same moment.
+    @Test func copiesAskedForAtTheSameMomentAreMadeOneAfterAnotherAndNoneIsLost() async throws {
+        let shop = try Workshop()
+        defer { shop.remove() }
+        try await shop.store.perform(label: "seed") { try $0.insert(reminder("Живая", on: "2026-09-30")) }
+        let results = await withTaskGroup(of: Result<BackupFile, any Error>.self) { group in
+            for _ in 0 ..< 6 {
+                group.addTask {
+                    do { return .success(try await shop.backups.run(.manual)) } catch { return .failure(error) }
+                }
+            }
+            var all: [Result<BackupFile, any Error>] = []
+            for await result in group { all.append(result) }
+            return all
+        }
+        let failures = results.compactMap { result -> String? in if case let .failure(error) = result { "\(error)" } else { nil } }
+        #expect(failures.isEmpty, "\(failures)")
+        let names = Set(results.compactMap { try? $0.get().url.lastPathComponent })
+        #expect(names.count == 6, "every copy has a name of its own: \(names)")
+        // the folder keeps the last few of that kind, none unfinished
+        #expect(shop.filesInBackupsFolder().allSatisfy { !$0.hasSuffix(".partial") })
+        #expect(shop.backups.list().count == BackupService.otherKeep)
+    }
+
+    @Test func twoDailyCopiesAskedForTogetherMakeOne() async throws {
+        let shop = try Workshop()
+        defer { shop.remove() }
+        async let first = shop.backups.runDailyIfDue()
+        async let second = shop.backups.runDailyIfDue()
+        let made = try await [first, second].compactMap { $0 }
+        #expect(made.count == 1)
+        #expect(shop.backups.list().filter { $0.reason == .daily }.count == 1)
+    }
+
     @Test func aCopyThatCannotBeReadBackIsNotKept() async throws {
         // A database without the calendar tables: the copy is written but fails the read-back.
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("kuzmemo-badcopy-\(UUID().uuidString)")
@@ -270,6 +306,99 @@ struct MaintenanceTests {
         #expect(report.problems == [], "\(report.problems)")
         #expect(report.isHealthy)
         #expect(try await shop.store.search("доступ").count == 12) // and searching was right all along
+    }
+
+    /// The same false alarm on the writer: another process rewrote the index (here a second connection to the same file does
+    /// it), and the app's long-lived connection, which still holds the old picture of the index, was told by SQLite that the
+    /// index was corrupt ("fts5: checksum mismatch"). The file is sound; a connection opened now says so.
+    @Test func aWriterThatWentStaleAfterAnotherConnectionRewroteTheIndexDoesNotRaiseAFalseAlarm() async throws {
+        let shop = try Workshop()
+        defer { shop.remove() }
+        let other = Store(writer: try KuzmemoDatabase.open(at: shop.databaseURL), clock: shop.clock)
+        try await shop.store.perform(label: "seed") { m in
+            for n in 0 ..< 5 { try m.insert(reminder("Запись номер \(n) про хостинг", on: "2026-09-30")) }
+        }
+        _ = try await shop.store.search("хостинг")
+        #expect(try await shop.store.integrityCheck().isHealthy)
+        for round in 0 ..< 40 {
+            try await other.eraseAllData()
+            for n in 0 ..< 12 {
+                try await other.perform(label: "again") { try $0.insert(reminder("Запись \(n) круг \(round) доступ", on: "2026-09-30")) }
+            }
+        }
+        let report = try await shop.store.integrityCheck()
+        #expect(report.problems == [], "\(report.problems)")
+        #expect(report.isHealthy)
+        #expect(try await shop.store.search("доступ").count == 12)
+    }
+
+    private static let staleComplaint = "fts5: checksum mismatch for table \"items_fts\""
+
+    @Test func onlyComplaintsAboutTheSearchIndexAreTreatedAsPossiblyFalse() {
+        #expect(Store.concernsOnlyTheSearchIndex([Self.staleComplaint]))
+        #expect(Store.concernsOnlyTheSearchIndex(["SQLite error 267: fts5: corruption found reading blob 5 from table \"items_fts\""]))
+        #expect(!Store.concernsOnlyTheSearchIndex([]))
+        #expect(!Store.concernsOnlyTheSearchIndex(["row 12 missing from index idx_items_date"]))
+        #expect(!Store.concernsOnlyTheSearchIndex([Self.staleComplaint, "*** in database main *** Tree 5 page 5: btreeInitPage() returns error code 11"]))
+        #expect(!Store.concernsOnlyTheSearchIndex(["foreign key violation in op_changes"]))
+    }
+
+    /// What is no verdict on the file must not be taken for one: the app showed "problems found" over a database that was
+    /// merely busy for a moment.
+    @Test func aBusyOrUnreadableFileIsNotDamage() {
+        #expect(Store.isDamage(DatabaseError(resultCode: .SQLITE_CORRUPT)))
+        #expect(Store.isDamage(DatabaseError(resultCode: .SQLITE_NOTADB)))
+        for code in [ResultCode.SQLITE_BUSY, .SQLITE_LOCKED, .SQLITE_IOERR, .SQLITE_FULL, .SQLITE_CANTOPEN, .SQLITE_NOMEM, .SQLITE_INTERRUPT, .SQLITE_READONLY] {
+            #expect(!Store.isDamage(DatabaseError(resultCode: code)), "\(code)")
+        }
+    }
+
+    @Test func settlingComplaintsStopsWhereThereIsNothingToSettle() async throws {
+        var asked: [String] = []
+        let none = try await Store.settle([], onFreshConnection: { asked.append("fresh"); return nil }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { asked.append("again"); return [] })
+        #expect(none.problems.isEmpty && !none.rebuilt && asked.isEmpty)
+
+        let damage = ["*** in database main *** Tree 5 page 5: btreeInitPage() returns error code 11"]
+        let kept = try await Store.settle(damage, onFreshConnection: { asked.append("fresh"); return nil }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { asked.append("again"); return [] })
+        #expect(kept.problems == damage && !kept.rebuilt && asked.isEmpty, "damage elsewhere is reported as it is, nothing is tried")
+    }
+
+    @Test func aComplaintThatAFreshConnectionDoesNotRepeatWasFalse() async throws {
+        var asked: [String] = []
+        let result = try await Store.settle([Self.staleComplaint], onFreshConnection: { asked.append("fresh"); return [] }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { asked.append("again"); return [] })
+        #expect(result.problems.isEmpty && !result.rebuilt)
+        #expect(asked == ["fresh"], "the index is left alone: \(asked)")
+    }
+
+    @Test func aComplaintThatAFreshConnectionRepeatsIsFixedByRebuildingTheIndex() async throws {
+        var asked: [String] = []
+        let fixed = try await Store.settle([Self.staleComplaint], onFreshConnection: { asked.append("fresh"); return [Self.staleComplaint] }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { asked.append("again"); return [] })
+        #expect(fixed.problems.isEmpty && fixed.rebuilt)
+        #expect(asked == ["fresh", "rebuild", "again"])
+
+        asked = []
+        let stays = try await Store.settle([Self.staleComplaint], onFreshConnection: { [Self.staleComplaint] }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { [Self.staleComplaint] })
+        #expect(stays.problems == [Self.staleComplaint] && stays.rebuilt, "a rebuild that did not help leaves the complaint")
+    }
+
+    @Test func withoutAnAnswerFromAFreshConnectionTheFirstComplaintGoesToRebuilding() async throws {
+        for fresh in [{ () async throws -> [String]? in nil }, { throw DatabaseError(resultCode: .SQLITE_CANTOPEN) }] {
+            var asked: [String] = []
+            let result = try await Store.settle([Self.staleComplaint], onFreshConnection: fresh, rebuildIndex: { asked.append("rebuild") }, checkAgain: { [] })
+            #expect(result.problems.isEmpty && result.rebuilt && asked == ["rebuild"])
+        }
+    }
+
+    @Test func realDamageFoundOnAFreshConnectionIsReportedAndNotRebuilt() async throws {
+        let damage = ["*** in database main *** Tree 5 page 5: btreeInitPage() returns error code 11"]
+        var asked: [String] = []
+        let result = try await Store.settle([Self.staleComplaint], onFreshConnection: { damage }, rebuildIndex: { asked.append("rebuild") }, checkAgain: { [] })
+        #expect(result.problems == damage && !result.rebuilt && asked.isEmpty)
+    }
+
+    @Test func anIndexThatCannotBeRebuiltLeavesTheComplaintInPlace() async throws {
+        let result = try await Store.settle([Self.staleComplaint], onFreshConnection: { [Self.staleComplaint] }, rebuildIndex: { throw DatabaseError(resultCode: .SQLITE_CORRUPT) }, checkAgain: { [] })
+        #expect(result.problems == [Self.staleComplaint] && !result.rebuilt)
     }
 
     @Test func aDamagedFileIsReportedAndNothingIsRepairedBehindThePersonsBack() async throws {

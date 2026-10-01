@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             let voice = AppEnvironment.shared.voice!
             voice.beginTermination() // the sound comes back before the slow part, and no new recording can start during it
+            await AppEnvironment.shared.prepareToQuit()
             await voice.speech.silero.shutDown()
             voice.speech.clone.shutDown()
             try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit

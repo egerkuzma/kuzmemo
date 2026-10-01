@@ -120,7 +120,7 @@ final class AppEnvironment {
         do {
             opened = try Store.openRecovering(at: paths.database, backups: paths.backups, clock: clock)
         } catch {
-            fatalError("Cannot open the database at \(paths.database.path): \(error)")
+            Self.explainAndQuit(unopenable: paths.database, error: error)
         }
         store = opened.store
         data = DataMaintenance(store: opened.store, paths: paths, clock: clock, recovery: opened.outcome)
@@ -129,6 +129,34 @@ final class AppEnvironment {
         calendar = CalendarModel(store: store, clock: clock)
         settings = AppSettings(store: store)
         start()
+    }
+
+    /// The database file could not be opened for a reason other than damage (damage is dealt with in `DatabaseRecovery`): a full
+    /// disk, a folder without permission, a file locked by something else. Dying silently would leave a menu-bar app that
+    /// simply never appears; this says what is wrong, changes nothing and quits.
+    ///
+    /// This runs while SwiftUI is still building the app, so it must not run the window system's own event loop: an `NSAlert`
+    /// there lets SwiftUI draw a half-made scene and the process aborts. The system's notice dialog is shown by another
+    /// process and only blocks this thread.
+    private static func explainAndQuit(unopenable file: URL, error: any Error) -> Never {
+        var response: CFOptionFlags = 0
+        CFUserNotificationDisplayAlert(
+            0, CFOptionFlags(kCFUserNotificationStopAlertLevel), nil, nil, nil,
+            tr("Kuzmemo cannot open its database") as CFString,
+            tr(
+                "The file %1$@ could not be opened: %2$@. Nothing was changed. Check that the disk has room and that the folder is not locked, then start Kuzmemo again.",
+                file.path, error.localizedDescription
+            ) as CFString,
+            tr("Quit") as CFString, nil, nil, &response
+        )
+        exit(1)
+    }
+
+    /// The app is quitting: the control socket goes away (a stale file would make a script believe the app is still there) and
+    /// preferences changed a moment ago are saved.
+    func prepareToQuit() async {
+        controlServer?.stop()
+        await settings.flush()
     }
 
     /// The system time zone changed (a flight, or the automatic setting): "today", the alerts and the calendar are worked out
