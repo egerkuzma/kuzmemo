@@ -9,8 +9,13 @@ struct GlossarySettingsTab: View {
     let env: AppEnvironment
     @State private var terms: [GlossaryTerm] = []
     @State private var editing: TermEditorRequest?
-    @State private var probe = tr("check the notion access")
+    /// What the person typed over the example phrase; nil while it is still the phrase in the interface language.
+    @State private var editedProbe: String?
     @State private var message: String?
+
+    private var probe: Binding<String> {
+        Binding(get: { editedProbe ?? tr("check the notion access") }, set: { editedProbe = $0 })
+    }
 
     struct TermEditorRequest: Identifiable {
         var term: GlossaryTerm
@@ -65,8 +70,8 @@ struct GlossarySettingsTab: View {
     private var probeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(tr("Try it")).font(.subheadline.weight(.semibold))
-            TextField(tr("A phrase as speech recognition heard it"), text: $probe)
-            let fixed = Glossary.applyAliases(to: probe, terms: terms)
+            TextField(tr("A phrase as speech recognition heard it"), text: probe)
+            let fixed = Glossary.applyAliases(to: probe.wrappedValue, terms: terms)
             HStack(alignment: .firstTextBaseline) {
                 Text(tr("Becomes:")).foregroundStyle(.secondary)
                 Text(verbatim: fixed).textSelection(.enabled)

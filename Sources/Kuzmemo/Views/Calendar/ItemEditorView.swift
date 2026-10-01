@@ -17,6 +17,8 @@ struct ItemEditorView: View {
     @State private var untilValue: Date
     @State private var countValue: Int
     @State private var problem: String?
+    /// The save is under way: a second press must not make a second entry.
+    @State private var saving = false
     @State private var sourceText: String?
     @FocusState private var titleFocused: Bool
 
@@ -248,7 +250,7 @@ struct ItemEditorView: View {
                 }
                 Spacer()
                 Button(tr("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isNew ? tr("Add") : tr("Save"), action: save).keyboardShortcut(.defaultAction)
+                Button(isNew ? tr("Add") : tr("Save"), action: save).keyboardShortcut(.defaultAction).disabled(saving)
             }
         }
         .padding(.horizontal, 20)
@@ -266,11 +268,20 @@ struct ItemEditorView: View {
             problem = AppEnvironment.describe(error)
             return
         }
-        switch request {
-        case .new: env.act { try await env.calendar.create(out) }
-        case let .edit(item): env.act { try await env.calendar.save(out, as: item.id) }
+        guard !saving else { return }
+        saving = true
+        problem = nil
+        // The sheet closes when the entry is saved, not before: a failed save (a full disk, a locked file, an entry that was
+        // deleted meanwhile) must not throw away what the person typed.
+        Task { @MainActor in
+            defer { saving = false }
+            let failure: (any Error)?
+            switch request {
+            case .new: failure = await env.attempt { try await env.calendar.create(out) }
+            case let .edit(item): failure = await env.attempt { try await env.calendar.save(out, as: item.id) }
+            }
+            if let failure { problem = AppEnvironment.describe(failure) } else { dismiss() }
         }
-        dismiss()
     }
 }
 

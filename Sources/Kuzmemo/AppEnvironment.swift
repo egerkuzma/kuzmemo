@@ -66,6 +66,8 @@ final class AppEnvironment {
     let provider: ClaudeCLIProvider
     let calendar: CalendarModel
     let settings: AppSettings
+    /// Downloads and copies of speech models, which go on whatever window is open.
+    let models = ModelInstaller()
 
     private(set) var todayEntries: [AgendaEntry] = []
     private var baseStatus: Status = .idle
@@ -335,14 +337,21 @@ final class AppEnvironment {
     /// Runs an action from the calendar window and reports it with an undo toast (or the reason it failed).
     func act(_ work: @escaping @MainActor () async throws -> ActionOutcome) {
         Task { @MainActor in
-            do {
-                let outcome = try await work()
-                if !outcome.lines.isEmpty {
-                    toast = Toast(style: .success, lines: outcome.lines, undoOpID: outcome.op?.id)
-                }
-            } catch {
-                toast = Toast(style: .error, lines: [Self.describe(error)])
+            if let error = await attempt(work) { toast = Toast(style: .error, lines: [Self.describe(error)]) }
+        }
+    }
+
+    /// The same, for a caller that has to know how it went (the editor keeps what the person typed when saving fails): a
+    /// success is reported with an undo toast, a failure is handed back and nothing is shown.
+    func attempt(_ work: @MainActor () async throws -> ActionOutcome) async -> (any Error)? {
+        do {
+            let outcome = try await work()
+            if !outcome.lines.isEmpty {
+                toast = Toast(style: .success, lines: outcome.lines, undoOpID: outcome.op?.id)
             }
+            return nil
+        } catch {
+            return error
         }
     }
 

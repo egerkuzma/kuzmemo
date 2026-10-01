@@ -67,7 +67,7 @@ private struct MemoCard: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: memo.inputKind == .voice ? "mic.fill" : "keyboard").foregroundStyle(.orange).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: memo.transcriptRaw.map { "«\($0)»" } ?? tr("Recording without text")).font(.callout)
+                    Text(verbatim: memo.transcriptRaw.map { Wording.quoted($0) } ?? tr("Recording without text")).font(.callout)
                     Text(verbatim: MemoFailure.explanation(for: memo)).font(.caption).foregroundStyle(.secondary)
                     if let retry = retryText { Text(verbatim: retry).font(.caption).foregroundStyle(.secondary) }
                 }
@@ -110,7 +110,7 @@ private struct MemoCard: View {
     private var retryText: String? {
         guard let next = memo.nextRetryAt else { return nil }
         let date = Date(timeIntervalSince1970: Double(next) / 1000)
-        let time = date.formatted(.dateTime.hour().minute().locale(DateBridge.locale))
-        return date > Date() ? tr("Will retry automatically at %1$@", "\(time)") : tr("Will retry automatically soon")
+        let time = Wording.time(LocalDateTime(date: date, in: env.clock.timeZone).time)
+        return date > env.clock.now() ? tr("Will retry automatically at %1$@", time) : tr("Will retry automatically soon")
     }
 }

@@ -23,6 +23,17 @@ struct LocalizationTests {
         #expect(Localization.with(.russian) { tr("A sentence nobody translated") } == "A sentence nobody translated")
     }
 
+    /// The size of a file was written by the system formatter in the system's language: an English interface on a Mac set to
+    /// Russian showed "МБ".
+    @Test func fileSizesAreWrittenInTheInterfaceLanguage() {
+        func plain(_ text: String) -> String {
+            text.unicodeScalars.map { $0.properties.isWhitespace ? " " : String($0) }.joined()
+        }
+        #expect(plain(Localization.with(.english) { Wording.fileSize(bytes: 1_500_000) }) == "1.5 MB")
+        #expect(plain(Localization.with(.russian) { Wording.fileSize(bytes: 1_500_000) }) == "1,5 МБ")
+        #expect(plain(Localization.with(.english) { Wording.fileSize(bytes: 0) }) == "0 bytes")
+    }
+
     @Test func argumentsAreFilledIn() {
         #expect(Localization.with(.english) { tr("Could not save: %1$@", "disk full") } == "Could not save: disk full")
         #expect(Localization.with(.russian) { tr("Could not save: %1$@", "диск полон") } == "Не удалось сохранить: диск полон")

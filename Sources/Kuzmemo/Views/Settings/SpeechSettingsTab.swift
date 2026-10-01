@@ -6,7 +6,8 @@ import SwiftUI
 struct SpeechSettingsTab: View {
     let env: AppEnvironment
     @State private var voices = SpeechSettingsTab.installedVoices()
-    @State private var sample = tr("Hello! You have three things today: stand-up at ten, a team sync at eleven and a report to check at six in the evening.")
+    /// What the person typed over the sample sentence; nil while it is still the sentence in the interface language.
+    @State private var editedSample: String?
     @State private var confirmForget = false
 
     struct VoiceInfo: Identifiable, Equatable {
@@ -17,6 +18,14 @@ struct SpeechSettingsTab: View {
     }
 
     private var settings: AppSettings { env.settings }
+
+    private static var defaultSample: String {
+        tr("Hello! You have three things today: stand-up at ten, a team sync at eleven and a report to check at six in the evening.")
+    }
+
+    private var sample: Binding<String> {
+        Binding(get: { editedSample ?? Self.defaultSample }, set: { editedSample = $0 })
+    }
 
     /// The chosen system voice for the interface language (each language keeps its own).
     private var systemVoiceBinding: Binding<String?> {
@@ -81,7 +90,7 @@ struct SpeechSettingsTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tr("Sample phrase")).font(.caption).foregroundStyle(.secondary)
                     // a TextEditor: a multi-line TextField in a grouped form aligns its text to the trailing edge
-                    TextEditor(text: $sample)
+                    TextEditor(text: sample)
                         .font(.body)
                         .frame(height: 56)
                         .scrollContentBackground(.hidden)
@@ -312,7 +321,7 @@ struct SpeechSettingsTab: View {
     }
 
     private func preview() {
-        env.voice.previewSpeech(sample)
+        env.voice.previewSpeech(sample.wrappedValue)
     }
 
     private static func installedVoices() -> [VoiceInfo] {

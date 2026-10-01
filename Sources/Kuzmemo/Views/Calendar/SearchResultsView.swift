@@ -40,7 +40,7 @@ struct SearchResultsView: View {
     private var summary: String {
         let query = calendar.searchText.trimmingCharacters(in: .whitespaces)
         if query.isEmpty { return tr("Find an entry by title or keyword") }
-        return "«\(query)» — \(Wording.entryCount(calendar.searchResults.count))"
+        return "\(Wording.quoted(query)) — \(Wording.entryCount(calendar.searchResults.count))"
     }
 }
 

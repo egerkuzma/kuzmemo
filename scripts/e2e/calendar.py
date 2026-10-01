@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Checks of the calendar window through the dev app's control socket: demo data, window states, renders, and the
-real window (opened behind other windows without activating the app, then closed).
+real window (opened behind other windows without activating the app, then closed), including what the editor does when
+it is saved or cancelled (keys are typed into the sheet through /window/key).
 
 Needs the dev app running (scripts/run_app.sh). It erases the dev database and pins the clock to
 2026-09-28 14:30. It never brings the window in front of the person's work.
@@ -116,6 +117,28 @@ def main():
     check("a new entry opens the sheet too", call("GET", "/window").get("sheetAttached") is True)
     call("POST", "/ui", {"editor": None})
     time.sleep(0.5)
+
+    print("saving from the editor")
+    # Return is the Save button of the sheet, Escape its Cancel. A save closes the sheet; one that fails (here the entry was
+    # erased while the editor was open) keeps it open, so that what was typed is not lost.
+    call("POST", "/ui", {"editor": "Встреча с Дмитрием"})
+    time.sleep(0.8)
+    pressed = call("POST", "/window/key?name=main&key=return&sheet=1")
+    time.sleep(0.8)
+    check("Return saves the entry and closes the sheet", pressed.get("handled") is True and call("GET", "/window").get("sheetAttached") is False, str(pressed))
+    check("…and says so", "Сохранено" in " ".join((call("GET", "/state").get("toast") or {}).get("lines", [])))
+    call("POST", "/ui", {"editor": "Встреча с Дмитрием"})
+    time.sleep(0.8)
+    call("POST", "/db/reset")
+    call("POST", "/window/key?name=main&key=return&sheet=1")
+    time.sleep(0.8)
+    check("a save that fails keeps the sheet open", call("GET", "/window").get("sheetAttached") is True)
+    call("POST", "/window/key?name=main&key=escape&sheet=1")
+    time.sleep(0.8)
+    check("Escape closes it without saving", call("GET", "/window").get("sheetAttached") is False)
+    call("POST", "/dev/seed")
+    call("POST", "/ui", {"mode": "day", "date": "2026-09-29"})
+
     closed = call("POST", "/window/close")
     time.sleep(0.3)
     check("it closes", call("GET", "/window").get("open") is False, str(closed))

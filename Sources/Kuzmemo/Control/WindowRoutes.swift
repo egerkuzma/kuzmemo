@@ -54,6 +54,26 @@ enum WindowRoutes {
         return describe(name)
     }
 
+    /// Types a key into the window, or into the sheet attached to it, the way the person would, without activating the app:
+    /// `return` is the default button (Save), `escape` is Cancel. For checks of what a sheet does when it is saved or dismissed,
+    /// where a window that is deliberately kept behind everything cannot be clicked.
+    static func key(name: String = "main", key: String, sheet: Bool) -> HTTPResponse {
+        guard let window = window(name), window.isVisible else { return .error("the \(name) window is not open", status: 404) }
+        guard let target = sheet ? window.attachedSheet : window else { return .error("no sheet is attached", status: 404) }
+        let typed: (characters: String, code: UInt16)
+        switch key {
+        case "return": typed = ("\r", 36)
+        case "escape": typed = ("\u{1b}", 53)
+        default: return .error("key is \"return\" or \"escape\"", status: 400)
+        }
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: target.windowNumber, context: nil, characters: typed.characters, charactersIgnoringModifiers: typed.characters,
+            isARepeat: false, keyCode: typed.code
+        ) else { return .error("cannot make the key event", status: 500) }
+        return .json(["handled": target.performKeyEquivalent(with: event)])
+    }
+
     /// `front` puts the window on top for a moment (without activating the app or taking keyboard focus) because
     /// SwiftUI does not redraw a window that is fully covered, so a covered window captures half empty.
     /// `chrome` draws the whole window as the person sees it, title bar and toolbar (or tab strip) included, by

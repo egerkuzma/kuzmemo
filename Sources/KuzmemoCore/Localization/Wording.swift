@@ -78,6 +78,11 @@ public enum Wording {
     /// Text in the quotation marks of the current language: «Созвон» / “Team sync”.
     public static func quoted(_ text: String) -> String { tr("“%1$@”", text) }
 
+    /// A size on disk, "1.2 MB" / "1,2 МБ", in the interface language (the system's own may be another one).
+    public static func fileSize(bytes: Int64) -> String {
+        bytes.formatted(.byteCount(style: .file, spellsOutZero: false).locale(Localization.current.locale))
+    }
+
     // MARK: - Lengths of time
 
     /// "5 минут" / "5 minutes", "1 час" / "1 hour", "2 дня" / "2 days": a whole number of minutes, hours or days.

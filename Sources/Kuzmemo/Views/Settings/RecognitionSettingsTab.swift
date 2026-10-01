@@ -5,29 +5,24 @@ import SwiftUI
 /// Speech recognition: which model, which language, how long it stays in memory, and a check with the microphone.
 struct RecognitionSettingsTab: View {
     let env: AppEnvironment
-    @State private var installed = RecognitionSettingsTab.installedNow()
-    @State private var installing: String?
-    /// How far a download has got (0...1); `nil` while a copy is made or before the first bytes arrive.
-    @State private var progress: Double?
-    @State private var copying = false
-    @State private var installError: String?
     @State private var tester = RecognitionTester()
 
     var body: some View {
         @Bindable var settings = env.settings
+        let models = env.models
         Form {
             Section(tr("Speech recognition model")) {
                 ForEach(ModelCatalog.variants) { variant in
                     ModelRow(
                         variant: variant, selected: settings.recognition.modelVariant == variant.id,
-                        installed: installed.contains(variant.id), canCopy: ModelCatalog.canInstall(variant),
-                        installing: installing == variant.id, copying: copying, progress: progress,
+                        installed: models.installed.contains(variant.id), canCopy: models.copyable.contains(variant.id),
+                        running: models.running[variant.id],
                         select: { settings.recognition.modelVariant = variant.id },
-                        install: { install(variant) }
+                        install: { models.install(variant) }
                     )
                 }
                 LabeledContent(tr("Current")) { Text(verbatim: env.voice.modelSummary).foregroundStyle(.secondary) }
-                if let installError { Text(verbatim: installError).font(.caption).foregroundStyle(.red) }
+                if let failure = models.failure { Text(verbatim: failure).font(.caption).foregroundStyle(.red) }
                 Hint(tr("A model is downloaded from Hugging Face the first time (or copied, when another app already has it in Documents/huggingface). The first load of a new model on this Mac takes up to a couple of minutes (Core ML prepares it once), then about a second."))
             }
             Section(tr("Try it")) {
@@ -62,7 +57,10 @@ struct RecognitionSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .task { refresh() }
+        .task {
+            env.models.refresh()
+            env.models.probeSources()
+        }
     }
 
     @ViewBuilder private var testOutput: some View {
@@ -95,40 +93,6 @@ struct RecognitionSettingsTab: View {
     private static func seconds(_ value: Double) -> String {
         String(format: tr("%.1f s"), locale: Localization.current.locale, value)
     }
-
-    private static func installedNow() -> Set<String> {
-        Set(ModelCatalog.variants.filter { ModelCatalog.isInstalled($0) }.map(\.id))
-    }
-
-    private func refresh() {
-        installed = Self.installedNow()
-    }
-
-    private func install(_ variant: ModelVariant) {
-        installing = variant.id
-        installError = nil
-        progress = nil
-        copying = ModelCatalog.canInstall(variant)
-        let copy = copying
-        Task {
-            var failure: String?
-            if copy {
-                failure = await Task.detached { () -> String? in
-                    do { try ModelCatalog.install(variant); return nil } catch { return "\(error)" }
-                }.value
-            } else {
-                do {
-                    try await ModelCatalog.download(variant) { fraction in Task { @MainActor in progress = fraction } }
-                } catch {
-                    failure = "\(error)"
-                }
-            }
-            installing = nil
-            progress = nil
-            refresh()
-            if let failure { installError = tr("Could not install the model: %1$@", "\(failure)") }
-        }
-    }
 }
 
 private struct ModelRow: View {
@@ -136,9 +100,8 @@ private struct ModelRow: View {
     let selected: Bool
     let installed: Bool
     let canCopy: Bool
-    let installing: Bool
-    let copying: Bool
-    let progress: Double?
+    /// Set while the model is being downloaded or copied.
+    let running: ModelInstaller.Progress?
     let select: () -> Void
     let install: () -> Void
 
@@ -157,13 +120,13 @@ private struct ModelRow: View {
                 Text(verbatim: variant.detail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if installing {
-                if let progress, !copying {
-                    ProgressView(value: progress).frame(width: 90)
-                    Text(verbatim: "\(Int(progress * 100)) %").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            if let running {
+                if let fraction = running.fraction, !running.copying {
+                    ProgressView(value: fraction).frame(width: 90)
+                    Text(verbatim: "\(Int(fraction * 100)) %").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 } else {
                     ProgressView().controlSize(.small)
-                    Text(copying ? tr("Copying…") : tr("Downloading…")).font(.caption).foregroundStyle(.secondary)
+                    Text(running.copying ? tr("Copying…") : tr("Downloading…")).font(.caption).foregroundStyle(.secondary)
                 }
             } else if installed {
                 Text(selected ? tr("In use") : tr("Installed")).font(.caption).foregroundStyle(.secondary)

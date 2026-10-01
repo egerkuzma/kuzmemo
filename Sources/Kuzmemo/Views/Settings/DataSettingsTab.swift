@@ -35,7 +35,7 @@ struct DataSettingsTab: View {
                     Text(verbatim: contents).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                 }
                 LabeledContent(tr("Size")) {
-                    Text(verbatim: ByteCountFormatter.string(fromByteCount: data.databaseBytes, countStyle: .file)).foregroundStyle(.secondary)
+                    Text(verbatim: Wording.fileSize(bytes: data.databaseBytes)).foregroundStyle(.secondary)
                 }
                 LabeledContent(tr("Integrity")) {
                     HStack {
@@ -55,7 +55,7 @@ struct DataSettingsTab: View {
                 } else {
                     ForEach(data.copies.prefix(Self.shownCopies)) { copy in
                         LabeledContent {
-                            Text(verbatim: ByteCountFormatter.string(fromByteCount: copy.bytes, countStyle: .file)).foregroundStyle(.secondary)
+                            Text(verbatim: Wording.fileSize(bytes: copy.bytes)).foregroundStyle(.secondary)
                         } label: {
                             HStack(spacing: 6) {
                                 Text(verbatim: DataMaintenance.describe(copy))

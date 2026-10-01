@@ -5,9 +5,9 @@ Every text passed to tr("…") or trCount("…") in Swift sources must have a Ru
 Sources/KuzmemoCore/Resources/ru.lproj/Localizable.strings (English is the source language and needs no entry, except
 for plural forms), and every entry of the tables must still be used. A translation may not use a placeholder its English
 key lacks, and a call must pass as many arguments as its text has placeholders (`String(format:)` with too few
-arguments reads garbage). A stored static or global property must not call tr(): it would keep the language of its first
-use after the person switches languages (make it a computed property). Exit status 1 when something is missing, unused
-or inconsistent.
+arguments reads garbage). A stored static or global property, or the first value of a @State, must not call tr(): it would
+keep the language of its first use after the person switches languages (make it a computed property, or keep only what the
+person typed and fall back to a computed default). Exit status 1 when something is missing, unused or inconsistent.
 
     scripts/check_localization.py [--prune]      (--prune deletes unused entries from both tables)
 """
@@ -76,18 +76,21 @@ def argument_count(source, start):
 
 
 STORED = re.compile(r"^\s*(?:(?:private|fileprivate|public|internal)\s+)?(?:nonisolated\s+)?(?:static\s+)?(?:let|var)\s+\w+[^=\n{]*=\s*(.*)$")
+STATE = re.compile(r"^\s*@(?:State|StateObject|SceneStorage)\b[^=\n]*=\s*(.*)$")
 LOCALIZED = re.compile(r"\b(?:tr|trCount|Wording\.\w+)\(")
 
 
 def frozen_texts():
-    """Stored static or global properties whose initializer calls tr()/Wording: they keep their first language."""
+    """Stored static or global properties, and @State first values, that call tr()/Wording: they keep their first language."""
     found = []
     for source in sorted((ROOT / "Sources").rglob("*.swift")):
         lines = source.read_text().splitlines()
         for number, line in enumerate(lines):
             m = STORED.match(line)
             if not m or not (re.search(r"\bstatic\b", line) or len(line) - len(line.lstrip()) == 0):
-                continue
+                m = STATE.match(line)
+                if not m:
+                    continue
             text = m.group(1)
             depth = sum(text.count(c) for c in "([{") - sum(text.count(c) for c in ")]}")
             end = number + 1
@@ -138,7 +141,7 @@ def main():
         elif given > 0 and given != wanted:  # a bare tr("… %1$@ …") is returned as it is, so zero arguments are allowed
             print(f"{path}:{line}: {given} argument(s) for {wanted} placeholder(s): {key!r}"); problems += 1
     for path, line, text in frozen_texts():
-        print(f"{path}:{line}: a stored property calls tr(), so it keeps the first language: {text}"); problems += 1
+        print(f"{path}:{line}: a stored property or @State calls tr(), so it keeps the first language: {text}"); problems += 1
     for table_name, table in (("ru", ru), ("en", en)):
         for key, value in table.items():
             base = key.split("|")[0]
