@@ -106,17 +106,27 @@ done
 [ -e "$ROOT/Resources/Sounds/Kuzmemo-bell.wav" ] || python3 "$ROOT/scripts/make_sounds.py" # generated, not committed
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
 # The app icon is drawn by scripts/make_icon.swift (generated, not committed); the automation build gets a grey one
-[ -e "$ROOT/Resources/AppIcon.icns" ] || swift "$ROOT/scripts/make_icon.swift"
+{ [ -e "$ROOT/Resources/AppIcon.icns" ] && [ -e "$ROOT/Resources/AppIcon.icon/icon.json" ]; } || swift "$ROOT/scripts/make_icon.swift"
 if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; fi
 cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
-# The same icon as an asset catalog as well: macOS 26 takes the icon of a notification banner (and of the Dock) from
-# Assets.car through CFBundleIconName, and showed a blank white square for an app that only has an .icns file.
+# The icon in the layered format of macOS 26 as well, compiled into Assets.car (CFBundleIconName names it). A notification
+# banner takes its icon from there: with only an .icns file the banner showed a blank white square. The layered document
+# (Resources/AppIcon.icon) is drawn by scripts/make_icon.swift; if Xcode's actool cannot compile it, the same pictures go
+# in as a plain asset catalog, and failing that the build carries on with the .icns alone.
+ICON_DOC="$ROOT/Resources/${ICON%.icns}.icon"
 ASSETS="$APPDIR/icon-assets"
 rm -rf "$ASSETS"
-mkdir -p "$ASSETS/Assets.xcassets/AppIcon.appiconset" "$ASSETS/out"
-iconutil -c iconset "$ROOT/Resources/$ICON" -o "$ASSETS/AppIcon.iconset"
-cp "$ASSETS"/AppIcon.iconset/*.png "$ASSETS/Assets.xcassets/AppIcon.appiconset/"
-python3 - "$ASSETS/Assets.xcassets" <<'PY'
+mkdir -p "$ASSETS/out"
+ICON_NAME_ENTRY=""
+compile_icon() { xcrun actool "$1" --compile "$ASSETS/out" --platform macosx --minimum-deployment-target 26.0 \
+                   --app-icon AppIcon --output-partial-info-plist "$ASSETS/out/partial.plist" >/dev/null 2>&1 && [ -s "$ASSETS/out/Assets.car" ]; }
+if [ -d "$ICON_DOC" ] && compile_icon "$ICON_DOC"; then
+  :
+else
+  mkdir -p "$ASSETS/Assets.xcassets/AppIcon.appiconset"
+  iconutil -c iconset "$ROOT/Resources/$ICON" -o "$ASSETS/AppIcon.iconset"
+  cp "$ASSETS"/AppIcon.iconset/*.png "$ASSETS/Assets.xcassets/AppIcon.appiconset/"
+  python3 - "$ASSETS/Assets.xcassets" <<'PY'
 import json, sys
 root = sys.argv[1]
 images = [{"filename": "icon_%dx%d%s.png" % (s, s, "@2x" if k == 2 else ""), "idiom": "mac", "scale": "%dx" % k, "size": "%dx%d" % (s, s)}
@@ -124,14 +134,14 @@ images = [{"filename": "icon_%dx%d%s.png" % (s, s, "@2x" if k == 2 else ""), "id
 json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, open(root + "/AppIcon.appiconset/Contents.json", "w"), indent=2)
 json.dump({"info": {"author": "xcode", "version": 1}}, open(root + "/Contents.json", "w"))
 PY
-if xcrun actool "$ASSETS/Assets.xcassets" --compile "$ASSETS/out" --platform macosx --minimum-deployment-target 26.0 \
-     --app-icon AppIcon --output-partial-info-plist "$ASSETS/out/partial.plist" >/dev/null 2>&1 && [ -s "$ASSETS/out/Assets.car" ]; then
+  compile_icon "$ASSETS/Assets.xcassets" || rm -f "$ASSETS/out/Assets.car"
+fi
+if [ -s "$ASSETS/out/Assets.car" ]; then
   cp "$ASSETS/out/Assets.car" "$APP/Contents/Resources/Assets.car"
   ICON_NAME_ENTRY="    <key>CFBundleIconName</key><string>AppIcon</string>
 "
 else
-  echo "note: the asset catalog of the icon could not be made (Xcode's actool is needed); notifications may show a blank icon" >&2
-  ICON_NAME_ENTRY=""
+  echo "note: the layered icon could not be compiled (Xcode's actool is needed); notifications may show a blank icon" >&2
 fi
 # The Silero voice runs in a small Python helper (see scripts/install_silero.sh)
 cp "$ROOT/Resources/Silero/silero_helper.py" "$APP/Contents/Resources/"
