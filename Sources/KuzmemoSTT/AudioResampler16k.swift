@@ -13,6 +13,9 @@ public final class AudioResampler16k {
               let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: inputFormat, to: output)
         else { return nil }
+        // Without this a stereo input is made mono by taking the first channel only: a voice that reaches the microphone
+        // through the second channel (an audio interface's second input, a one-sided file) would come out silent.
+        converter.downmix = true
         self.converter = converter
         self.outputFormat = output
         self.ratio = 16_000 / inputFormat.sampleRate

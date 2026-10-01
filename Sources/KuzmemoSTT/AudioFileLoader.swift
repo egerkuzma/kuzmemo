@@ -19,6 +19,7 @@ public enum AudioFileLoader {
             let count = min(chunk, AVAudioFrameCount(file.length - file.framePosition))
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else { break }
             do { try file.read(into: buffer, frameCount: count) } catch { throw LoadError.unreadable("\(error)") }
+            guard buffer.frameLength > 0 else { break } // a file shorter than its header says: stop instead of waiting for frames that never come
             samples += resampler.convert(buffer)
         }
         samples += resampler.finish()

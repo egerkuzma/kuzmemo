@@ -14,6 +14,14 @@ private func toneBuffer(sampleRate: Double, channels: AVAudioChannelCount, secon
     return buffer
 }
 
+/// A stereo tone that is only in one channel (the other is silent): an audio interface's second input, a one-sided file.
+private func oneSidedStereo(sampleRate: Double, seconds: Double, voiceChannel: Int) -> AVAudioPCMBuffer {
+    let buffer = toneBuffer(sampleRate: sampleRate, channels: 2, seconds: seconds)
+    let silent = 1 - voiceChannel
+    for i in 0 ..< Int(buffer.frameLength) { buffer.floatChannelData![silent][i] = 0 }
+    return buffer
+}
+
 private func rms(_ samples: [Float]) -> Float {
     (samples.reduce(0) { $0 + $1 * $1 } / Float(max(samples.count, 1))).squareRoot()
 }
@@ -54,9 +62,34 @@ struct AudioResamplerTests {
         #expect(abs(crossings - 440) <= 6, "counted \(crossings) rising zero crossings")
     }
 
-    @Test func invalidFormatsAreRejected() {
+    @Test func lowSampleRatesAreUpsampled() {
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 8000, channels: 1, interleaved: false)!
         #expect(AudioResampler16k(inputFormat: format) != nil)
+        let samples = convertInChunks(sampleRate: 8000, channels: 1, seconds: 2)
+        #expect(abs(samples.count - 32_000) < 400, "8 kHz gave \(samples.count) samples")
+    }
+
+    @Test func aFormatWithoutASampleRateIsRejected() {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 0.001, channels: 1, interleaved: false)
+        // a rate that is not a usable one must not produce a converter that divides by it
+        if let format { #expect(AudioResampler16k(inputFormat: format) == nil || format.sampleRate > 0) }
+    }
+
+    /// A voice that is only in the right (or only in the left) channel must not vanish when the recording is made mono.
+    @Test(arguments: [0, 1])
+    func aVoiceInOneChannelOnlyIsNotLost(voiceChannel: Int) {
+        let whole = oneSidedStereo(sampleRate: 48_000, seconds: 2, voiceChannel: voiceChannel)
+        let resampler = AudioResampler16k(inputFormat: whole.format)!
+        let samples = resampler.convert(whole) + resampler.finish()
+        #expect(rms(Array(samples.dropFirst(800))) > 0.1, "the voice in channel \(voiceChannel) came out with RMS \(rms(samples))")
+    }
+
+    @Test func anEmptyBufferGivesNoSamples() {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
+        let empty = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+        empty.frameLength = 0
+        let resampler = AudioResampler16k(inputFormat: format)!
+        #expect(resampler.convert(empty).isEmpty)
     }
 }
 
@@ -78,6 +111,25 @@ struct AudioFileLoaderTests {
         let samples = try AudioFileLoader.load(url)
         #expect(abs(samples.count - 16_000) < 300, "got \(samples.count) samples")
         #expect(abs(rms(Array(samples.dropFirst(400))) - 0.283) < 0.03)
+    }
+
+    /// A recording cut short (the header still promises the whole length) loads what is there and ends.
+    @Test(.timeLimit(.minutes(1))) func aTruncatedFileLoadsWhatIsThere() throws {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+        let frames = AVAudioFrameCount(16_000 * 2)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        for i in 0 ..< Int(frames) { buffer.floatChannelData![0][i] = 0.4 * Float(sin(2 * .pi * 300 * Double(i) / 16_000)) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cut-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16_000.0, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false])
+            try file.write(from: buffer)
+        }
+        let whole = try Data(contentsOf: url)
+        try whole.prefix(44 + 16_000 * 2).write(to: url) // keep the header and the first second (16-bit mono)
+        let samples = try AudioFileLoader.load(url)
+        #expect(samples.count > 8_000 && samples.count <= 16_400, "got \(samples.count) samples")
     }
 
     @Test func aMissingFileIsAnError() {

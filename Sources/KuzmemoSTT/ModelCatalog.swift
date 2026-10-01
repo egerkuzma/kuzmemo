@@ -53,8 +53,17 @@ public enum ModelCatalog {
     /// The Core ML parts a model folder must hold (a download that stopped halfway lacks some of them).
     private static let modelParts = ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "TextDecoder.mlmodelc"]
 
+    /// The files inside each part that make it usable. The downloader writes a file under its final name only when it has
+    /// arrived whole, but it creates a part's folder as soon as the first file of that part is there, so the folders alone
+    /// say nothing: a download that dropped in the middle leaves all of them without the big weights file.
+    private static let partFiles = ["coremldata.bin", "weights/weight.bin"]
+
     private static func isComplete(_ folder: URL) -> Bool {
-        modelParts.allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: folder.appendingPathComponent("config.json").path) else { return false }
+        return modelParts.allSatisfy { part in
+            partFiles.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent("\(part)/\($0)").path) }
+        }
     }
 
     /// Installed means the model folder is complete and its tokenizer files are in place.
@@ -91,6 +100,9 @@ public enum ModelCatalog {
                 _ = try await WhisperKit.download(variant: variant.id, downloadBase: root, progressCallback: { fetched in
                     progress?(min(fetched.fractionCompleted, 1) * 0.98)
                 })
+                guard isComplete(modelFolder(variant, in: root)) else {
+                    throw InstallError.downloadFailed(tr("The model arrived incomplete. Try again."))
+                }
             }
             let tokenizerTarget = tokenizerFolder(variant, in: root)
             try fm.createDirectory(at: tokenizerTarget, withIntermediateDirectories: true)
@@ -120,9 +132,15 @@ public enum ModelCatalog {
         }
         let fm = FileManager.default
         let destination = modelFolder(variant, in: root)
-        if !fm.fileExists(atPath: destination.path) {
+        if !isComplete(destination) {
             try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try clone(modelFolder(variant, in: source), to: destination)
+            // Copy beside the final place and move it in when whole: an app that is quit or killed in the middle of a copy
+            // must not leave a folder that looks like a model. What stands there already is ours and incomplete.
+            let partial = destination.deletingLastPathComponent().appendingPathComponent(destination.lastPathComponent + ".installing", isDirectory: true)
+            try? fm.removeItem(at: partial)
+            try? fm.removeItem(at: destination)
+            try clone(modelFolder(variant, in: source), to: partial)
+            try fm.moveItem(at: partial, to: destination)
         }
         let tokenizerTarget = tokenizerFolder(variant, in: root)
         try fm.createDirectory(at: tokenizerTarget, withIntermediateDirectories: true)

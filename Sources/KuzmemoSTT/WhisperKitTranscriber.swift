@@ -78,8 +78,11 @@ public actor WhisperKitTranscriber: Transcriber {
         }
     }
 
+    /// Loads the model ahead of a recording (at launch and when a key goes down). The idle timer starts here too: a
+    /// recording that ends without speech never reaches `transcribe`, and a model loaded for nothing must still go.
     public func prepare() async throws {
         _ = try await loadedPipe()
+        scheduleIdleUnload()
     }
 
     public func transcribe(_ samples: [Float]) async throws -> TranscriptionOutput {
@@ -111,8 +114,11 @@ public actor WhisperKitTranscriber: Transcriber {
     public func unload() async {
         idleTask?.cancel()
         idleTask = nil
-        await pipe?.unloadModels()
+        // Let go of the pipe before waiting: a caller that arrives meanwhile loads a fresh one instead of being handed
+        // models that are being freed.
+        let old = pipe
         pipe = nil
+        await old?.unloadModels()
     }
 
     // MARK: - Internals
