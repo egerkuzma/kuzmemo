@@ -3,12 +3,16 @@
 # and Input Monitoring grants are bound to the signing certificate), installs it to ~/Applications and
 # launches that copy.
 #
-#   scripts/run_app.sh [--prod] [--no-launch] [--adhoc] [--force]
+#   scripts/run_app.sh [--prod|--dist] [--no-launch] [--adhoc] [--force]
 #
 # Two bundles, each with its own data folder:
 #   default  app.kuzmemo.dev  "Kuzmemo Dev"  Kuzmemo-Dev  the automation build for scripts/e2e: control socket on,
 #                                            muted, ignores Fn and the chord, never opens the real microphone
 #   --prod   app.kuzmemo      "Kuzmemo"      Kuzmemo      the daily app for the person, no control socket
+#   --dist   app.kuzmemo      "Kuzmemo"                   a build to give to other people (scripts/make_dmg.sh): signed ad hoc, built in its
+#                                                        own scratch folder with the paths of this machine mapped away and the symbols
+#                                                        stripped, the install scripts inside, nothing installed or launched
+# KUZMEMO_VERSION overrides the version string of the bundle (VERSION is the default).
 # Start the dev bundle only when the daily app is not running (the check below stops you; --force overrides).
 set -euo pipefail
 
@@ -22,12 +26,15 @@ FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --prod) FLAVOR=prod ;;
+    --dist) FLAVOR=dist ;;
     --force) FORCE=1 ;;
     --no-launch) LAUNCH=0 ;;
     --adhoc) ADHOC=1 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [ "$FLAVOR" = dist ]; then LAUNCH=0; ADHOC=1; fi
 
 AUTOMATION=false
 case "$FLAVOR" in
@@ -40,7 +47,9 @@ if [ "$FLAVOR" = dev ] && [ "$FORCE" = 0 ] && [ "$LAUNCH" = 1 ] \
   echo "the daily app (Kuzmemo) is running: quit it first (the dev bundle is for scripts) or use --force." >&2
   exit 3
 fi
-VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)"
+VERSION="${KUZMEMO_VERSION:-$(cat "$ROOT/VERSION" 2>/dev/null || echo 0.1.0)}"
+# A build number that changes with every commit: system caches (the icon in notifications, for one) are keyed by it
+BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 GIT_HASH="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # --- signing identity -------------------------------------------------------------------------------
@@ -67,19 +76,28 @@ if [ "$ADHOC" = 0 ]; then
     || { echo "signing identity $IDENTITY not found (use --adhoc to sign ad hoc; permissions will reset on every build)" >&2; exit 1; }
 else
   IDENTITY="-"
-  echo "WARNING: ad-hoc signing: the microphone/Input Monitoring grants will not survive a rebuild." >&2
+  [ "$FLAVOR" = dist ] || echo "WARNING: ad-hoc signing: the microphone/Input Monitoring grants will not survive a rebuild." >&2
 fi
 
 # --- build ------------------------------------------------------------------------------------------
-swift build -c release --product Kuzmemo
-BIN="$(swift build -c release --show-bin-path)/Kuzmemo"
+EXTRA=()
+APPDIR="$ROOT/.build/app"
+if [ "$FLAVOR" = dist ]; then
+  # An own scratch folder (the flags below change every object file), and no path of this machine in what is shipped
+  EXTRA=(--scratch-path "$ROOT/.build/dist" -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/kuzmemo" -Xswiftc -debug-prefix-map -Xswiftc "$ROOT=/kuzmemo")
+  APPDIR="$ROOT/.build/dist-app"
+fi
+swift build -c release --product Kuzmemo ${EXTRA[@]+"${EXTRA[@]}"}
+BINDIR="$(swift build -c release --show-bin-path ${EXTRA[@]+"${EXTRA[@]}"})"
+BIN="$BINDIR/Kuzmemo"
 
-APP="$ROOT/.build/app/$APP_NAME.app"
+APP="$APPDIR/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Kuzmemo"
+[ "$FLAVOR" = dist ] && strip -S -x "$APP/Contents/MacOS/Kuzmemo"
 # SwiftPM resource bundles (for example from dependencies) must live next to the resources
-for b in "$(swift build -c release --show-bin-path)"/*.bundle; do
+for b in "$BINDIR"/*.bundle; do
   [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
@@ -93,8 +111,16 @@ if [ "$FLAVOR" = dev ]; then ICON="AppIconDev.icns"; else ICON="AppIcon.icns"; f
 cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
 # The Silero voice runs in a small Python helper (see scripts/install_silero.sh)
 cp "$ROOT/Resources/Silero/silero_helper.py" "$APP/Contents/Resources/"
+if [ "$FLAVOR" = dist ]; then
+  # Nobody who downloads the app has the source folder: the commands the settings pages show point here instead
+  mkdir -p "$APP/Contents/Resources/scripts"
+  cp "$ROOT/scripts/install_silero.sh" "$ROOT/scripts/install_omnivoice.sh" "$APP/Contents/Resources/scripts/"
+fi
 for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
 
+SOURCE_ROOT_ENTRY="    <key>KuzmemoSourceRoot</key><string>$ROOT</string>
+"
+[ "$FLAVOR" = dist ] && SOURCE_ROOT_ENTRY=""
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,7 +132,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Kuzmemo</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleLocalizations</key><array><string>en</string><string>ru</string></array>
@@ -118,8 +144,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>KuzmemoControlEnabled</key><$CONTROL/>
     <key>KuzmemoAutomation</key><$AUTOMATION/>
     <key>KuzmemoGitCommit</key><string>$GIT_HASH</string>
-    <key>KuzmemoSourceRoot</key><string>$ROOT</string>
-</dict>
+$SOURCE_ROOT_ENTRY</dict>
 </plist>
 PLIST
 
@@ -132,7 +157,7 @@ cat > "$APP/Contents/Resources/ru.lproj/InfoPlist.strings" <<'STR'
 "NSMicrophoneUsageDescription" = "Kuzmemo записывает твою речь, чтобы превратить её в записи календаря. Звук обрабатывается на этом Mac и удаляется сразу после расшифровки.";
 STR
 
-cat > "$ROOT/.build/app/Kuzmemo.entitlements" <<ENT
+cat > "$APPDIR/Kuzmemo.entitlements" <<ENT
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -143,9 +168,11 @@ cat > "$ROOT/.build/app/Kuzmemo.entitlements" <<ENT
 </plist>
 ENT
 
-codesign --force --sign "$IDENTITY" --entitlements "$ROOT/.build/app/Kuzmemo.entitlements" "$APP"
+codesign --force --sign "$IDENTITY" --entitlements "$APPDIR/Kuzmemo.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
 echo "signed: $(codesign -dr - "$APP" 2>&1 | grep -i designated | sed 's/^# //')"
+
+if [ "$FLAVOR" = dist ]; then echo "built: $APP"; exit 0; fi
 
 # --- install and launch -----------------------------------------------------------------------------
 DEST="$HOME/Applications/$APP_NAME.app"

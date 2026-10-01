@@ -1,0 +1,49 @@
+Kuzmemo: how to install and open it
+===================================
+
+1. Drag Kuzmemo onto the Applications folder.
+
+2. Open it the first time like this (macOS does this for every app that is not notarized by Apple, and Kuzmemo is not,
+   because it is a personal open-source project):
+   - double-click Kuzmemo in Applications; macOS says it cannot verify it, click "Done";
+   - open System Settings > Privacy & Security, scroll down to the message about "Kuzmemo" and click "Open Anyway",
+     then confirm with your password or Touch ID.
+   (Or, in Terminal: xattr -dr com.apple.quarantine /Applications/Kuzmemo.app )
+
+3. It lives in the menu bar (no Dock icon). Allow the microphone when asked. For the Fn key, allow "Input Monitoring"
+   in System Settings > Privacy & Security (the ^-option-M chord works without it).
+
+4. You need: a Mac with Apple silicon and macOS 26 or newer, and Claude Code (https://claude.com/claude-code) installed
+   and signed in (run `claude auth login` once): Kuzmemo asks it to understand what you say. Speech recognition runs on
+   your Mac: download a model in Settings > Recognition (about 1.5 GB, one time).
+
+5. Optional voices (Settings > Speech) are installed by two scripts inside the app, shown on that page with a button to
+   copy the command: the Silero voice (Python) and your own voice "My voice" (needs Xcode command line tools and CMake).
+
+Source code, issues and the full README: https://github.com/egerkuzma/kuzmemo  (MIT license, see LICENSE)
+
+
+Как установить и открыть Kuzmemo
+================================
+
+1. Перетащите Kuzmemo в папку «Программы».
+
+2. В первый раз откройте так (macOS просит это для любого приложения без нотаризации Apple, а Kuzmemo без неё:
+   это личный проект с открытым кодом):
+   - дважды щёлкните Kuzmemo в «Программах»; macOS скажет, что не может проверить приложение, нажмите «Готово»;
+   - откройте Системные настройки > Конфиденциальность и безопасность, внизу найдите сообщение про «Kuzmemo» и нажмите
+     «Всё равно открыть», подтвердите паролем или Touch ID.
+   (Или в Терминале: xattr -dr com.apple.quarantine /Applications/Kuzmemo.app )
+
+3. Приложение живёт в строке меню (значка в Dock нет). Разрешите микрофон, когда спросит. Для клавиши Fn разрешите
+   «Мониторинг ввода» там же (сочетание ^-option-M работает без этого).
+
+4. Нужны: Mac на Apple silicon с macOS 26 или новее и установленный, авторизованный Claude Code
+   (https://claude.com/claude-code; один раз выполните `claude auth login`): Kuzmemo просит его понять сказанное.
+   Распознавание речи работает на вашем Mac: скачайте модель в Настройки > Распознавание (около 1,5 ГБ, один раз).
+
+5. Необязательные голоса (Настройки > Озвучка) ставят два скрипта внутри приложения; команда показана на странице с
+   кнопкой копирования: голос Silero (Python) и ваш собственный голос «Мой голос» (нужны инструменты командной строки
+   Xcode и CMake).
+
+Исходный код, вопросы и полный README: https://github.com/egerkuzma/kuzmemo  (лицензия MIT, файл LICENSE)

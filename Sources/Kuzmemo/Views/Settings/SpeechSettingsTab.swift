@@ -236,7 +236,7 @@ struct SpeechSettingsTab: View {
 
     /// What to run in the Terminal to install the program of the voice (the project folder is known from the build).
     private static var installCloneCommand: String {
-        let root = (Bundle.main.object(forInfoDictionaryKey: "KuzmemoSourceRoot") as? String) ?? tr("<project folder>")
+        let root = (Bundle.main.object(forInfoDictionaryKey: "KuzmemoSourceRoot") as? String) ?? Bundle.main.resourcePath ?? tr("<project folder>")
         return "\"\(root)/scripts/install_omnivoice.sh\""
     }
 
@@ -296,7 +296,7 @@ struct SpeechSettingsTab: View {
 
     /// What to run in the Terminal to set Silero up (the project folder is known from the build).
     private static var installCommand: String {
-        let root = (Bundle.main.object(forInfoDictionaryKey: "KuzmemoSourceRoot") as? String) ?? tr("<project folder>")
+        let root = (Bundle.main.object(forInfoDictionaryKey: "KuzmemoSourceRoot") as? String) ?? Bundle.main.resourcePath ?? tr("<project folder>")
         return "\"\(root)/scripts/install_silero.sh\""
     }
 

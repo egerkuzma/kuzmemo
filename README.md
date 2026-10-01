@@ -78,7 +78,9 @@ The interface, the spoken answers and the recognition are available in **English
 
 ## Quick start
 
-Requirements: macOS 26 or later (Apple silicon recommended), Xcode 26 or later (Swift 6.2+), [Claude Code](https://claude.com/claude-code) installed and signed in with `claude auth login` (Kuzmemo calls `claude -p`, so it uses your Claude subscription; there is no API-key mode), and about 2 GB of disk for the speech model.
+**Download.** The [latest release](https://github.com/egerkuzma/kuzmemo/releases/latest) has a disk image, `Kuzmemo-<version>-arm64.dmg` (Apple silicon, macOS 26 or later). Drag the app to Applications. It is signed ad hoc and not notarized by Apple (this is a personal project, there is no Developer ID), so macOS asks you to confirm the first launch: System Settings > Privacy & Security > *Open Anyway* (`HOW-TO-OPEN.txt` in the image explains it step by step). You still need Claude Code signed in, and you download a speech model in *Settings > Recognition*. Because the signature is ad hoc, macOS asks for the microphone and Input Monitoring again after every update.
+
+**Or build it from source.** Requirements: macOS 26 or later (Apple silicon recommended), Xcode 26 or later (Swift 6.2+), [Claude Code](https://claude.com/claude-code) installed and signed in with `claude auth login` (Kuzmemo calls `claude -p`, so it uses your Claude subscription; there is no API-key mode), and about 2 GB of disk for the speech model.
 
 ```bash
 git clone https://github.com/egerkuzma/kuzmemo.git && cd kuzmemo
@@ -140,11 +142,11 @@ python3 scripts/check_localization.py        # translation tables against the co
 scripts/run_app.sh                           # the automation build, then scripts/e2e/*.py drive the real app
 ```
 
-The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
+The development build is muted, ignores the keyboard trigger, never opens the microphone and exposes a control socket, so the end-to-end scripts (`scripts/e2e/voice.py`, `calendar.py`, `settings.py`, `notifications.py`, `silero.py`, `clone.py`, `mute.py`, `data.py`) can drive the real app without a person; speech fixtures come from `scripts/fixtures/make_synth.sh`. The interface is localized with English source keys and Russian translation tables. The app icon is drawn by `scripts/make_icon.swift`, and the pictures above come from `scripts/screenshots.py --readme`.
 
 Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 
-Status: version 1.0. The voice path, the calendar window, settings, notifications, database copies and the bilingual interface are done. It is a personal project: there is no notarized download, so you build it from source (see [Quick start](#quick-start)).
+Status: version 1.0. The voice path, the calendar window, settings, notifications, database copies and the bilingual interface are done. It is a personal project: the download is signed ad hoc and not notarized, or you can build it from source (see [Quick start](#quick-start)).
 
 ## License
 
