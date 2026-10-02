@@ -359,6 +359,8 @@ enum ControlRoutes {
             body["options"] = clarification.options
         case .unknown:
             body["kind"] = "unknown"
+        case .erased:
+            body["kind"] = "erased"
         case let .failed(error, retryAt):
             body["kind"] = "failed"
             body["error"] = "\(error)"

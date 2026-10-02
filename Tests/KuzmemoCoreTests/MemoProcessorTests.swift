@@ -81,6 +81,47 @@ struct MemoProcessorTests {
         #expect(provider.callCount == 1)
     }
 
+    /// "Erase all entries and history" while a retry is with the model: the answer used to arrive after the erase, save the phrase
+    /// again and make its entry all over (the app only refused to erase while a spoken phrase was being worked on, and a retry
+    /// started by the timer is not that).
+    @Test func anEraseWhileAPhraseIsWithTheModelIsNotUndoneByTheAnswer() async throws {
+        let store = try makeStore()
+        let provider = GatedProvider(ScriptedProvider([.json(createAnswer)]))
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        try await store.save(memo: Memo(id: "failed", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                                        status: .failed, transcriptRaw: "напомни мне послезавтра сказать Дмитрию", nextRetryAt: 1))
+        let retry = Task { await processor.retry(memoID: "failed") }
+        while provider.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+
+        try await store.eraseEntriesAndHistory() // the person erases while the model is thinking
+        await provider.gate.open()
+        _ = await retry.value
+
+        #expect(try await store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 0))
+        #expect(try await store.search("Дмитрию").isEmpty)
+    }
+
+    /// The same for a phrase that is typed, and for one that is waiting for the answer to a question.
+    @Test func aPhraseThatIsErasedIsNeverSavedAgainByAnyStepOfTheProcessor() async throws {
+        let store = try makeStore()
+        let provider = ScriptedProvider([.json(createAnswer)])
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        let memo = Memo(id: "asking", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                        status: .clarifying, transcriptRaw: "напомни про Дмитрия")
+        try await store.save(memo: memo)
+        try await store.eraseEntriesAndHistory()
+        #expect(await processor.keepAsNote(memoID: "asking") == nil) // nothing is there any more to keep
+        await processor.discard(memoID: "asking", reason: "late")
+        await processor.supersede("asking")
+        #expect(try await store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 0))
+    }
+
     /// Two triggers for one memo (the Retry button and the timer, a double click) used to pass the "not in flight" check while
     /// the first was still reading the memo, and the phrase was interpreted and applied twice.
     @Test func severalSimultaneousRetriesApplyThePhraseOnce() async throws {

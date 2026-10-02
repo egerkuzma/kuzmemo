@@ -31,6 +31,8 @@ public struct ProcessOutcome: Sendable {
         case clarify(Clarification)
         /// Not a command (noise, chatter).
         case unknown
+        /// Everything was erased while the phrase was being worked on: nothing of it was saved or made.
+        case erased
         /// The model could not be reached or answered badly. The memo is saved and will be retried.
         case failed(LLMError, retryAt: Date?)
     }
@@ -307,7 +309,11 @@ public actor MemoProcessor {
         memo.failReason = nil
         memo.nextRetryAt = nil
         memo.status = .interpreted
-        try? await store.save(memo: memo)
+        // The model took seconds, and everything may have been erased meanwhile: a phrase that is gone stays gone (a failed
+        // write, as opposed to a refused one, is not a reason to stop).
+        guard (try? await store.saveUnlessErased(memo: memo)) != false else {
+            return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
+        }
 
         switch result.interpretation {
         case let .mutate(plan):
@@ -320,6 +326,8 @@ public actor MemoProcessor {
                 memo.opID = applied.op?.id
                 try? await store.save(memo: memo)
                 return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: result)
+            } catch StoreError.memoErased {
+                return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
             } catch {
                 return await fail(memo, .processFailed(exitCode: -2, stderr: "apply: \(error)"), elapsed: 0, stage: "apply")
             }

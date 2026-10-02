@@ -94,6 +94,23 @@ private struct Skip: Error { let message: String; init(_ message: String) { self
 
 @Suite("UtteranceProcessor")
 struct UtteranceProcessorTests {
+    /// Erasing everything while a recording is being recognised: the recognised words used to be saved into a memo made anew, and
+    /// the phrase went on to the model and into the calendar.
+    @Test func anEraseWhileARecordingIsBeingRecognisedLeavesNothingBehind() async throws {
+        let stt = BlockingTranscriber()
+        let r = try rig(stt: stt)
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let live = Task { await r.utterances.process(Utterance(samples: recording())) }
+        while stt.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+
+        try await r.store.eraseEntriesAndHistory()
+        await stt.gate.open()
+        _ = await live.value
+
+        #expect(try await r.store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 0))
+        #expect(r.provider.requests.isEmpty, "the erased phrase was sent to the model")
+    }
+
     @Test func spokenPhraseGoesToClaudeAndTheRecordingIsDeleted() async throws {
         let r = try rig(stt: ScriptedTranscriber([.reply("напомни мне послезавтра сказать Дмитрию про доступ в Нотион")]))
         defer { try? FileManager.default.removeItem(at: r.directory) }

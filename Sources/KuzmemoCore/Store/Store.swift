@@ -7,6 +7,8 @@ public struct Store: Sendable {
     public let writer: any DatabaseWriter
     public let clock: any NowProvider
     private let makeID: @Sendable () -> String
+    /// The saved phrases an erase has removed, shared by every copy of this store (see `ErasedMemos`).
+    let erased = ErasedMemos()
 
     public init(
         writer: any DatabaseWriter,
@@ -98,7 +100,11 @@ public struct Store: Sendable {
     ) async throws -> (op: Op?, value: Value) {
         let stamp = nowMs
         let makeID = self.makeID
+        let erased = self.erased
         return try await writer.write { db in
+            // A change that came out of a phrase which has been erased since is not made (its entries would be the erased
+            // words all over again). Checked in the transaction, after any erase that was ahead of it in the queue.
+            if let memoID, erased.contains(memoID) { throw StoreError.memoErased(memoID) }
             let mutator = Mutator(db: db, nowMs: stamp, makeID: makeID)
             let value = try body(mutator)
             guard !mutator.pending.isEmpty else { return (nil, value) }
@@ -191,8 +197,21 @@ public struct Store: Sendable {
 
     // MARK: - Memos
 
+    /// Saves (inserts or updates) a phrase. Nothing is written for a phrase that "erase all" has removed since it was read:
+    /// whatever was still working on it (a model call takes seconds) must not bring it back. A step that has to know whether its
+    /// write happened (to stop working on an erased phrase) uses `saveUnlessErased`.
     public func save(memo: Memo) async throws {
-        try await writer.write { db in try memo.save(db) }
+        _ = try await saveUnlessErased(memo: memo)
+    }
+
+    /// Like `save(memo:)`, and says whether the phrase was written: `false` means it has been erased.
+    public func saveUnlessErased(memo: Memo) async throws -> Bool {
+        let erased = self.erased
+        return try await writer.write { db in
+            guard !erased.contains(memo.id) else { return false }
+            try memo.save(db)
+            return true
+        }
     }
 
     public func memo(id: String) async throws -> Memo? {

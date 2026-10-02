@@ -421,6 +421,35 @@ struct MaintenanceTests {
         #expect(!report.searchIndexRebuilt)
     }
 
+    /// The ids of erased phrases are noted before the rows go, inside the erase's transaction. If that transaction fails, nothing
+    /// was erased, and no phrase may be refused for it.
+    @Test func anEraseThatFailsRefusesNoPhrase() async throws {
+        let store = try makeStore()
+        try await store.save(memo: Memo(id: "kept", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                                        status: .failed, transcriptRaw: "напомни"))
+        try await store.writer.write { try $0.execute(sql: "DROP TABLE notification_state") } // makes the erase fail part-way
+        await #expect(throws: (any Error).self) { try await store.eraseEntriesAndHistory() }
+        #expect(try await store.memo(id: "kept") != nil) // rolled back
+        var again = try #require(try await store.memo(id: "kept"))
+        again.status = .applied
+        #expect(try await store.saveUnlessErased(memo: again), "a phrase that was not erased was refused")
+    }
+
+    @Test func aPhraseThatWasErasedIsRefusedAndAnewOneWithTheSameWordsIsNot() async throws {
+        let store = try makeStore()
+        let old = Memo(id: "old", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice, status: .failed, transcriptRaw: "напомни")
+        try await store.save(memo: old)
+        try await store.eraseEntriesAndHistory()
+        #expect(try await store.saveUnlessErased(memo: old) == false)
+        await #expect(throws: StoreError.memoErased("old")) {
+            try await store.apply(MutationPlan(actions: [.create(NewItem(kind: .note, title: "всплыло"))]), source: .voice, memoID: "old", label: "late")
+        }
+        #expect(try await store.overview().entries == 0)
+        var fresh = old
+        fresh.id = "new"
+        #expect(try await store.saveUnlessErased(memo: fresh))
+    }
+
     @Test func eraseRemovesEntriesAndHistoryButKeepsTheGlossaryAndTheSettings() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("kuzmemo-erase-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

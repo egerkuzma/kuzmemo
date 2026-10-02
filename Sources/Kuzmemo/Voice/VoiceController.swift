@@ -661,12 +661,13 @@ final class VoiceController {
 
     /// The HUD, sound and speech for an outcome that `AppEnvironment.present` has already recorded.
     private func showOutcome(_ outcome: ProcessOutcome) async {
+        if case .erased = outcome.kind { showBackground(.hidden); return } // everything was erased meanwhile: nothing to show or say
         guard let toast = env.toast else { showBackground(.hidden); return }
         let spoken = await spokenText(for: outcome)
         switch outcome.kind {
         case .applied: if env.settings.speech.confirmationSound { cues.play(.saved) }
         case .unknown, .failed: cues.play(.attention)
-        case .answered, .clarify: break
+        case .answered, .clarify, .erased: break
         }
         let asking = env.pendingQuestion != nil
         if let spoken, session == nil {

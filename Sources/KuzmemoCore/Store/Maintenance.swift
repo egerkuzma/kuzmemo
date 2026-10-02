@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Synchronization
 
 /// What the database check found.
 public struct IntegrityReport: Equatable, Sendable {
@@ -153,6 +154,27 @@ extension Store {
         try await writer.write { db in try SearchIndex.rebuild(db) }
     }
 
+    /// Deletes everything that holds what the person said and did, in one transaction, after `summarize` has looked at it. The ids of
+    /// the saved phrases are noted before anything goes, inside that transaction: work that was still under way for one of them
+    /// (a model call, a recognition) is refused when it finishes, whether its write was queued behind this one or comes later.
+    func wipeContent<Value: Sendable>(summarize: @escaping @Sendable (Database) throws -> Value) async throws -> Value {
+        let erased = self.erased
+        let noted = Mutex<[String]>([])
+        do {
+            return try await writer.write { db -> Value in
+                let value = try summarize(db)
+                let ids = try String.fetchAll(db, sql: "SELECT id FROM memos")
+                noted.withLock { $0 = ids }
+                erased.insert(ids)
+                for table in Store.contentTables { try db.execute(sql: "DELETE FROM \(table)") }
+                return value
+            }
+        } catch {
+            erased.remove(noted.withLock { $0 }) // rolled back: nothing was erased, so nothing is refused
+            throw error
+        }
+    }
+
     /// Folds the write-ahead log into the database file, so that the file alone holds everything. Done when the app quits.
     public func checkpoint() async throws {
         try await writer.writeWithoutTransaction { db in _ = try db.checkpoint(.truncate) }
@@ -167,14 +189,12 @@ extension Store {
     /// the checkpoint is part of the erase.
     @discardableResult
     public func eraseEntriesAndHistory() async throws -> EraseSummary {
-        var summary = try await writer.write { db -> EraseSummary in
-            let summary = EraseSummary(
+        var summary = try await wipeContent { db in
+            EraseSummary(
                 entries: try Item.filter(Column("deleted_at") == nil).fetchCount(db),
                 memos: try Memo.fetchCount(db),
                 undoSteps: try Op.fetchCount(db)
             )
-            for table in Store.contentTables { try db.execute(sql: "DELETE FROM \(table)") }
-            return summary
         }
         do {
             try await writer.vacuum()

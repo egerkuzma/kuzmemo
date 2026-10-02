@@ -60,13 +60,13 @@ enum DevSeed {
         let anchor = "\(today) \(env.clock.localNow().time)"
         let soon = Int64(Date().addingTimeInterval(90).timeIntervalSince1970 * 1000)
         try await store.save(memo: Memo(
-            id: "seed-1", createdAt: Int64(Date().timeIntervalSince1970 * 1000), anchorLocal: anchor, tz: env.clock.timeZone.identifier,
+            id: "seed-\(UUID().uuidString.lowercased())", createdAt: Int64(Date().timeIntervalSince1970 * 1000), anchorLocal: anchor, tz: env.clock.timeZone.identifier,
             inputKind: .voice, status: .failed,
             transcriptRaw: text("remind me on Wednesday to check the Notion subscription", "напомни мне в среду проверить подписку в Notion"),
             failStage: "llm", failReason: "timedOut(seconds: 30.0)", attempts: 1, nextRetryAt: soon
         ))
         try await store.save(memo: Memo(
-            id: "seed-2", createdAt: Int64(Date().timeIntervalSince1970 * 1000) - 5, anchorLocal: anchor, tz: env.clock.timeZone.identifier,
+            id: "seed-\(UUID().uuidString.lowercased())", createdAt: Int64(Date().timeIntervalSince1970 * 1000) - 5, anchorLocal: anchor, tz: env.clock.timeZone.identifier,
             inputKind: .voice, status: .failed, failStage: "stt", failReason: "modelMissing(\"/nowhere\")", attempts: 1
         ))
     }

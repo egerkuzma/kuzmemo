@@ -200,8 +200,9 @@ public actor UtteranceProcessor {
             // discarded the phrase. Now the recording stays, the memo stays "transcribing", and recovery recognises it again.
             let recording = memo.audioPath
             memo.audioPath = nil
+            let stored: Bool
             do {
-                try await store.save(memo: memo)
+                stored = try await store.saveUnlessErased(memo: memo)
             } catch {
                 let delay = retryPolicy.delay(afterAttempts: memo.attempts + 1) ?? 30
                 return UtteranceResult(
@@ -210,6 +211,13 @@ public actor UtteranceProcessor {
                 )
             }
             spool.remove(path: recording)
+            guard stored else {
+                // Everything was erased while the recording was being recognised: the words are not kept and go nowhere.
+                return UtteranceResult(
+                    kind: .processed(ProcessOutcome(memo: memo, kind: .erased, interpretation: nil)),
+                    memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
+                )
+            }
 
             if let asker = memo.parentMemoID { await processor.supersede(asker) } // the answer carries the phrase on
             onStage(.interpreting(output.text))

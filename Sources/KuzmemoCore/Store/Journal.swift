@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Synchronization
 
 /// One undoable operation (a voice command, a manual edit, ...).
 public struct Op: Codable, Hashable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
@@ -55,6 +56,19 @@ public enum StoreError: Error, Equatable {
     case alreadyUndone(String)
     /// A later change touched a row this operation modified, so undoing it would overwrite newer data.
     case undoConflict(String)
+    /// The phrase this change came from was erased (by "erase all") while it was being worked on, so nothing is made of it.
+    case memoErased(String)
+}
+
+/// The ids of the saved phrases that "erase all" has removed. A phrase that was with the model or the recogniser when the erase
+/// came would otherwise save itself again when the answer arrived and make its entry all over; its writes are refused instead.
+/// In memory only: work that was under way does not survive a restart, and a phrase made after the erase has a new id.
+final class ErasedMemos: Sendable {
+    private let ids = Mutex(Set<String>())
+
+    func insert(_ new: [String]) { ids.withLock { $0.formUnion(new) } }
+    func remove(_ old: [String]) { ids.withLock { $0.subtract(old) } }
+    func contains(_ id: String) -> Bool { ids.withLock { $0.contains(id) } }
 }
 
 enum Snapshot {

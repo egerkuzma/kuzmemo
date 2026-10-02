@@ -497,6 +497,8 @@ final class AppEnvironment {
         case .unknown:
             baseStatus = .idle
             toast = Toast(style: .warning, lines: [tr("That does not sound like a calendar command. Nothing was saved.")])
+        case .erased:
+            baseStatus = .idle // everything was erased while this phrase was being worked on: nothing of it is left to show
         case let .failed(error, retryAt):
             baseStatus = .error
             toast = Toast(style: .error, lines: [Self.message(for: error, retryAt: retryAt, today: now.date)])
