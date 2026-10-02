@@ -118,6 +118,17 @@ public actor MemoProcessor {
         guard inFlight.insert(memoID).inserted else { return nil }
         defer { inFlight.remove(memoID) }
         guard var memo = try? await store.memo(id: memoID), memo.status != .applied, memo.opID == nil else { return nil }
+        // The note and the phrase's new status are two writes. If the app was gone between them, the note exists and the phrase
+        // still looks unanswered: it is marked as dealt with, and no second note is made (the phrase's journal entry says so, as
+        // in `process`).
+        if let op = try? await store.op(forMemo: memo.id), op.undoneAt == nil {
+            memo.status = .applied
+            memo.opID = op.id
+            memo.failReason = nil
+            memo.nextRetryAt = nil
+            try? await store.save(memo: memo)
+            return ProcessOutcome(memo: memo, kind: .applied(ApplyResult(op: op, changes: [])), interpretation: nil)
+        }
         let words = await chainTranscripts(endingAt: memo).first ?? memo.transcriptRaw
         guard let text = words?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         let title = text.count <= 80 ? text : String(text.prefix(77)) + "…"

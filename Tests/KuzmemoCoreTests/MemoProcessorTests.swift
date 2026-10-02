@@ -122,6 +122,29 @@ struct MemoProcessorTests {
         #expect(try await store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 0))
     }
 
+    /// "Save as a note" makes the note and then marks the phrase as dealt with, in two writes. If the app quits between them,
+    /// the phrase is still "asking" at the next launch, and closing orphaned questions made the same note a second time.
+    @Test func savingAPhraseAsANoteTwiceAfterACrashBetweenTheWritesMakesOneNote() async throws {
+        let store = try makeStore()
+        let provider = ScriptedProvider([])
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider),
+            clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        try await store.save(memo: Memo(id: "asking", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
+                                        status: .clarifying, transcriptRaw: "позвонить Дмитрию"))
+        // what the first run did before the app was gone: the note and its journal entry, but not the memo's new status
+        let plan = MutationPlan(actions: [.create(NewItem(kind: .note, title: "позвонить Дмитрию"))])
+        let first = try await store.apply(plan, source: .voice, memoID: "asking", label: "Note from a phrase")
+        #expect(try await store.memo(id: "asking")?.status == .clarifying)
+
+        let outcomes = await processor.closeOrphanedQuestions() // the next launch
+        #expect(try await store.inbox().map(\.title) == ["позвонить Дмитрию"], "a second note was made")
+        let memo = try #require(try await store.memo(id: "asking"))
+        #expect(memo.status == .applied && memo.opID == first.op?.id)
+        guard case .applied = outcomes.first?.kind else { Issue.record("expected the phrase to be reported as applied: \(outcomes)"); return }
+    }
+
     /// Two triggers for one memo (the Retry button and the timer, a double click) used to pass the "not in flight" check while
     /// the first was still reading the memo, and the phrase was interpreted and applied twice.
     @Test func severalSimultaneousRetriesApplyThePhraseOnce() async throws {
