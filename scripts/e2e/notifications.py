@@ -8,6 +8,7 @@ played). Needs the dev app running (scripts/run_app.sh). Erases the dev database
 
     scripts/e2e/notifications.py
 """
+import glob
 import http.client
 import json
 import os
@@ -120,7 +121,7 @@ def run():
     check("the plan is in time order", times == sorted(times))
     first = state["alerts"][0]
     check("a request is built for each alert", first["trigger"] == first["fireAt"] + ":00" and first["category"] == "kuzmemo.entry"
-          and first["soundFile"] == "System-Hero.aiff", json.dumps(first, ensure_ascii=False))
+          and first["soundFile"] == "Kuzmemo Hero.aiff", json.dumps(first, ensure_ascii=False))
     check("its text reads well", first["kindText"] == "В назначенное время" and first["when"] == "Сегодня, 16:00", json.dumps(first, ensure_ascii=False))
     call("POST", "/settings", {"interface": {"language": "english"}})
     english = call("POST", "/notifications/sync?limit=60")["alerts"][0]
@@ -156,10 +157,10 @@ def run():
     check("an own chime goes to the system by its bundled file name", meeting[0]["soundFile"] == "Kuzmemo-bell.wav", json.dumps(meeting[0], ensure_ascii=False))
     check("no sound means no sound", meeting[1]["soundFile"] is None and meeting[1]["silent"] is False, json.dumps(meeting[1], ensure_ascii=False))
     allday = [a for a in state["alerts"] if "Сказать Дмитрию" in a["title"]]
-    check("a system sound goes by its bundled copy", allday[0]["soundFile"] == "System-Ping.aiff", json.dumps(allday[0], ensure_ascii=False))
+    check("a system sound goes by its copy in the person's sounds folder", allday[0]["soundFile"] == "Kuzmemo Ping.aiff", json.dumps(allday[0], ensure_ascii=False))
     if os.path.isdir(BUNDLE):
         check("the chime file is in the app", os.path.exists(f"{BUNDLE}/Kuzmemo-bell.wav"))
-        check("the system sound copy is in the app", os.path.exists(f"{BUNDLE}/System-Ping.aiff") and os.path.exists(f"{BUNDLE}/System-Hero.aiff"))
+        check("the app carries none of Apple's sounds", not glob.glob(f"{BUNDLE}/System-*.aiff"))
     else:
         print("  skip the bundled sound files (the dev app is not installed in ~/Applications)")
 
@@ -167,7 +168,7 @@ def run():
     state = plan(quietHours={"enabled": True, "from": "23:00", "to": "08:00"}, allDayTimes=["07:30", "12:00"])
     early, noon = [a for a in state["alerts"] if "Сказать Дмитрию" in a["title"]]
     check("an alert inside them stays but loses its sound", early["fireAt"].endswith("07:30") and early["silent"] is True and early["soundFile"] is None, json.dumps(early, ensure_ascii=False))
-    check("an alert outside them keeps its sound", noon["silent"] is False and noon["soundFile"] == "System-Glass.aiff", json.dumps(noon, ensure_ascii=False))
+    check("an alert outside them keeps its sound", noon["silent"] is False and noon["soundFile"] == "Kuzmemo Glass.aiff", json.dumps(noon, ensure_ascii=False))
     state = plan(quietHours={"enabled": True, "from": "23:00", "to": "08:00"}, allDayTimes=["09:00"])
     check("after the quiet stretch (09:00) it is loud again", [a["silent"] for a in state["alerts"] if "Сказать Дмитрию" in a["title"]] == [False])
 

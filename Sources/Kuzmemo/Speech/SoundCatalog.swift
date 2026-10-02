@@ -4,9 +4,10 @@ import KuzmemoCore
 
 /// The sounds an alert can use, where their files are, and playing them for a preview.
 ///
-/// Three kinds: the app's own chimes (`Kuzmemo-<id>.wav`, bundled), macOS system sounds (copied into the bundle as
-/// `System-<Name>.aiff` when the app is built, so that the notification system can find them by file name), and a file
-/// the person chose (copied to `~/Library/Sounds`, the other place the notification system looks in).
+/// Three kinds: the app's own chimes (`Kuzmemo-<id>.wav`, bundled), macOS system sounds (not shipped, they are Apple's: the
+/// one in use is copied from the system's folder into `~/Library/Sounds` on the person's Mac, see `SystemSoundLibrary`), and a
+/// file the person chose (copied to `~/Library/Sounds` as well). The notification system finds a sound by file name in the app
+/// bundle and in that folder, and nowhere else.
 enum SoundCatalog {
     struct Chime: Identifiable, Equatable {
         var id: String
@@ -20,16 +21,12 @@ enum SoundCatalog {
         Chime(id: "melody", title: tr("Rising melody")), Chime(id: "soft", title: tr("Soft signal")),
     ] }
 
-    static let systemDirectory = URL(fileURLWithPath: "/System/Library/Sounds", isDirectory: true)
-    static var userSoundsDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds", isDirectory: true)
-    }
+    private static let systemSounds = SystemSoundLibrary()
+    static var systemDirectory: URL { systemSounds.systemDirectory }
+    static var userSoundsDirectory: URL { systemSounds.userDirectory }
 
     /// Names of the macOS system sounds ("Glass", "Hero", …).
-    static var systemSoundNames: [String] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: systemDirectory, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.pathExtension == "aiff" }.map { $0.deletingPathExtension().lastPathComponent }.sorted()
-    }
+    static var systemSoundNames: [String] { systemSounds.names }
 
     static func title(for sound: AlertSound) -> String {
         switch sound.kind {
@@ -57,8 +54,9 @@ enum SoundCatalog {
         case .none: return nil
         case .chime: return Bundle.main.url(forResource: "Kuzmemo-\(sound.name)", withExtension: "wav") == nil ? nil : "Kuzmemo-\(sound.name).wav"
         case .system:
-            if Bundle.main.url(forResource: "System-\(sound.name)", withExtension: "aiff") != nil { return "System-\(sound.name).aiff" }
-            return "\(sound.name).aiff" // not bundled (a build without the script): let the system try its own folder
+            // Copied into the person's sounds folder when first needed. The automation build only plans: it never writes to the
+            // person's folders. Nil (no such sound, no copy) falls back to the default alert sound.
+            return systemSounds.notificationFileName(for: sound.name, copy: !AppPaths.isAutomation)
         case .file:
             let url = URL(fileURLWithPath: sound.name)
             return url.deletingLastPathComponent().standardizedFileURL == userSoundsDirectory.standardizedFileURL ? url.lastPathComponent : nil

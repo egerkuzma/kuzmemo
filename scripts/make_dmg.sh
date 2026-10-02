@@ -36,6 +36,7 @@ case "$SIGNATURE" in *"Signature=adhoc"*) ;; *) echo "FAIL: the app is not signe
 [ "$(/usr/libexec/PlistBuddy -c 'Print :KuzmemoControlEnabled' "$APP/Contents/Info.plist")" = "false" ] || { echo "FAIL: the control channel is on"; fail=1; }
 [ -x "$APP/Contents/Resources/scripts/install_silero.sh" ] && [ -x "$APP/Contents/Resources/scripts/install_omnivoice.sh" ] || { echo "FAIL: the install scripts are missing or not executable"; fail=1; }
 [ -s "$APP/Contents/Resources/THIRD-PARTY-NOTICES.txt" ] || { echo "FAIL: the licence notice of the built-in packages is missing"; fail=1; }
+compgen -G "$APP/Contents/Resources/System-*.aiff" >/dev/null && { echo "FAIL: copies of Apple's system sounds are inside (they are copied on the person's Mac instead)"; fail=1; }
 
 # What goes into the image is put together first and searched as a whole (the app and the files next to it)
 STAGE="$ROOT/.build/dmg-stage"

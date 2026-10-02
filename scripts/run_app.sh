@@ -126,8 +126,8 @@ for b in "$BINDIR"/*.bundle; do
   [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
-# Alert sounds: the app's own chimes (made above), and copies of the macOS system sounds (the notification system finds a
-# sound by its file name inside the app bundle).
+# Alert sounds: the app's own chimes (made above). The macOS system sounds are Apple's and are not copied in: the app
+# copies the one in use from the system's folder into the person's ~/Library/Sounds (see SystemSoundLibrary).
 cp "$ROOT"/Resources/Sounds/*.wav "$APP/Contents/Resources/"
 cp "$ROOT/Resources/$ICON" "$APP/Contents/Resources/AppIcon.icns"
 # The licences of what is built in travel with the app (the disk image passes them on)
@@ -139,7 +139,6 @@ if [ "$FLAVOR" = dist ]; then
   mkdir -p "$APP/Contents/Resources/scripts"
   cp "$ROOT/scripts/install_silero.sh" "$ROOT/scripts/install_omnivoice.sh" "$APP/Contents/Resources/scripts/"
 fi
-for f in /System/Library/Sounds/*.aiff; do cp "$f" "$APP/Contents/Resources/System-$(basename "$f")"; done
 
 SOURCE_ROOT_ENTRY="    <key>KuzmemoSourceRoot</key><string>$ROOT</string>
 "
