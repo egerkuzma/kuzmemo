@@ -146,6 +146,17 @@ public struct Store: Sendable {
                 guard checked.insert("\(change.tbl)|\(change.rowID)").inserted else { continue }
                 if try !Store.currentState(db, matches: change) { throw StoreError.undoConflict("\(change.tbl) \(change.rowID)") }
             }
+            // Undoing a creation removes the row, and with it (by cascade) every per-occurrence override the row has. Ticking an
+            // occurrence off, skipping or moving it writes only to those overrides, so the series' own row looks untouched and
+            // the check above lets the undo through; an override that this operation did not make is a later change to the
+            // series, and is refused like any other.
+            let ownOverrides = Set(changes.filter { $0.tbl == "item_exceptions" }.map(\.rowID))
+            for change in changes where change.tbl == "items" && change.beforeJSON == nil {
+                let overrides = try ItemException.filter(Column("item_id") == change.rowID).fetchAll(db)
+                if overrides.contains(where: { !ownOverrides.contains(Mutator.exceptionKey($0.itemID, $0.occDate)) }) {
+                    throw StoreError.undoConflict("item_exceptions \(change.rowID)")
+                }
+            }
             for change in changes { try Store.restore(db, change) }
             op.undoneAt = stamp
             try op.update(db)

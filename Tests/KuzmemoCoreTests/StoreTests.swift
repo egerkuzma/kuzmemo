@@ -98,6 +98,51 @@ struct StoreJournalTests {
         await #expect(throws: StoreError.alreadyUndone(second.id)) { try await store.undo(opID: second.id) }
     }
 
+    /// Undoing the creation of a series deletes the row (and, by cascade, every per-occurrence override). The check only compared
+    /// the series' own row, which ticking an occurrence off does not change, so it let the undo through and the tick was destroyed
+    /// without a word, while undoing an edit of the same row after the same tick is refused.
+    @Test func undoOfASeriesCreationIsRefusedOnceAnOccurrenceHasBeenTickedOff() async throws {
+        let store = try makeStore()
+        var series = Item(id: "", kind: .event, title: "Планёрка", date: LocalDate("2026-10-05"), time: LocalTime("10:00"), source: .voice)
+        series.recurrence = Recurrence(freq: .weekly, byWeekday: [.mon])
+        let seed = series
+        let created = try await store.performReturning(label: "series") { try $0.insert(seed) }
+        let creation = try #require(created.op)
+        _ = try await store.apply(MutationPlan(actions: [.complete(itemID: created.value.id, occurrenceDate: LocalDate("2026-10-05"))]),
+                                  source: .manual, memoID: nil, label: "tick")
+
+        await #expect(throws: StoreError.self) { try await store.undo(opID: creation.id) }
+        let agenda = try await store.agenda(in: LocalDate("2026-10-05")! ... LocalDate("2026-10-12")!)
+        #expect(agenda.map(\.isDone) == [true, false], "the series or the tick was destroyed")
+        #expect(try await store.exceptions(for: [created.value.id]).count == 1)
+    }
+
+    @Test func undoOfASeriesCreationStillWorksWhenNothingHappenedToItSince() async throws {
+        let store = try makeStore()
+        var series = Item(id: "", kind: .event, title: "Планёрка", date: LocalDate("2026-10-05"), time: LocalTime("10:00"), source: .voice)
+        series.recurrence = Recurrence(freq: .weekly, byWeekday: [.mon])
+        let seed = series
+        let created = try await store.performReturning(label: "series") { try $0.insert(seed) }
+        try await store.undo(opID: try #require(created.op).id)
+        #expect(try await store.recurringSeries().isEmpty)
+    }
+
+    /// One operation that creates a series and ticks off one of its occurrences is undone as a whole.
+    @Test func undoOfAnOperationThatCreatedASeriesAndTickedOffItsOwnOccurrenceStillWorks() async throws {
+        let store = try makeStore()
+        var series = Item(id: "fixed-series", kind: .event, title: "Планёрка", date: LocalDate("2026-10-05"), time: LocalTime("10:00"), source: .voice)
+        series.recurrence = Recurrence(freq: .weekly, byWeekday: [.mon])
+        let seed = series
+        let made = try await store.performReturning(label: "both") { m in
+            let row = try m.insert(seed)
+            try m.setException(ItemException(itemID: row.id, occDate: LocalDate("2026-10-05")!, action: .done))
+            return row
+        }
+        try await store.undo(opID: try #require(made.op).id)
+        #expect(try await store.recurringSeries().isEmpty)
+        #expect(try await store.exceptions(for: [made.value.id]).isEmpty)
+    }
+
     @Test func throwingBodyRollsBackEverythingAndLeavesNoOp() async throws {
         let store = try makeStore()
         struct Boom: Error {}
