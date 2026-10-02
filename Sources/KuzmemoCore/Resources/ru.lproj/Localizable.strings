@@ -675,3 +675,6 @@
 "The model arrived incomplete. Try again." = "Модель скачалась не полностью. Попробуй ещё раз.";
 "Kuzmemo cannot open its database" = "Kuzmemo не может открыть свою базу данных";
 "The file %1$@ could not be opened: %2$@. Nothing was changed. Check that the disk has room and that the folder is not locked, then start Kuzmemo again." = "Файл %1$@ не удалось открыть: %2$@. Ничего не изменилось. Проверь, что на диске есть место и папка не заблокирована, и запусти Kuzmemo снова.";
+"Discard this phrase?" = "Отбросить эту фразу?";
+"The phrase %1$@ will be removed from the list and cannot be brought back." = "Фраза %1$@ пропадёт из списка, вернуть её будет нельзя.";
+"The recording will be removed from the list and cannot be brought back." = "Запись пропадёт из списка, вернуть её будет нельзя.";

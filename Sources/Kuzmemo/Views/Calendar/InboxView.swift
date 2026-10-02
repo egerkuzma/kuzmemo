@@ -97,7 +97,7 @@ private struct MemoCard: View {
                         Button(tr("Save as a note")) { env.keepAsNote(memo: memo) }
                     }
                     Spacer()
-                    Button(tr("Discard"), role: .destructive) { env.discard(memo: memo) }
+                    Button(tr("Discard"), role: .destructive) { env.discardRequest = memo.id }
                 }
             }
         }
@@ -105,6 +105,26 @@ private struct MemoCard: View {
         .padding(12)
         .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.orange.opacity(0.25)))
+        // Discarding cannot be taken back (the phrase stays in the database but nothing in the app shows it again), so it asks.
+        .confirmationDialog(tr("Discard this phrase?"), isPresented: asking, titleVisibility: .visible) {
+            Button(tr("Discard"), role: .destructive) { env.discard(memo: memo) }
+            Button(tr("Cancel"), role: .cancel) {}
+        } message: {
+            Text(verbatim: discardMessage)
+        }
+    }
+
+    private var asking: Binding<Bool> {
+        Binding(get: { env.discardRequest == memo.id }, set: { if !$0, env.discardRequest == memo.id { env.discardRequest = nil } })
+    }
+
+    /// Names the phrase, because the dialog is not drawn next to its card.
+    private var discardMessage: String {
+        guard let words = memo.transcriptRaw?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty else {
+            return tr("The recording will be removed from the list and cannot be brought back.")
+        }
+        let shown = words.count > 100 ? String(words.prefix(99)) + "…" : words
+        return tr("The phrase %1$@ will be removed from the list and cannot be brought back.", Wording.quoted(shown))
     }
 
     private var retryText: String? {

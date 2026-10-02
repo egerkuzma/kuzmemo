@@ -80,6 +80,8 @@ final class AppEnvironment {
     var settingsTab: SettingsView.Tab = .general
     /// Bumped by ⌘F; the window moves keyboard focus to its search field when this changes.
     private(set) var searchFocusRequest = 0
+    /// The phrase in the Inbox whose "Discard" is waiting for the person's confirmation (its memo id).
+    var discardRequest: String?
 
     func focusSearch() {
         showMainWindow()

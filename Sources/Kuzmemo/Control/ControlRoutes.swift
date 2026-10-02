@@ -35,6 +35,8 @@ enum ControlRoutes {
         case ("POST", "/popover/wiring"): return await PopoverRoutes.wiring(env)
         case ("POST", "/window/open"): return await WindowRoutes.open(env, name: request.query["name"] ?? "main")
         case ("POST", "/window/close"): return WindowRoutes.close(request.query["name"] ?? "main")
+        case ("POST", "/window/press"):
+            return WindowRoutes.press(name: request.query["name"] ?? "main", title: request.query["title"] ?? "", sheet: request.query["sheet"] == "1")
         case ("POST", "/window/key"):
             return WindowRoutes.key(name: request.query["name"] ?? "main", key: request.query["key"] ?? "", sheet: request.query["sheet"] == "1")
         case ("POST", "/undo"): return await undo(env)
@@ -192,7 +194,7 @@ enum ControlRoutes {
         }
     }
 
-    /// Puts the window in a state: `mode`, `date`, `search`, and `editor` ("new" or a part of an entry's title).
+    /// Puts the window in a state: `mode`, `date`, `search`, `editor` ("new" or a part of an entry's title) and `discard`.
     private static func ui(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         guard let json = request.jsonBody else { return .error("body must be JSON", status: 400) }
         let calendar = env.calendar
@@ -221,6 +223,16 @@ enum ControlRoutes {
             }
         } else if json["editor"] is NSNull {
             env.editorRequest = nil
+        }
+        // `discard`: a memo id or a part of its words, to ask about discarding it as the card's button does (null withdraws it)
+        if let part = json["discard"] as? String {
+            let needle = SearchText.normalize(part)
+            guard let memo = calendar.failedMemos.first(where: { $0.id == part || SearchText.normalize($0.transcriptRaw ?? "").contains(needle) }) else {
+                return .error("no phrase waiting in the Inbox matches «\(part)»", status: 404)
+            }
+            env.discardRequest = memo.id
+        } else if json["discard"] is NSNull {
+            env.discardRequest = nil
         }
         return .json([
             "mode": calendar.mode.rawValue, "date": "\(calendar.selectedDate)", "today": "\(calendar.today)",

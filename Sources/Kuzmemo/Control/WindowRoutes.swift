@@ -54,6 +54,25 @@ enum WindowRoutes {
         return describe(name)
     }
 
+    /// Presses the button with this title in the window, or in the sheet attached to it (a confirmation dialog is an AppKit alert
+    /// whose buttons are real buttons), without activating the app. For checks of what a dialog does when it is confirmed.
+    static func press(name: String = "main", title: String, sheet: Bool) -> HTTPResponse {
+        guard let window = window(name), window.isVisible else { return .error("the \(name) window is not open", status: 404) }
+        guard let target = sheet ? window.attachedSheet : window else { return .error("no sheet is attached", status: 404) }
+        func buttons(in view: NSView) -> [NSButton] {
+            var found: [NSButton] = []
+            if let button = view as? NSButton { found.append(button) }
+            for child in view.subviews { found += buttons(in: child) }
+            return found
+        }
+        let all = target.contentView.map(buttons(in:)) ?? []
+        guard let button = all.first(where: { $0.title == title }) else {
+            return .error("no button «\(title)»; there are \(all.map(\.title))", status: 404)
+        }
+        button.performClick(nil)
+        return .json(["pressed": title])
+    }
+
     /// Types a key into the window, or into the sheet attached to it, the way the person would, without activating the app:
     /// `return` is the default button (Save), `escape` is Cancel. For checks of what a sheet does when it is saved or dismissed,
     /// where a window that is deliberately kept behind everything cannot be clicked.

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks of the calendar window through the dev app's control socket: demo data, window states, renders, and the
 real window (opened behind other windows without activating the app, then closed), including what the editor does when
-it is saved or cancelled (keys are typed into the sheet through /window/key).
+it is saved or cancelled (keys are typed into the sheet through /window/key), and that discarding an Inbox phrase asks first
+(a dialog button is pressed through /window/press).
 
 Needs the dev app running (scripts/run_app.sh). It erases the dev database and pins the clock to
 2026-09-28 14:30. It never brings the window in front of the person's work.
@@ -143,6 +144,30 @@ def main():
     call("POST", "/window/key?name=main&key=escape&sheet=1")
     time.sleep(0.8)
     check("Escape closes it without saving", call("GET", "/window").get("sheetAttached") is False)
+    call("POST", "/dev/seed")
+
+    print("discarding a phrase from the Inbox")
+    # "Discard" cannot be taken back (the phrase stays in the database, nothing in the app shows it again), so it asks first:
+    # Cancel (Escape) leaves the phrase where it was, the dialog's own button removes it.
+    call("POST", "/ui", {"mode": "inbox"})
+    waiting = call("GET", "/state")["counts"]["unfinishedMemos"]
+    check("two phrases wait in the seeded Inbox", waiting == 2, str(waiting))
+    call("POST", "/ui", {"discard": "подписку в Notion"})
+    time.sleep(0.8)
+    check("Discard asks before it discards", call("GET", "/window").get("sheetAttached") is True)
+    check("…and nothing is discarded while it asks", call("GET", "/state")["counts"]["unfinishedMemos"] == waiting)
+    call("POST", "/window/key?name=main&key=escape&sheet=1")
+    time.sleep(0.8)
+    check("Cancel leaves the phrase where it was", call("GET", "/window").get("sheetAttached") is False and call("GET", "/state")["counts"]["unfinishedMemos"] == waiting)
+    call("POST", "/ui", {"discard": "подписку в Notion"})
+    time.sleep(0.8)
+    pressed = call("POST", "/window/press?name=main&sheet=1&title=" + quote("Отбросить"))
+    time.sleep(0.8)
+    check("the dialog's Discard removes it", pressed.get("pressed") == "Отбросить" and call("GET", "/state")["counts"]["unfinishedMemos"] == waiting - 1, str(pressed))
+    check("…and the dialog is gone", call("GET", "/window").get("sheetAttached") is False)
+    status, _ = call("POST", "/ui", {"discard": "нет такой фразы"}, raw=True)
+    check("a phrase that is not there is refused, nothing is asked", status == 404 and call("GET", "/window").get("sheetAttached") is False, str(status))
+    call("POST", "/db/reset")
     call("POST", "/dev/seed")
     call("POST", "/ui", {"mode": "day", "date": "2026-09-29"})
 
