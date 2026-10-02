@@ -40,8 +40,12 @@ extension Store {
     /// items, all-day entries first within a day. Skipped occurrences are left out.
     public func agenda(in range: ClosedRange<LocalDate>, includeDone: Bool = true) async throws -> [AgendaEntry] {
         let oneOffs = try await items(in: range)
-        let series = try await recurringSeries().filter { ($0.date ?? range.upperBound) <= range.upperBound }
-        let exceptions = try await exceptions(for: series.map(\.id))
+        let allSeries = try await recurringSeries()
+        let exceptions = try await exceptions(for: allSeries.map(\.id))
+        // A series that starts after the range has nothing in it, unless one of its occurrences was moved back into it (to a
+        // day before the series' own start): those moves are looked at before the series is passed over.
+        let movedIn = Set(exceptions.filter { $0.movedDate.map(range.contains) == true }.map(\.itemID))
+        let series = allSeries.filter { ($0.date ?? range.upperBound) <= range.upperBound || movedIn.contains($0.id) }
 
         var entries: [AgendaEntry] = oneOffs.compactMap { item in
             guard let date = item.date else { return nil }

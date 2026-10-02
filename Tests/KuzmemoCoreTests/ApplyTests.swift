@@ -75,6 +75,25 @@ struct ApplyTests {
         #expect(open.status == .open && open.doneAt == nil)
     }
 
+    /// A series that starts on the 5th, its first occurrence moved to the 3rd: the day query dropped every series that begins after
+    /// the day asked about, before it looked at the moves, so the 3rd showed nothing (the month, which contains the start, did).
+    @Test func anOccurrenceMovedToADayBeforeTheSeriesStartsIsOnThatDay() async throws {
+        let store = try makeStore()
+        try await seedWeekly(store) // Mondays from 2026-10-05
+        _ = try await store.apply(MutationPlan(actions: [
+            .moveOccurrence(itemID: "id-1", occurrenceDate: day("2026-10-05"), newDate: day("2026-10-03"), newTime: LocalTime("09:00")),
+        ]), source: .voice, memoID: nil, label: "move")
+
+        let onTheDay = try await store.agenda(on: day("2026-10-03"))
+        #expect(onTheDay.map(\.item.title) == ["Планёрка"], "the moved occurrence is missing from its day")
+        #expect(onTheDay.first?.time == LocalTime("09:00") && onTheDay.first?.wasMoved == true)
+        #expect(try await store.agenda(on: day("2026-10-05")).isEmpty) // and no longer on its old one
+        let month = try await store.agenda(in: day("2026-10-01") ... day("2026-10-31"))
+        #expect(month.map { $0.date.description } == ["2026-10-03", "2026-10-12", "2026-10-19", "2026-10-26"])
+        // a day before the series that nothing was moved to stays empty, and a series that begins later is not dragged in
+        #expect(try await store.agenda(on: day("2026-10-02")).isEmpty)
+    }
+
     @Test func repeatingItemsAreHandledPerOccurrence() async throws {
         let store = try makeStore()
         try await seedWeekly(store)
