@@ -185,3 +185,46 @@ struct AlertPlannerTests {
         #expect(await store.settings(NotificationSettings.self) == custom)
     }
 }
+
+@Suite("Snoozed alerts")
+struct SnoozedAlertTests {
+    private func series() -> Item {
+        Item(id: "s", kind: .reminder, title: "Выпить воды", date: LocalDate("2026-09-21"), time: LocalTime("10:00"), recurrence: Recurrence(freq: .daily))
+    }
+
+    @Test func anEntryThatIsGoneEndsTheSnooze() {
+        #expect(SnoozedAlert.isStale(item: nil, occurrence: nil, exceptions: []))
+        var deleted = Item(id: "a", kind: .task, title: "Дело", date: LocalDate("2026-09-28"))
+        deleted.deletedAt = 5
+        #expect(SnoozedAlert.isStale(item: deleted, occurrence: nil, exceptions: []))
+    }
+
+    @Test func aOneOffEntryThatWasTickedOffEndsTheSnoozeAndAnOpenOneDoesNot() {
+        var task = Item(id: "a", kind: .task, title: "Дело", date: LocalDate("2026-09-28"))
+        #expect(!SnoozedAlert.isStale(item: task, occurrence: nil, exceptions: []))
+        task.status = .done
+        #expect(SnoozedAlert.isStale(item: task, occurrence: nil, exceptions: []))
+    }
+
+    /// After "snooze" and then "done" on a repeating entry the snooze used to ring anyway: only entries without a repeat were
+    /// looked at, and the state of one occurrence is kept in the series' overrides.
+    @Test func anOccurrenceThatWasTickedOffOrSkippedEndsItsSnooze() {
+        let day = LocalDate("2026-09-28")!
+        let done = ItemException(itemID: "s", occDate: day, action: .done)
+        let skipped = ItemException(itemID: "s", occDate: day, action: .skip)
+        #expect(SnoozedAlert.isStale(item: series(), occurrence: day, exceptions: [done]))
+        #expect(SnoozedAlert.isStale(item: series(), occurrence: day, exceptions: [skipped]))
+    }
+
+    @Test func anOpenOccurrenceKeepsItsSnoozeWhateverHappenedToOthers() {
+        let day = LocalDate("2026-09-28")!
+        let otherDay = ItemException(itemID: "s", occDate: LocalDate("2026-09-27")!, action: .done)
+        let otherSeries = ItemException(itemID: "other", occDate: day, action: .done)
+        let moved = ItemException(itemID: "s", occDate: day, action: .moved, movedDate: LocalDate("2026-09-29"), movedTime: nil)
+        #expect(!SnoozedAlert.isStale(item: series(), occurrence: day, exceptions: []))
+        #expect(!SnoozedAlert.isStale(item: series(), occurrence: day, exceptions: [otherDay, otherSeries]))
+        #expect(!SnoozedAlert.isStale(item: series(), occurrence: day, exceptions: [moved]))
+        #expect(!SnoozedAlert.isStale(item: series(), occurrence: nil, exceptions: [otherDay])) // no occurrence named: nothing to compare
+    }
+}
+

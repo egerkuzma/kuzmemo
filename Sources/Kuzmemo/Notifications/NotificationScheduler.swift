@@ -158,9 +158,14 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             guard let itemID = info["itemID"] as? String else { continue }
             // "No such entry" ends the snooze; a read that failed says nothing, and the snooze stays.
             let found: Item?
-            do { found = try await env.store.item(id: itemID) } catch { continue }
-            guard let item = found else { stale.append(request.identifier); continue }
-            if item.recurrence == nil, item.status == .done { stale.append(request.identifier) }
+            let exceptions: [ItemException]
+            do {
+                found = try await env.store.item(id: itemID)
+                // A repeating entry is ticked off one occurrence at a time, in its overrides, and the snooze is for one of them.
+                exceptions = found?.recurrence == nil ? [] : try await env.store.exceptions(for: [itemID])
+            } catch { continue }
+            let occurrence = (info["occurrence"] as? String).flatMap(LocalDate.init)
+            if SnoozedAlert.isStale(item: found, occurrence: occurrence, exceptions: exceptions) { stale.append(request.identifier) }
         }
         if !stale.isEmpty { UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: stale) }
     }
