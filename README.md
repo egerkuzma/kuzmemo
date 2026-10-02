@@ -146,7 +146,7 @@ The development build is muted, ignores the keyboard trigger, never opens the mi
 
 Issues and pull requests are welcome. Code, comments, docs and commit messages are in English (Conventional Commits); user-visible text goes through the translation tables. Please keep personal data out of examples and tests.
 
-Status: version 1.0. The voice path, the calendar window, settings, notifications, database copies and the bilingual interface are done. It is a personal project: the download is signed ad hoc and not notarized, or you can build it from source (see [Quick start](#quick-start)).
+Status: version 1.1. The voice path, the calendar window, settings, notifications, database copies and the bilingual interface are done. It is a personal project: the download is signed ad hoc and not notarized, or you can build it from source (see [Quick start](#quick-start)).
 
 ## License
 
