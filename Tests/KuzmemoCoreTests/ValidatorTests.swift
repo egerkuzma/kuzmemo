@@ -10,13 +10,14 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
     _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
-    followUp: Bool = false, timeAsked: Bool = false, revisions: [String: Int] = [:]
+    followUp: Bool = false, timeAsked: Bool = false, revisions: [String: Int] = [:], confirmAnyChange: Bool = false
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
         context: ContextPlan(entries: entries, expanded: false, revisions: revisions),
-        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked
+        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked,
+        confirmAnyChange: confirmAnyChange
     )
     return await ActionValidator.validate(response, in: context)
 }
@@ -343,11 +344,40 @@ struct ValidatorTargetTests {
         #expect(oneOff.actions == [.delete(itemID: "m1")])
         // a series among two deletions: the question names both, without the per-occurrence option
         let both = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#, entries: entries)))
-        #expect(both.question == "Удалить 2 записи: «Встреча с Дмитрием», «Планёрка»?", "\(both.question)")
+        #expect(both.question == "Удалить 2 записи: «Планёрка» (вся серия), «Встреча с Дмитрием»?", "\(both.question)")
         #expect(both.options == ["Да, удалить", "Нет"] && both.pending?.actions.count == 2)
         // skipping an occurrence is what the model answers to "only this one", and needs no question
         guard case let .mutate(skip) = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"skip_occurrence","ref":1}]}"#, entries: entries) else { Issue.record("expected the skip"); return }
         #expect(skip.actions == [.skipOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!)])
+    }
+
+    /// The scope of what happens to a repeating entry is part of what is confirmed: a deletion or an edit of it is "(the whole
+    /// series)" in the question, a move of one of its occurrences is not.
+    @Test func theQuestionNamesTheSeriesScopeOfEachEntry() async throws {
+        let entries = [entry(weekly, occurrence: "2026-10-05"), entry(meeting), entry(item("a", "Другое", "2026-09-29")), entry(item("b", "Ещё", "2026-09-30"))]
+        let renames = (1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# }.joined(separator: ",")
+        let edit = try #require(clarification(try await validate(#"{"intent":"update","confidence":0.9,"actions":[\#(renames)]}"#, entries: entries)))
+        #expect(edit.question == "Изменить 4 записи: «Планёрка» (вся серия), «Встреча с Дмитрием», «Другое», «Ещё»?", "\(edit.question)")
+        let moves = (2 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# } + [#"{"op":"update","ref":1,"changes":{"when":{"mode":"none","time":"11:00"}}}"#]
+        let moved = try #require(clarification(try await validate(#"{"intent":"update","confidence":0.9,"actions":[\#(moves.joined(separator: ","))]}"#, entries: entries)))
+        #expect(moved.question == "Изменить 4 записи: «Планёрка», «Встреча с Дмитрием», «Другое», «Ещё»?", "\(moved.question)") // one occurrence moves, the series stays
+    }
+
+    /// A plan that replaces one the person already agreed to (their yes could not be applied as it was meant) is asked about
+    /// whatever its size, so that a smaller replacement does not slip through under the limits.
+    @Test func aReplacedPlanIsAskedAboutWhateverItsSize() async throws {
+        let entries = [entry(meeting), entry(item("a", "Другое", "2026-09-29"))]
+        let oneDelete = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":2}]}"#
+        guard case .mutate = try await validate(oneDelete, entries: entries) else { Issue.record("one deletion needs no question on its own"); return }
+        let asked = try #require(clarification(try await validate(oneDelete, entries: entries, followUp: true, confirmAnyChange: true)))
+        #expect(asked.question == "Удалить 1 запись: «Другое»?" && asked.pending?.actions == [.delete(itemID: "a")])
+        let oneEdit = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Встреча с Анной"}}]}"#
+        let edit = try #require(clarification(try await validate(oneEdit, entries: entries, followUp: true, confirmAnyChange: true)))
+        #expect(edit.question == "Изменить 1 запись: «Встреча с Дмитрием»?" && edit.pending?.actions.count == 1)
+        let creation = try #require(clarification(try await validate(ParserResponseTests.create, entries: entries, followUp: true, confirmAnyChange: true)))
+        #expect(creation.question == "Применить 1 изменение?" && creation.options == ["Да", "Нет"] && creation.pending?.actions.count == 1)
+        #expect(FollowUp(previous: "x", question: creation.question).askedToConfirm)
+        #expect(FollowUp(previous: "x", question: "Apply 2 changes?").askedToConfirm && FollowUp(previous: "x", question: "Apply 1 change?").askedToConfirm)
     }
 
     /// The model tends to repeat the entry's title or kind beside the one thing that differs. A repeated field is not a change:

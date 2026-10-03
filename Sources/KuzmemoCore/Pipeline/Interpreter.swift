@@ -26,6 +26,7 @@ public struct FollowUp: Equatable, Sendable {
     public var askedToConfirm: Bool {
         question.wholeMatch(of: #/(Delete|Change|Удалить|Изменить) \d+ (?:entr(?:y|ies)|запис(?:ь|и|ей))(?:: .+)?\?/#) != nil
             || question.wholeMatch(of: #/(Delete the whole series|Удалить всю серию) .+\?/#) != nil
+            || question.wholeMatch(of: #/(Apply|Применить) \d+ (?:changes?|изменени[еяй])\?/#) != nil
     }
 
     /// A short answer that only says yes. Every word has to be a known one: "yes, but not the third", "да, 2" (a number: which
@@ -72,12 +73,17 @@ public struct InterpretRequest: Sendable {
     public var anchor: LocalDateTime
     public var timeZone: TimeZone
     public var followUp: FollowUp?
+    /// Whatever plan comes out is asked about before it is applied, however small: the phrase replaces a plan the person had
+    /// already agreed to (their yes could not be applied as it was meant), and the replacement must not slip through under
+    /// the limits.
+    public var confirmAnyChange: Bool
 
-    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone, followUp: FollowUp? = nil) {
+    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone, followUp: FollowUp? = nil, confirmAnyChange: Bool = false) {
         self.transcript = transcript
         self.anchor = anchor
         self.timeZone = timeZone
         self.followUp = followUp
+        self.confirmAnyChange = confirmAnyChange
     }
 }
 
@@ -149,7 +155,7 @@ public struct Interpreter: Sendable {
                 let validation = ValidationContext(
                     context: context,
                     resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
-                    store: store, policy: policy, followUp: followUp
+                    store: store, policy: policy, followUp: followUp, confirmAnyChange: request.confirmAnyChange
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)
                 return InterpretResult(

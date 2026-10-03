@@ -518,6 +518,8 @@
 "Works without extra permissions and behaves like Fn." = "Работает без дополнительных разрешений, действует так же, как Fn.";
 "Yes, change" = "Да, изменить";
 "Yes, delete" = "Да, удалить";
+"Yes" = "Да";
+"%1$@ (the whole series)" = "%1$@ (вся серия)";
 "Delete the whole series “%1$@”?" = "Удалить всю серию «%1$@»?";
 "Only this occurrence" = "Только это вхождение";
 "You have %1$@ overdue:" = "Просрочено %1$@:";
@@ -586,6 +588,10 @@
 "Change %lld entries?|few" = "Изменить %lld записи?";
 "Change %lld entries?|many" = "Изменить %lld записей?";
 "Change %lld entries?|other" = "Изменить %lld записи?";
+"Apply %lld changes?|one" = "Применить %lld изменение?";
+"Apply %lld changes?|few" = "Применить %lld изменения?";
+"Apply %lld changes?|many" = "Применить %lld изменений?";
+"Apply %lld changes?|other" = "Применить %lld изменения?";
 "%1$@, %2$@, %3$@" = "%1$@, %2$@, %3$@";
 "%lld glossary words|one" = "%lld слово в глоссарии";
 "%lld glossary words|few" = "%lld слова в глоссарии";

@@ -309,6 +309,10 @@ public actor MemoProcessor {
         // yes applies it, exactly as it was, without the model: a model asked to make the plan up again could name other
         // entries, and one that misread the no could come back with the deletions. Anything in between goes to the model as a
         // new command, with the limits in force (so the model's answer is asked about again if it is still a bulk change).
+        // The person's yes that could not be applied as it was meant (the plan's entries changed, or no plan was kept) is read by
+        // the model as a new command, and whatever comes out replaces a plan the person had agreed to: it is asked about again,
+        // however small, instead of slipping through under the limits.
+        var confirmAnyChange = false
         if let followUp, followUp.askedToConfirm {
             if FollowUp.declines(transcript) {
                 memo.llmModel = "local-router"
@@ -319,24 +323,27 @@ public actor MemoProcessor {
                 try? await store.save(memo: memo)
                 return ProcessOutcome(memo: memo, kind: .unknown, interpretation: nil)
             }
-            if FollowUp.affirms(transcript), let plan = await pendingPlan(behind: memo) {
-                do {
-                    let applied = try await store.apply(
-                        plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: Self.label(for: plan)
-                    )
-                    memo.llmModel = "local-router"
-                    memo.intent = plan.actions.contains { if case .delete = $0 { true } else { false } } ? Intent.delete.rawValue : Intent.update.rawValue
-                    memo.confidence = 1
-                    memo.status = .applied
-                    memo.opID = applied.op?.id
-                    try? await store.save(memo: memo)
-                    return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: nil)
-                } catch StoreError.memoErased {
-                    return ProcessOutcome(memo: memo, kind: .erased, interpretation: nil)
-                } catch {
-                    // An entry of the plan changed since the question was asked (or is gone): the yes no longer means what it
-                    // meant. The phrase is read again below, and a bulk change is asked about once more.
+            if FollowUp.affirms(transcript) {
+                if let plan = await pendingPlan(behind: memo) {
+                    do {
+                        let applied = try await store.apply(
+                            plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: Self.label(for: plan)
+                        )
+                        memo.llmModel = "local-router"
+                        memo.intent = plan.actions.contains { if case .delete = $0 { true } else { false } } ? Intent.delete.rawValue : Intent.update.rawValue
+                        memo.confidence = 1
+                        memo.status = .applied
+                        memo.opID = applied.op?.id
+                        try? await store.save(memo: memo)
+                        return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: nil)
+                    } catch StoreError.memoErased {
+                        return ProcessOutcome(memo: memo, kind: .erased, interpretation: nil)
+                    } catch {
+                        // An entry of the plan changed since the question was asked (or is gone): the yes no longer means what it
+                        // meant. The phrase is read again below, and whatever comes out is asked about once more.
+                    }
                 }
+                confirmAnyChange = true
             }
         }
 
@@ -351,7 +358,7 @@ public actor MemoProcessor {
             let result: InterpretResult
             do {
                 result = try await interpreter.interpret(InterpretRequest(
-                    transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp
+                    transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp, confirmAnyChange: confirmAnyChange
                 ))
             } catch let error as LLMError {
                 return await fail(memo, error, elapsed: Date().timeIntervalSince(started))

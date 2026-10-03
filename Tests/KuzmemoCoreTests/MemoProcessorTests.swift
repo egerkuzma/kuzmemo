@@ -381,6 +381,30 @@ struct MemoProcessorTests {
         #expect(try await store.items(on: LocalDate("2026-09-29")!).isEmpty)
     }
 
+    /// After a refused yes the model reads the phrase anew; what it makes of it replaces a plan the person agreed to, and is asked
+    /// about again even when it is small enough to pass the limits on its own. A/B/C agreed, A changed, the model now says D/E.
+    @Test func aReplacementForAnAgreedPlanIsAskedAboutAgainEvenWhenSmall() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let twoOthers = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":4},{"op":"delete","ref":5}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(twoOthers)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 5 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали три записи на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        var draft = ItemDraft(try #require(try await store.item(id: "i1")))
+        draft.title = "Запись 1, уточнённая" // meanwhile
+        try await store.save(draft, as: "i1")
+
+        let yes = await processor.submit(text: "да", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .clarify(again) = yes.kind else { Issue.record("expected to be asked again: \(yes.kind)"); return }
+        #expect(again.question == "Удалить 2 записи: «Запись 4», «Запись 5»?" && provider.requests.count == 2, "\(again.question)")
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 5) // two deletions, under the limit, and still nothing applied
+        let yesAgain = await processor.submit(text: "да", inputKind: .voice, parentMemoID: yes.memo.id, followupQuestion: again.question)
+        guard case let .applied(result) = yesAgain.kind else { Issue.record("expected the deletions: \(yesAgain.kind)"); return }
+        #expect(result.changes.map(\.item.id) == ["i4", "i5"] && provider.requests.count == 2)
+    }
+
     /// "Да, 2" is not a plain yes (which two?): it goes to the model as a new command, and the limits hold for the answer.
     @Test func aQualifiedYesGoesToTheModelWithTheLimitsInForce() async throws {
         let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
