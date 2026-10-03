@@ -131,6 +131,26 @@ struct RecurrenceExpanderTests {
         let onto = [ItemException(itemID: "s1", occDate: d("2026-10-26"), action: .moved, movedDate: d("2026-11-02"))]
         #expect(dates(item, "2026-11-01", "2026-11-07", exceptions: onto) == ["2026-11-02", "2026-11-02"])
     }
+
+    /// "Stand-up every Monday", Monday the 26th moved to Wednesday the 28th, then the series edited to Tuesdays (or started later,
+    /// or ended): the moved occurrence has no series behind it any more and used to keep showing, with an alert planned for it.
+    @Test func aMoveOfADayTheEditedRuleNoLongerProducesIsNotShown() {
+        let moved = [ItemException(itemID: "s1", occDate: d("2026-10-26"), action: .moved, movedDate: d("2026-10-28"), movedTime: LocalTime("15:30"))]
+        let mondays = series("2026-10-05", Recurrence(freq: .weekly, byWeekday: [.mon]), time: "10:00")
+        #expect(dates(mondays, "2026-10-26", "2026-10-31", exceptions: moved) == ["2026-10-28"]) // as long as the rule has that Monday
+        let tuesdays = series("2026-10-05", Recurrence(freq: .weekly, byWeekday: [.tue]), time: "10:00")
+        #expect(dates(tuesdays, "2026-10-26", "2026-10-31", exceptions: moved) == ["2026-10-27"])
+        let startedLater = series("2026-11-02", Recurrence(freq: .weekly, byWeekday: [.mon]), time: "10:00")
+        #expect(dates(startedLater, "2026-10-26", "2026-10-31", exceptions: moved).isEmpty)
+        let ended = series("2026-10-05", Recurrence(freq: .weekly, byWeekday: [.mon], until: d("2026-10-20")), time: "10:00")
+        #expect(dates(ended, "2026-10-26", "2026-10-31", exceptions: moved).isEmpty)
+        let three = series("2026-10-05", Recurrence(freq: .weekly, byWeekday: [.mon], count: 3), time: "10:00")
+        #expect(dates(three, "2026-10-26", "2026-10-31", exceptions: moved).isEmpty) // the 5th, 12th and 19th: the 26th is not one of them
+        // a done occurrence that was moved follows the same rule
+        let doneMoved = [ItemException(itemID: "s1", occDate: d("2026-10-26"), action: .done, movedDate: d("2026-10-28"))]
+        #expect(dates(tuesdays, "2026-10-26", "2026-10-31", exceptions: doneMoved) == ["2026-10-27"])
+        #expect(dates(mondays, "2026-10-26", "2026-10-31", exceptions: doneMoved) == ["2026-10-28"])
+    }
 }
 
 @Suite("Store.agenda")

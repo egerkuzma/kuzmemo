@@ -50,6 +50,10 @@ public enum RecurrenceExpander {
         }
         for exception in overrides.values where exception.action == .moved || (exception.action == .done && exception.movedDate != nil) {
             guard let movedDate = exception.movedDate, movedDate >= from, movedDate <= through else { continue }
+            // Only an occurrence the rule still generates can stand somewhere else. After the series was edited (another weekday,
+            // a later start, an end), a move of a day the rule no longer produces used to keep showing an occurrence that had no
+            // series behind it, and an alert was planned for it; the override stays stored, for when the rule comes back.
+            guard !ruleDates(rule: rule, start: start, from: exception.occDate, through: exception.occDate).isEmpty else { continue }
             result.append(Occurrence(
                 originalDate: exception.occDate, date: movedDate, time: exception.movedTime ?? item.time,
                 state: exception.action == .done ? .done : .open, wasMoved: true
