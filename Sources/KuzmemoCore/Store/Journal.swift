@@ -58,6 +58,8 @@ public enum StoreError: Error, Equatable {
     case undoConflict(String)
     /// The phrase this change came from was erased (by "erase all") while it was being worked on, so nothing is made of it.
     case memoErased(String)
+    /// The entry was changed by something else after the editor read it: saving the editor's copy would undo that change.
+    case changedMeanwhile(String)
 }
 
 /// The ids of the saved phrases that "erase all" has removed. A phrase that was with the model or the recogniser when the erase

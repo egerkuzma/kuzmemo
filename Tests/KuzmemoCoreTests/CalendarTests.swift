@@ -108,6 +108,33 @@ struct ManualEditTests {
         #expect(restored.date == date("2026-10-05") && restored.time == LocalTime("10:00") && restored.recurrence != nil && restored.details == "в переговорной")
     }
 
+    /// The editor reads an entry and saves its whole draft later. A change that reached the entry in between (a voice command, a
+    /// Done from a notification, an undo) used to be quietly overwritten by the editor's older copy.
+    @Test func savingAnEditorCopyOfAnEntryThatChangedMeanwhileIsRefused() async throws {
+        let store = try makeStore()
+        let made = try await store.create(ItemDraft(kind: .task, title: "Купить молоко", date: date("2026-09-29")))
+        let id = made.item.id
+        var draft = ItemDraft(made.item) // what the editor shows, read at version 1
+        draft.title = "Купить молоко и хлеб"
+        // meanwhile: a voice command moves the entry
+        try await store.apply(MutationPlan(actions: [.update(itemID: id, changes: ItemChanges(date: date("2026-09-30")))]), source: .voice, memoID: nil, label: "Move")
+        let moved = try #require(try await store.item(id: id))
+        #expect(moved.version == 2)
+
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.save(draft, as: id, expectingVersion: made.item.version) }
+        let untouched = try #require(try await store.item(id: id))
+        #expect(untouched.title == "Купить молоко" && untouched.date == date("2026-09-30") && untouched.version == 2) // nothing was written
+        // the person decides: a save without a version to check replaces the entry with the editor's copy (and the undo journal
+        // still has the move)
+        try await store.save(draft, as: id, expectingVersion: nil)
+        let replaced = try #require(try await store.item(id: id))
+        #expect(replaced.title == "Купить молоко и хлеб" && replaced.date == date("2026-09-29") && replaced.version == 3)
+        // a save with the current version goes through as before
+        draft.title = "Молоко"
+        try await store.save(draft, as: id, expectingVersion: 3)
+        #expect(try await store.item(id: id)?.title == "Молоко")
+    }
+
     @Test func editingADateMakesAnApproximateItemExact() async throws {
         let store = try makeStore()
         let id = try await store.perform(label: "seed") { m in

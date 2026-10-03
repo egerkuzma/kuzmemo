@@ -19,6 +19,9 @@ struct ItemEditorView: View {
     @State private var problem: String?
     /// The save is under way: a second press must not make a second entry.
     @State private var saving = false
+    /// The version of the entry the editor read. A save checks it, so that a change that reached the entry meanwhile (a voice
+    /// command, a notification's Done, an undo) is not quietly put back; after that has been said once, the next Save replaces it.
+    @State private var expectedVersion: Int?
     @State private var sourceText: String?
     @FocusState private var titleFocused: Bool
 
@@ -28,7 +31,9 @@ struct ItemEditorView: View {
         let start: ItemDraft
         switch request {
         case let .new(draft): start = draft
-        case let .edit(item): start = ItemDraft(item)
+        case let .edit(item):
+            start = ItemDraft(item)
+            _expectedVersion = State(initialValue: item.version)
         }
         _draft = State(initialValue: start)
         _hasDate = State(initialValue: start.date != nil)
@@ -278,8 +283,9 @@ struct ItemEditorView: View {
             let failure: (any Error)?
             switch request {
             case .new: failure = await env.attempt { try await env.calendar.create(out) }
-            case let .edit(item): failure = await env.attempt { try await env.calendar.save(out, as: item.id) }
+            case let .edit(item): failure = await env.attempt { try await env.calendar.save(out, as: item.id, expectingVersion: expectedVersion) }
             }
+            if case StoreError.changedMeanwhile? = failure { expectedVersion = nil } // the next Save is the person's decision
             if let failure { problem = AppEnvironment.describe(failure) } else { dismiss() }
         }
     }

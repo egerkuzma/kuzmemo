@@ -364,6 +364,8 @@ final class AppEnvironment {
             case .emptyTitle: tr("Enter a title for the entry.")
             case .repeatWithoutDate: tr("A repeating entry needs a start date.")
             }
+        case StoreError.changedMeanwhile:
+            tr("This entry was changed while you were editing it. Save again to replace that change with your version, or cancel to keep it.")
         case is StoreError:
             tr("The entry has changed: refresh the window and try again.")
         default:

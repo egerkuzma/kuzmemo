@@ -146,6 +146,24 @@ def main():
     check("Escape closes it without saving", call("GET", "/window").get("sheetAttached") is False)
     call("POST", "/dev/seed")
 
+    # An entry that changes while its editor is open (here the last edit of it is undone behind the editor's back) is not
+    # quietly overwritten by the editor's older copy: the first Save says so and keeps the sheet, a second Save is the
+    # person's decision and replaces it.
+    call("POST", "/ui", {"editor": "Встреча с Дмитрием"})
+    time.sleep(0.8)
+    call("POST", "/window/key?name=main&key=return&sheet=1")  # an edit of its own, to be undone
+    time.sleep(0.8)
+    call("POST", "/ui", {"editor": "Встреча с Дмитрием"})
+    time.sleep(0.8)
+    undone = call("POST", "/undo")
+    time.sleep(0.5)
+    call("POST", "/window/key?name=main&key=return&sheet=1")
+    time.sleep(0.8)
+    check("a save over an entry that changed meanwhile keeps the sheet open", undone.get("label") == "Edit entry" and call("GET", "/window").get("sheetAttached") is True, str(undone))
+    call("POST", "/window/key?name=main&key=return&sheet=1")
+    time.sleep(0.8)
+    check("…and a second Save replaces it deliberately", call("GET", "/window").get("sheetAttached") is False and "Сохранено" in " ".join((call("GET", "/state").get("toast") or {}).get("lines", [])))
+
     print("discarding a phrase from the Inbox")
     # "Discard" cannot be taken back (the phrase stays in the database, nothing in the app shows it again), so it asks first:
     # Cancel (Escape) leaves the phrase where it was, the dialog's own button removes it.

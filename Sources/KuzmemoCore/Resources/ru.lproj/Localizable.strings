@@ -445,6 +445,7 @@
 "The chosen Python was not found: %1$@" = "Указанный Python не найден: %1$@";
 "The claude program was not found." = "Не найдена программа claude.";
 "The entry has changed: refresh the window and try again." = "Запись уже изменилась: обнови окно и повтори.";
+"This entry was changed while you were editing it. Save again to replace that change with your version, or cancel to keep it." = "Пока запись была открыта в редакторе, её изменило что-то ещё. Нажми «Сохранить» ещё раз, чтобы заменить то изменение своей версией, или отмени, чтобы оставить его.";
 "The full model: the most accurate, but noticeably slower." = "Полная модель: максимум точности, но заметно медленнее.";
 "The glossary is empty" = "Глоссарий пуст";
 "The installed version of claude does not support the options the app needs." = "Установленная версия claude не поддерживает нужные параметры.";
