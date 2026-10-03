@@ -297,13 +297,26 @@ public actor MemoProcessor {
         memo.status = .thinking
         try? await store.save(memo: memo)
 
+        let followUp = await followUp(for: memo)
+        // A plain no to the app's own "Delete 3 entries?" is decided here, without the model: the limits were lifted for the
+        // answer to that question, and a model that misread the no could have come back with the deletions.
+        if let followUp, followUp.askedToConfirmBulk, FollowUp.declines(transcript) {
+            memo.llmModel = "local-router"
+            memo.intent = Intent.unknown.rawValue
+            memo.confidence = 1
+            memo.status = .discarded
+            memo.failReason = "the person said no"
+            try? await store.save(memo: memo)
+            return ProcessOutcome(memo: memo, kind: .unknown, interpretation: nil)
+        }
+
         let anchor = Self.parseAnchor(memo.anchorLocal) ?? clock.localNow()
         let timeZone = TimeZone(identifier: memo.tz) ?? clock.timeZone
         let started = Date()
         let result: InterpretResult
         do {
             result = try await interpreter.interpret(InterpretRequest(
-                transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: await followUp(for: memo)
+                transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp
             ))
         } catch let error as LLMError {
             return await fail(memo, error, elapsed: Date().timeIntervalSince(started))

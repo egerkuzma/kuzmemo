@@ -26,13 +26,14 @@ public struct ValidationContext: Sendable {
     /// The question this transcript answers was about the time: an event that still has none is then an all-day event
     /// (the person said it does not matter), not a reason to ask once more.
     public var timeWasAsked: Bool
-    /// The question this transcript answers was the app's own "Delete 3 entries?" / "Change 4 entries?": the person has
-    /// said yes, so the bulk limits do not ask again. Any other answer is a new command with the limits in force.
-    public var bulkConfirmed: Bool
+    /// The transcript is the person's plain yes to the app's own "Delete 3 entries?" / "Change 4 entries?": the limit for that
+    /// operation is lifted, up to the number of entries the person agreed to. Any other answer is a new command with the
+    /// limits in force.
+    public var bulkConfirmation: BulkConfirmation?
 
     public init(
         context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
-        isFollowUp: Bool = false, timeWasAsked: Bool = false, bulkConfirmed: Bool = false
+        isFollowUp: Bool = false, timeWasAsked: Bool = false, bulkConfirmation: BulkConfirmation? = nil
     ) {
         self.context = context
         self.resolver = resolver
@@ -40,15 +41,18 @@ public struct ValidationContext: Sendable {
         self.policy = policy
         self.isFollowUp = isFollowUp
         self.timeWasAsked = timeWasAsked
-        self.bulkConfirmed = bulkConfirmed
+        self.bulkConfirmation = bulkConfirmation
     }
 
-    /// The flags of an answer to a question come from the question itself, in one place for the pipeline and for the replay
-    /// of recorded answers.
-    public init(context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard, followUp: FollowUp?) {
+    /// The flags of an answer to a question come from the question and the answer themselves, in one place for the pipeline
+    /// and for the replay of recorded answers.
+    public init(
+        context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
+        followUp: FollowUp?, answer: String
+    ) {
         self.init(
             context: context, resolver: resolver, store: store, policy: policy, isFollowUp: followUp != nil,
-            timeWasAsked: followUp?.askedForTime ?? false, bulkConfirmed: followUp?.askedToConfirmBulk ?? false
+            timeWasAsked: followUp?.askedForTime ?? false, bulkConfirmation: followUp?.confirmedBulk(by: answer)
         )
     }
 }
@@ -133,14 +137,14 @@ public enum ActionValidator {
             // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
             // stand-ups this week" can name one item three times.
             let deletes = distinctTargets(actions.filter { $0.op == .delete })
-            if deletes > policy.maxDeletesWithoutConfirmation && !vc.bulkConfirmed {
+            if deletes > allowed(.delete, without: policy.maxDeletesWithoutConfirmation) {
                 throw Stop(.clarify(Clarification(
                     question: trCount("Delete %lld entries?", deletes),
                     reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")]
                 )))
             }
             let updates = distinctTargets(actions.filter { $0.op == .update })
-            if updates > policy.maxUpdatesWithoutConfirmation && !vc.bulkConfirmed {
+            if updates > allowed(.update, without: policy.maxUpdatesWithoutConfirmation) {
                 throw Stop(.clarify(Clarification(
                     question: trCount("Change %lld entries?", updates),
                     reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")]
@@ -159,6 +163,14 @@ public enum ActionValidator {
                 actions: planned, warnings: warnings,
                 correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1)
             ))
+        }
+
+        /// How many entries one answer may touch with this operation before the person is asked: the policy's limit, or what the
+        /// person has just agreed to ("Delete 3 entries?" — "yes"). The model's answer to the yes is made anew; one that names
+        /// more entries than were agreed to is asked about again.
+        func allowed(_ operation: BulkConfirmation.Operation, without confirmation: Int) -> Int {
+            guard let confirmed = vc.bulkConfirmation, confirmed.operation == operation else { return confirmation }
+            return max(confirmed.count, confirmation)
         }
 
         /// How many different entries the actions are about (a ref the model was shown, else the words it used to find one).

@@ -19,10 +19,72 @@ public struct FollowUp: Equatable, Sendable {
         question.lowercased().range(of: #"во сколько|в какое время|какое время|на какое время|at what time|what time|which time"#, options: .regularExpression) != nil
     }
 
-    /// The question was the app's own "Delete 3 entries?" or "Change 4 entries?" (in either language). An answer to it is the
-    /// person's yes; an answer to any other question is a new command and meets the bulk limits again.
-    public var askedToConfirmBulk: Bool {
-        question.range(of: #"^(Delete|Change) \d+ entr(y|ies)\?$|^(Удалить|Изменить) \d+ запис(ь|и|ей)\?$"#, options: .regularExpression) != nil
+    /// The question was the app's own "Delete 3 entries?" or "Change 4 entries?" (in either language). Only a plain yes to it
+    /// lifts the bulk limits (`confirmedBulk(by:)`); a plain no never reaches the model (`declines`); anything else is a new
+    /// command that meets the limits again.
+    public var askedToConfirmBulk: Bool { bulkQuestion != nil }
+
+    /// What the app's own bulk question asked about: the operation and how many entries.
+    public var bulkQuestion: BulkConfirmation? {
+        let pattern = #/^(Delete|Change|Удалить|Изменить) (\d+) (?:entr(?:y|ies)|запис(?:ь|и|ей))\?$/#
+        guard let match = question.wholeMatch(of: pattern), let count = Int(match.output.2) else { return nil }
+        let verb = match.output.1
+        return BulkConfirmation(operation: verb == "Delete" || verb == "Удалить" ? .delete : .update, count: count)
+    }
+
+    /// The person's answer to the app's own bulk question, when it is a plain yes ("да, удалить", "yes", "delete them"): the limit
+    /// is lifted for that operation and for at most that many entries, which is what the person agreed to. The model's answer
+    /// to the "yes" is made anew and could in principle name more.
+    public func confirmedBulk(by answer: String) -> BulkConfirmation? {
+        guard let asked = bulkQuestion, Self.affirms(answer) else { return nil }
+        return asked
+    }
+
+    /// A short answer that only says yes. Every word has to be a known one: "yes, but not the third" is left to the model.
+    public static func affirms(_ answer: String) -> Bool {
+        let words = Self.words(answer)
+        return !words.isEmpty && words.allSatisfy { affirmativeWords.contains($0) || fillerWords.contains($0) }
+            && words.contains { affirmativeWords.contains($0) }
+    }
+
+    /// A short answer that only says no ("нет", "не надо", "отмена", "no, cancel", "never mind").
+    public static func declines(_ answer: String) -> Bool {
+        let words = Self.words(answer)
+        return !words.isEmpty && words.allSatisfy { negativeWords.contains($0) || fillerWords.contains($0) }
+            && words.contains { negativeWords.contains($0) }
+    }
+
+    private static func words(_ text: String) -> [String] {
+        text.lowercased().replacingOccurrences(of: "ё", with: "е")
+            .split { !$0.isLetter && $0 != "'" }.map(String.init)
+    }
+
+    private static let affirmativeWords: Set<String> = [
+        "да", "ага", "угу", "давай", "давайте", "конечно", "подтверждаю", "верно", "точно", "ок", "окей", "хорошо", "можно", "ладно",
+        "удаляй", "удаляйте", "удали", "удалить", "изменяй", "измени", "изменить", "меняй", "поменяй",
+        "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed", "delete", "change", "proceed", "go",
+    ]
+    private static let negativeWords: Set<String> = [
+        "нет", "не", "неа", "отмена", "отмени", "отменить", "отбой", "стоп", "передумал", "передумала", "ничего",
+        "no", "nope", "nah", "don't", "dont", "cancel", "never", "stop", "nothing", "forget",
+    ]
+    /// Words that carry no decision of their own and may stand beside a yes or a no.
+    private static let fillerWords: Set<String> = [
+        "и", "все", "их", "это", "эти", "пожалуйста", "ну", "надо", "нужно", "делай", "удаляй", "записи", "запись", "записей", "спасибо",
+        "them", "all", "it", "please", "ahead", "do", "fine", "right", "correct", "that's", "thats", "so", "the", "entries", "mind",
+        "anything", "thanks", "thank", "you",
+    ]
+}
+
+/// The app's own "Delete 3 entries?" / "Change 4 entries?": which operation, and for how many entries.
+public struct BulkConfirmation: Equatable, Sendable {
+    public enum Operation: Sendable { case delete, update }
+    public var operation: Operation
+    public var count: Int
+
+    public init(operation: Operation, count: Int) {
+        self.operation = operation
+        self.count = count
     }
 }
 
@@ -108,7 +170,7 @@ public struct Interpreter: Sendable {
                 let validation = ValidationContext(
                     context: context,
                     resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
-                    store: store, policy: policy, followUp: followUp
+                    store: store, policy: policy, followUp: followUp, answer: transcript
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)
                 return InterpretResult(

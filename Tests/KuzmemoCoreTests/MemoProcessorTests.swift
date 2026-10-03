@@ -232,6 +232,49 @@ struct MemoProcessorTests {
         #expect(try await store.unfinishedMemos().isEmpty) // a superseded question is not left hanging
     }
 
+    /// The app asked "Delete 3 entries?" and the person said no. The model is not consulted at all: the limits are lifted for
+    /// the answer to that question, so a model that misread the no and came back with the deletions would have been obeyed.
+    @Test func aNoToTheAppsOwnBulkQuestionNeverReachesTheModel() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(threeDeletes)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 3 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали всё на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind, question.question == "Удалить 3 записи?" else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        #expect(provider.requests.count == 1)
+
+        let declined = await processor.submit(text: "нет, не надо", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case .unknown = declined.kind else { Issue.record("expected nothing to happen: \(declined.kind)"); return }
+        #expect(provider.requests.count == 1) // the misreading model was never given the chance
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 3)
+        #expect(try await store.memo(id: asked.memo.id)?.status == .superseded)
+        #expect(try await store.memo(id: declined.memo.id)?.status == .discarded)
+        #expect(try await store.unfinishedMemos().isEmpty)
+    }
+
+    /// The yes goes to the model (it has to say which entries), and its answer counts as confirmed only within what was agreed to.
+    @Test func aYesToTheAppsOwnBulkQuestionIsAppliedWithinWhatWasAgreedTo() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let fourDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3},{"op":"delete","ref":4}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(fourDeletes), .json(threeDeletes), .json(threeDeletes)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 4 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали три записи на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        // the model's answer to the yes names four: more than the three the person agreed to, so it is asked about again
+        let more = await processor.submit(text: "да, удалить", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .clarify(again) = more.kind else { Issue.record("expected a new question: \(more.kind)"); return }
+        #expect(again.question == "Удалить 4 записи?" && provider.requests.count == 2)
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 4)
+        // the same yes, with an answer that stays within the agreed three, is applied
+        let fine = await processor.submit(text: "да", inputKind: .voice, parentMemoID: more.memo.id, followupQuestion: again.question)
+        guard case let .applied(result) = fine.kind else { Issue.record("expected the deletions: \(fine.kind)"); return }
+        #expect(result.changes.count == 3 && provider.requests.count == 3)
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 1)
+    }
+
     @Test func aRetryAfterAFailureKeepsTheConversation() async throws {
         let (processor, _, provider) = try processor([.json(ParserResponseTests.clarify), .fail(.timedOut(seconds: 30)), .json(createAnswer)])
         let asked = await processor.submit(text: "напомни позвонить Дмитрию", inputKind: .voice)
