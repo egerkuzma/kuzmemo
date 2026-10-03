@@ -85,6 +85,10 @@ final class VoiceController {
     private struct Job {
         var id: Int
         var utterance: Utterance
+        /// The phrase made for the recording the moment it ended (its audio in the spool, a `recorded` row in the database). It is
+        /// started before the job waits its turn, so that a quit or a crash while another phrase is being worked on loses
+        /// nothing: the next launch finds the phrase and recognises it.
+        var admission: Task<Memo, Never>
         /// Set when the recording answers a question the app asked.
         var reply: AppEnvironment.PendingQuestion?
         var done: (@MainActor @Sendable (UtteranceResult) -> Void)?
@@ -597,13 +601,17 @@ final class VoiceController {
         nextJobID += 1
         pendingJobs += 1
         showBackground(modelState == .loading ? .preparingModel : .transcribing)
-        jobs.yield(Job(id: nextJobID, utterance: utterance, reply: reply, done: done))
+        // The phrase is saved right away, in parallel with whatever the worker is doing; the job is queued at once, so two quick
+        // recordings keep their order.
+        let utterances = self.utterances
+        let admission = Task { await utterances.admit(utterance, replyTo: reply.map { Reply(memoID: $0.memoID, question: $0.question) }) }
+        jobs.yield(Job(id: nextJobID, utterance: utterance, admission: admission, reply: reply, done: done))
     }
 
     private func run(_ job: Job) async {
         activeJob = job.id
-        let reply = job.reply.map { Reply(memoID: $0.memoID, question: $0.question) }
-        let result = await utterances.process(job.utterance, replyTo: reply) { [weak self] stage in
+        let memo = await job.admission.value
+        let result = await utterances.process(admitted: memo, samples: job.utterance.samples) { [weak self] stage in
             Task { @MainActor in self?.stageChanged(stage, job: job.id) }
         }
         activeJob = nil

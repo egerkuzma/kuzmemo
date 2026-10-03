@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -136,6 +137,23 @@ def main():
         r = call("POST", "/record/inject-audio", {"path": wav(name)})
         check(f"{name} never reaches the model", r["kind"] == "noSpeech" and r["spoken"] == [])
     check("…and creates no items", counts()["items"] == before["items"])
+
+    # two recordings in quick succession: the second is saved as a phrase the moment it ends, not when its turn in the queue
+    # comes (a quit or a crash while the first was being worked on used to lose it without a trace)
+    memos = counts()["memos"]
+    results = {}
+    def inject(name):
+        results[name] = call("POST", "/record/inject-audio", {"path": wav(name)})
+    first = threading.Thread(target=inject, args=("01",))
+    second = threading.Thread(target=inject, args=("02",))
+    first.start(); time.sleep(0.3); second.start(); time.sleep(0.5)
+    queued = counts()["memos"]
+    busy = call("GET", "/voice")["pendingJobs"]
+    first.join(); second.join()
+    check("a recording that waits behind another one is already a saved phrase", queued == memos + 2 and busy == 2,
+          f"memos {memos} → {queued}, pending jobs {busy} while the first was being worked on")
+    check("…and both are processed", results["01"]["kind"] == "processed" and results["02"]["kind"] == "processed",
+          f"{results['01'].get('kind')} / {results['02'].get('kind')}")
 
     print("trigger key, with a scripted microphone")
     call("POST", "/voice/input", {"path": wav("02")})

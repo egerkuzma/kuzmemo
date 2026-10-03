@@ -293,6 +293,41 @@ struct UtteranceProcessorTests {
         #expect(memo.status == .applied && memo.anchorLocal == "2026-09-28 14:29" && r.spool.files().isEmpty)
     }
 
+    /// A recording that waits its turn behind another one is on disk and in the database from the moment it was admitted, and a
+    /// recovery pass that runs meanwhile leaves it to the worker that will process it.
+    @Test func anAdmittedRecordingIsSavedBeforeItsTurnComes() async throws {
+        let r = try rig(stt: ScriptedTranscriber([.reply("напомни позвонить")]))
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let spokenAt = LocalDateTime(date: LocalDate("2026-09-28")!, time: LocalTime("14:29")!)
+        let memo = await r.utterances.admit(Utterance(samples: recording(), spokenAt: spokenAt))
+        let saved = try #require(try await r.store.memo(id: memo.id))
+        #expect(saved.status == .recorded && saved.anchorLocal == "2026-09-28 14:29" && saved.audioPath == memo.audioPath)
+        #expect(r.spool.files().count == 1)
+        #expect(try r.spool.read(path: memo.audioPath ?? "").count == recording().count)
+        #expect(await r.utterances.recoverUnfinished(includeBlocked: true).isEmpty) // claimed: not recognised twice
+        #expect(r.spool.files().count == 1)
+
+        let result = await r.utterances.process(admitted: memo, samples: recording())
+        guard case let .processed(outcome) = result.kind, case .applied = outcome.kind else { Issue.record("expected applied: \(result.kind)"); return }
+        #expect(result.memoID == memo.id && r.spool.files().isEmpty && r.provider.requests.count == 1)
+    }
+
+    /// The app quit (or crashed) with a recording still waiting in the queue: the next launch recognises it, once.
+    @Test func anAdmittedRecordingThatNeverGotItsTurnIsRecognisedAtTheNextLaunch() async throws {
+        let r = try rig(stt: ScriptedTranscriber([.reply("напомни позвонить")]))
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        let memo = await r.utterances.admit(Utterance(samples: recording()))
+        // the next launch: a processor of its own over the same database and spool
+        let relaunched = UtteranceProcessor(
+            recognizer: Recognizer(transcriber: ScriptedTranscriber([.reply("напомни позвонить")])), processor: r.processorForTests,
+            store: r.store, spool: r.spool, clock: FixedNow(local: "2026-09-28 14:35", in: moscow)!
+        )
+        let results = await relaunched.recoverUnfinished(includeBlocked: true)
+        #expect(results.count == 1 && results[0].memoID == memo.id)
+        #expect(try await r.store.memo(id: memo.id)?.status == .applied && r.spool.files().isEmpty)
+        #expect(await relaunched.recoverUnfinished(includeBlocked: true).isEmpty) // and not a second time
+    }
+
     @Test func aMissingRecordingIsGivenUpOn() async throws {
         let r = try rig(stt: ScriptedTranscriber([]), claude: [])
         defer { try? FileManager.default.removeItem(at: r.directory) }

@@ -82,9 +82,19 @@ public actor UtteranceProcessor {
         self.makeID = makeID
     }
 
+    /// Admits a recording and carries it through to the end: `admit` followed by `process(admitted:)`.
     public func process(
         _ utterance: Utterance, replyTo reply: Reply? = nil, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
     ) async -> UtteranceResult {
+        let memo = await admit(utterance, replyTo: reply)
+        return await process(admitted: memo, samples: utterance.samples, onStage: onStage)
+    }
+
+    /// Writes the recording to the spool and saves a phrase for it, and nothing more. This is done the moment a recording ends,
+    /// before it waits its turn behind another one: from here on a quit or a crash leaves a `recorded` phrase with its audio,
+    /// which the next launch picks up. The phrase is claimed until `process(admitted:)` has run it, so that a recovery pass
+    /// started by the timer meanwhile leaves it alone.
+    public func admit(_ utterance: Utterance, replyTo reply: Reply? = nil) async -> Memo {
         let spoken = utterance.spokenAt ?? clock.localNow()
         var anchorText = "\(spoken.date) \(spoken.time)"
         var timeZone = clock.timeZone.identifier
@@ -94,7 +104,6 @@ public actor UtteranceProcessor {
         }
         let id = makeID()
         inFlight.insert(id)
-        defer { inFlight.remove(id) }
         var memo = Memo(
             id: id, createdAt: nowMs, anchorLocal: anchorText, tz: timeZone,
             inputKind: .voice, status: .recorded, durationMs: Int(Double(utterance.samples.count) / 16),
@@ -103,7 +112,15 @@ public actor UtteranceProcessor {
         // If the spool cannot be written the phrase is still handled, just without the crash safety net.
         memo.audioPath = try? spool.write(utterance.samples, name: id)
         try? await store.save(memo: memo)
-        return await transcribe(memo, samples: utterance.samples, onStage: onStage)
+        return memo
+    }
+
+    /// Recognises and interprets a recording that `admit` has taken in.
+    public func process(
+        admitted memo: Memo, samples: [Float], onStage: @Sendable (UtteranceStage) -> Void = { _ in }
+    ) async -> UtteranceResult {
+        defer { inFlight.remove(memo.id) }
+        return await transcribe(memo, samples: samples, onStage: onStage)
     }
 
     /// Picks up recordings that were never transcribed (the app quit, the model was missing) and those due for
