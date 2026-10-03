@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 /// Why a copy of the database was made. It decides how many copies of that kind are kept.
-public enum BackupReason: String, Sendable, CaseIterable {
+public enum BackupReason: String, Codable, Sendable, CaseIterable {
     /// The automatic copy: one per day.
     case daily
     /// The person asked for it.
@@ -23,7 +23,7 @@ public enum BackupReason: String, Sendable, CaseIterable {
 }
 
 /// One copy of the database in the backups folder.
-public struct BackupFile: Equatable, Sendable, Identifiable {
+public struct BackupFile: Equatable, Codable, Sendable, Identifiable {
     public var url: URL
     public var reason: BackupReason
     /// When it was made, by the wall clock of the Mac at that time.
@@ -82,9 +82,12 @@ public actor BackupService {
     /// The copies, newest first; a folder that cannot be read is an error (a missing one holds no copies). Recovery needs the
     /// difference: "no copies" starts an empty database, "cannot read the copies" must not.
     public static func listing(in directory: URL) throws -> [BackupFile] {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) else { return [] }
-        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return []
+        }
         return names.compactMap { name -> BackupFile? in
             guard let parsed = Self.parse(name) else { return nil }
             let url = directory.appendingPathComponent(name)
@@ -112,7 +115,7 @@ public actor BackupService {
 
     private func makeCopy(_ reason: BackupReason) async throws -> BackupFile {
         let fileManager = FileManager.default
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try PrivateFiles.directory(directory)
         // Leftovers of a copy that was interrupted (a crash, a power cut). Copies are made one at a time, so none is in progress.
         for name in (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasSuffix(".partial") {
             try? fileManager.removeItem(at: directory.appendingPathComponent(name))
@@ -128,6 +131,7 @@ public actor BackupService {
         let partial = directory.appendingPathComponent(name + ".partial")
         do {
             try await store.writer.vacuum(into: partial.path)
+            try PrivateFiles.file(partial)
             try Self.verify(partial)
             try fileManager.moveItem(at: partial, to: final)
         } catch {

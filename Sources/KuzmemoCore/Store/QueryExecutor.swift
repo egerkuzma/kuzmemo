@@ -47,20 +47,25 @@ extension Store {
     /// Runs a validated query against the calendar.
     public func run(_ plan: QueryPlan, now: LocalDateTime) async throws -> QueryResult {
         let today = now.date
+        let current = clock.now()
+        let instant = LocalDateTime(date: current, in: clock.timeZone) == now ? current : now.instant(in: clock.timeZone)
         switch plan.target {
         case let .days(range):
             var entries = try await agenda(in: range, includeDone: plan.includeDone)
             var passed = 0
             if !plan.includeDone, range.contains(today) { // asking for the whole day (with done ones) keeps what has passed
                 let before = entries.count
-                entries.removeAll { $0.date == today && $0.hasPassed(at: now) }
+                entries.removeAll { $0.date == today && $0.hasPassed(at: now, timeZone: clock.timeZone, instant: instant) }
                 passed = before - entries.count
             }
             return QueryResult(plan: plan, entries: entries, title: Self.title(for: range, today: today), passedToday: passed)
 
         case let .upcoming(limit):
             let entries = try await agenda(in: today ... today.adding(days: 60), includeDone: false)
-                .filter { $0.date > today || ($0.date == today && ($0.time.map { $0 >= now.time } ?? true)) }
+                .filter { entry in
+                    if let stamp = entry.scheduledAt { return Date(timeIntervalSince1970: TimeInterval(stamp) / 1000) >= instant }
+                    return entry.date > today || (entry.date == today && (entry.time.map { $0 >= now.time } ?? true))
+                }
             return QueryResult(plan: plan, entries: Array(entries.prefix(limit)), title: tr("upcoming"))
 
         case .overdue:
@@ -79,7 +84,7 @@ extension Store {
             for variant in try await searchVariants(text) {
                 for item in try await search(variant, limit: 20) where seen.insert(item.id).inserted { items.append(item) }
             }
-            return QueryResult(plan: plan, entries: items.map { Self.entry($0, today: today) }, title: Wording.quoted(text))
+            return QueryResult(plan: plan, entries: items.map { Self.entry($0.shown(in: clock.timeZone), today: today) }, title: Wording.quoted(text))
         }
     }
 
@@ -101,7 +106,7 @@ extension Store {
     static func entry(_ item: Item, today: LocalDate) -> AgendaEntry {
         AgendaEntry(
             item: item, date: item.date ?? today, time: item.time, isDone: item.status == .done,
-            occurrenceDate: nil, wasMoved: false
+            occurrenceDate: nil, wasMoved: false, scheduledAt: item.scheduledAt
         )
     }
 

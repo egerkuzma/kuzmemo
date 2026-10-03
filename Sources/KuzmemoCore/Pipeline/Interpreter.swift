@@ -28,6 +28,7 @@ public struct FollowUp: Equatable, Sendable {
         // either language (`ActionValidator.confirmation`).
         question.wholeMatch(of: #/(?:Delete|Change|Add|Mark|Reopen|Skip|Удалить|Изменить|Добавить|Отметить|Вернуть|Пропустить) \d+ .+\?/#) != nil
             || question.wholeMatch(of: #/(?:Delete the whole series|Удалить всю серию) .+\?/#) != nil
+            || question.wholeMatch(of: #/(?:Apply|Применить) \d+ (?:changes?|изменени[еяй])\?/#) != nil // saved questions from older builds
     }
 
     /// A short answer that only says yes. Every word has to be a known one: "yes, but not the third", "да, 2" (a number: which
@@ -78,13 +79,15 @@ public struct InterpretRequest: Sendable {
     /// already agreed to (their yes could not be applied as it was meant), and the replacement must not slip through under
     /// the limits.
     public var confirmAnyChange: Bool
+    public var anchorInstant: Date?
 
-    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone, followUp: FollowUp? = nil, confirmAnyChange: Bool = false) {
+    public init(transcript: String, anchor: LocalDateTime, timeZone: TimeZone, followUp: FollowUp? = nil, confirmAnyChange: Bool = false, anchorInstant: Date? = nil) {
         self.transcript = transcript
         self.anchor = anchor
         self.timeZone = timeZone
         self.followUp = followUp
         self.confirmAnyChange = confirmAnyChange
+        self.anchorInstant = anchorInstant
     }
 }
 
@@ -155,7 +158,7 @@ public struct Interpreter: Sendable {
                 let response = try Self.decode(llm.structuredJSON)
                 let validation = ValidationContext(
                     context: context,
-                    resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts),
+                    resolver: RelativeDateResolver(anchor: request.anchor, dayParts: promptBuilder.dayParts, timeZone: request.timeZone, anchorInstant: request.anchorInstant),
                     store: store, policy: policy, followUp: followUp, confirmAnyChange: request.confirmAnyChange
                 )
                 let interpretation = await ActionValidator.validate(response, in: validation)

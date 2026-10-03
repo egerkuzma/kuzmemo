@@ -110,6 +110,12 @@ public enum Schema {
             """)
         }
 
+        migrator.registerMigration("v5-explicit-time") { db in
+            try db.execute(sql: "ALTER TABLE item_exceptions ADD COLUMN time_cleared INTEGER CHECK(time_cleared IN (0, 1))")
+            try db.execute(sql: "ALTER TABLE item_exceptions ADD COLUMN scheduled_at INTEGER")
+            try db.execute(sql: "ALTER TABLE items ADD COLUMN scheduled_at INTEGER")
+        }
+
         return migrator
     }
 }

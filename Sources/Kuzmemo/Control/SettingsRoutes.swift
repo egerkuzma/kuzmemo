@@ -26,6 +26,9 @@ enum SettingsRoutes {
     /// replace the current values. The interface language is "system", "english" or "russian".
     static func update(_ request: HTTPRequest, _ env: AppEnvironment) async -> HTTPResponse {
         guard let json = request.jsonBody else { return .error("body must be JSON", status: 400) }
+        for (name, group) in [("speech", AppSettings.Group.speech), ("recognition", .recognition), ("recording", .recording), ("notifications", .notifications)] {
+            if json[name] != nil, !env.settings.isLoaded(group) { return .error("settings have not loaded yet", status: 503) }
+        }
         if let patch = json["interface"] as? [String: Any], let name = patch["language"] as? String {
             guard let preference = LanguagePreference(rawValue: name) else {
                 return .error("the interface language is one of \(LanguagePreference.allCases.map(\.rawValue))", status: 400)
