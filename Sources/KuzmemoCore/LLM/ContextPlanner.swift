@@ -67,6 +67,8 @@ public struct ContextPlanner: Sendable {
             if seen.insert(entry.id).inserted { entries.append(entry) }
         }
 
+        // The entries the phrase's own words point at: whatever the list is cut to, they stay in it.
+        var found = Set<String>()
         if expanded {
             var hits: [Item] = []
             for word in words where word.count >= 4 && !Self.stopWords.contains(word) && !Self.editCues.contains(where: { word.hasPrefix($0) }) {
@@ -78,6 +80,7 @@ public struct ContextPlanner: Sendable {
             // A series found by its words but outside the window is listed at its next occurrence: its own date is the day it
             // started, and "complete", "skip" or "move" on that would hit an occurrence from months ago.
             var upcoming: [String: AgendaEntry]?
+            found = Set(hits.prefix(searchHitLimit).map(\.id))
             for item in hits.prefix(searchHitLimit) where !entries.contains(where: { $0.item.id == item.id }) {
                 let entry: AgendaEntry
                 if item.recurrence != nil {
@@ -103,7 +106,21 @@ public struct ContextPlanner: Sendable {
             if $0.date != $1.date { return $0.date < $1.date }
             return ($0.time?.minutesSinceMidnight ?? -1) < ($1.time?.minutesSinceMidnight ?? -1)
         }
-        return ContextPlan(entries: Array(entries.prefix(limit)), expanded: expanded)
+        return ContextPlan(entries: Self.cut(entries, to: limit, keeping: found), expanded: expanded)
+    }
+
+    /// The first `limit` entries, except that an entry of an item the words pointed at is never the one dropped: a full fortnight
+    /// of nearer entries used to push "the meeting with Dmitry" in a month out of the list, and the model could not see what it
+    /// was asked to change. The latest entries go first; found ones go only when they alone exceed the limit.
+    static func cut(_ entries: [AgendaEntry], to limit: Int, keeping found: Set<String>) -> [AgendaEntry] {
+        guard entries.count > limit else { return entries }
+        var kept = entries
+        var index = kept.count - 1
+        while kept.count > limit, index >= 0 {
+            if !found.contains(kept[index].item.id) { kept.remove(at: index) }
+            index -= 1
+        }
+        return Array(kept.prefix(limit))
     }
 }
 

@@ -191,4 +191,21 @@ struct ContextPlannerTests {
         #expect(plan.entries.count == 25)
         #expect(plan.entries.first?.item.title == "дело 0")
     }
+
+    /// A full fortnight of nearer entries used to push the one entry the words pointed at (a month away) out of the list: the
+    /// model then could not see what it was asked to change.
+    @Test func anEntryFoundByTheWordsSurvivesTheCut() async throws {
+        let store = try makeStore()
+        try await store.perform(label: "many") { m in
+            for i in 0 ..< 48 {
+                try m.insert(reminder("дело \(i)", on: "2026-09-\(29 + i / 24)", at: LocalTime(hour: 8 + (i % 24) / 4, minute: (i % 4) * 15)!.description))
+            }
+            try m.insert(reminder("Встреча с Дмитрием", on: "2026-11-20", at: "15:00"))
+        }
+        let plan = try await ContextPlanner().plan(transcript: "перенеси встречу с Дмитрием на четверг", anchor: anchor, store: store)
+        #expect(plan.expanded && plan.entries.count == 40)
+        #expect(plan.entries.contains { $0.item.title == "Встреча с Дмитрием" })
+        #expect(plan.entries.first?.item.title == "дело 0") // the nearest still go first; the latest of the rest made room
+        #expect(!plan.entries.contains { $0.item.title == "дело 47" })
+    }
 }
