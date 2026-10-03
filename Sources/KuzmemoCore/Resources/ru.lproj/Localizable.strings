@@ -281,6 +281,9 @@
 "No notifications about reminders." = "Уведомлений о напоминаниях не будет.";
 "No Python with torch was found." = "Не найден Python с torch.";
 "No recognition model. Your recording is saved — download the model in Settings → Recognition." = "Нет модели распознавания. Запись сохранена — скачай модель в Настройки → Распознавание.";
+"No recognition model, and the recording could not be kept. Download the model in Settings → Recognition." = "Нет модели распознавания, и запись не удалось сохранить. Скачай модель в Настройках → Распознавание.";
+"Could not recognize the speech, and the recording could not be kept." = "Не удалось распознать речь, и запись не удалось сохранить.";
+"The recording could not be kept on disk, so a crash would have lost it: %1$@" = "Запись не удалось сохранить на диск, при сбое она бы пропала: %1$@";
 "No reminders: such items are only visible in the day list." = "Без напоминаний: такие дела видны только в списке дня.";
 "No repeating entries" = "Повторяющихся записей нет";
 "No sound" = "Без звука";

@@ -35,8 +35,8 @@ public struct UtteranceResult: Sendable {
     public enum Kind: Sendable {
         /// Silence, noise or an invented phrase; nothing was stored except a discarded memo.
         case noSpeech(reason: String)
-        /// The engine could not run. The recording is kept and transcribed again later; `needsUser` means it will
-        /// not be retried on its own (the speech model is not installed).
+        /// The engine could not run. The recording is kept and transcribed again later (`recordingKept`); `needsUser` means
+        /// it will not be retried on its own (the speech model is not installed).
         case recognitionFailed(String, needsUser: Bool, retryAt: Date?)
         case processed(ProcessOutcome)
     }
@@ -48,6 +48,16 @@ public struct UtteranceResult: Sendable {
     public var sttMs: Int?
     /// True when a question was answered by the local router, without asking Claude.
     public var answeredLocally: Bool
+    /// The audio is on disk for another attempt (false when the spool could not be written, or the audio is gone for good).
+    public var recordingKept: Bool = false
+}
+
+/// A recording taken in: its phrase, and whether it is safe on disk.
+public struct Admission: Sendable {
+    public var memo: Memo
+    /// Why the recording is not safe on disk when it is not: the spool or the database could not be written. The phrase is
+    /// still processed, only without the safety net a crash would need.
+    public var failure: String?
 }
 
 /// Recording → text → decision. A recording is written to a spool and a memo is saved *before* recognition,
@@ -86,15 +96,15 @@ public actor UtteranceProcessor {
     public func process(
         _ utterance: Utterance, replyTo reply: Reply? = nil, onStage: @Sendable (UtteranceStage) -> Void = { _ in }
     ) async -> UtteranceResult {
-        let memo = await admit(utterance, replyTo: reply)
-        return await process(admitted: memo, samples: utterance.samples, onStage: onStage)
+        let admission = await admit(utterance, replyTo: reply)
+        return await process(admitted: admission.memo, samples: utterance.samples, onStage: onStage)
     }
 
     /// Writes the recording to the spool and saves a phrase for it, and nothing more. This is done the moment a recording ends,
     /// before it waits its turn behind another one: from here on a quit or a crash leaves a `recorded` phrase with its audio,
     /// which the next launch picks up. The phrase is claimed until `process(admitted:)` has run it, so that a recovery pass
-    /// started by the timer meanwhile leaves it alone.
-    public func admit(_ utterance: Utterance, replyTo reply: Reply? = nil) async -> Memo {
+    /// started by the timer meanwhile leaves it alone. A write that fails does not stop the phrase, but is reported.
+    public func admit(_ utterance: Utterance, replyTo reply: Reply? = nil) async -> Admission {
         let spoken = utterance.spokenAt ?? clock.localNow()
         var anchorText = "\(spoken.date) \(spoken.time)"
         var timeZone = clock.timeZone.identifier
@@ -109,10 +119,10 @@ public actor UtteranceProcessor {
             inputKind: .voice, status: .recorded, durationMs: Int(Double(utterance.samples.count) / 16),
             parentMemoID: reply?.memoID, followupQuestion: reply?.question
         )
-        // If the spool cannot be written the phrase is still handled, just without the crash safety net.
-        memo.audioPath = try? spool.write(utterance.samples, name: id)
-        try? await store.save(memo: memo)
-        return memo
+        var failure: String?
+        do { memo.audioPath = try spool.write(utterance.samples, name: id) } catch { failure = "spool: \(error)" }
+        do { try await store.save(memo: memo) } catch { failure = (failure.map { $0 + "; " } ?? "") + "database: \(error)" }
+        return Admission(memo: memo, failure: failure)
     }
 
     /// Recognises and interprets a recording that `admit` has taken in.
@@ -224,7 +234,7 @@ public actor UtteranceProcessor {
                 let delay = retryPolicy.delay(afterAttempts: memo.attempts + 1) ?? 30
                 return UtteranceResult(
                     kind: .recognitionFailed("the transcript could not be stored: \(error)", needsUser: false, retryAt: clock.now().addingTimeInterval(delay)),
-                    memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
+                    memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false, recordingKept: recording != nil
                 )
             }
             spool.remove(path: recording)
@@ -275,9 +285,10 @@ public actor UtteranceProcessor {
         } else {
             memo.nextRetryAt = nil
         }
-        try? await store.save(memo: memo)
+        let saved = (try? await store.save(memo: memo)) != nil
         return UtteranceResult(
-            kind: .recognitionFailed("\(error)", needsUser: needsUser, retryAt: retryAt), memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil, answeredLocally: false
+            kind: .recognitionFailed("\(error)", needsUser: needsUser, retryAt: retryAt), memoID: memo.id, transcript: nil, audioSeconds: seconds, sttMs: nil,
+            answeredLocally: false, recordingKept: memo.audioPath != nil && saved // another attempt needs both the audio and the phrase
         )
     }
 }

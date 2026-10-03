@@ -161,6 +161,7 @@ final class AppEnvironment {
     /// preferences changed a moment ago are saved.
     func prepareToQuit() async {
         controlServer?.stop()
+        await voice?.awaitAdmissions() // a recording that has just ended is written before the app goes
         await settings.flush()
     }
 

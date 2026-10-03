@@ -227,11 +227,31 @@ struct UtteranceProcessorTests {
         #expect(message.contains("ANE busy") && !needsUser && retryAt == Date(timeIntervalSince1970: 1_790_595_030)) // 30 s later
         let failed = try #require(try await r.store.memo(id: first.memoID))
         #expect(failed.status == .failed && failed.failStage == "stt" && failed.attempts == 1 && failed.nextRetryAt == 1_790_595_030_000)
-        #expect(failed.audioPath != nil && r.spool.files().count == 1)
+        #expect(failed.audioPath != nil && r.spool.files().count == 1 && first.recordingKept)
 
         // Not due yet: a timer-driven recovery leaves it alone.
         #expect(await r.utterances.recoverUnfinished(includeBlocked: false).isEmpty)
         #expect(stt.callCount == 1)
+    }
+
+    /// The spool cannot be written (a full disk, a folder in the way): the phrase is still recognised and handled, and the failure
+    /// is said, instead of a silent promise that the recording is safe.
+    @Test func aRecordingThatCannotBeKeptIsStillProcessedAndTheFailureIsReported() async throws {
+        let r = try rig(stt: ScriptedTranscriber([.reply("напомни позвонить"), .fail(.transcriptionFailed("ANE busy"))]))
+        defer { try? FileManager.default.removeItem(at: r.directory) }
+        try FileManager.default.createDirectory(at: r.directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("in the way".utf8).write(to: r.directory) // a file where the spool folder should be
+
+        let admitted = await r.utterances.admit(Utterance(samples: recording()))
+        #expect(admitted.failure?.contains("spool") == true && admitted.memo.audioPath == nil)
+        #expect(try await r.store.memo(id: admitted.memo.id)?.status == .recorded) // the database write worked, the phrase is there
+        let result = await r.utterances.process(admitted: admitted.memo, samples: recording())
+        guard case let .processed(outcome) = result.kind, case .applied = outcome.kind else { Issue.record("expected applied: \(result.kind)"); return }
+
+        // a recognition that fails without the audio on disk says so: there is nothing to try again with
+        let second = await r.utterances.process(Utterance(samples: recording()))
+        guard case .recognitionFailed = second.kind else { Issue.record("expected failure: \(second.kind)"); return }
+        #expect(!second.recordingKept)
     }
 
     @Test func aFailedRecognitionIsRetriedWhenDueAndThenFlowsOn() async throws {
@@ -299,7 +319,9 @@ struct UtteranceProcessorTests {
         let r = try rig(stt: ScriptedTranscriber([.reply("напомни позвонить")]))
         defer { try? FileManager.default.removeItem(at: r.directory) }
         let spokenAt = LocalDateTime(date: LocalDate("2026-09-28")!, time: LocalTime("14:29")!)
-        let memo = await r.utterances.admit(Utterance(samples: recording(), spokenAt: spokenAt))
+        let admitted = await r.utterances.admit(Utterance(samples: recording(), spokenAt: spokenAt))
+        let memo = admitted.memo
+        #expect(admitted.failure == nil)
         let saved = try #require(try await r.store.memo(id: memo.id))
         #expect(saved.status == .recorded && saved.anchorLocal == "2026-09-28 14:29" && saved.audioPath == memo.audioPath)
         #expect(r.spool.files().count == 1)
@@ -316,7 +338,7 @@ struct UtteranceProcessorTests {
     @Test func anAdmittedRecordingThatNeverGotItsTurnIsRecognisedAtTheNextLaunch() async throws {
         let r = try rig(stt: ScriptedTranscriber([.reply("напомни позвонить")]))
         defer { try? FileManager.default.removeItem(at: r.directory) }
-        let memo = await r.utterances.admit(Utterance(samples: recording()))
+        let memo = await r.utterances.admit(Utterance(samples: recording())).memo
         // the next launch: a processor of its own over the same database and spool
         let relaunched = UtteranceProcessor(
             recognizer: Recognizer(transcriber: ScriptedTranscriber([.reply("напомни позвонить")])), processor: r.processorForTests,
