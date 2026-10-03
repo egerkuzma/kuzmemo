@@ -24,9 +24,10 @@ public struct FollowUp: Equatable, Sendable {
     /// without the model (`affirms`, `declines`, decided by `MemoProcessor`); anything else is a new command that meets the
     /// limits again.
     public var askedToConfirm: Bool {
-        question.wholeMatch(of: #/(Delete|Change|Удалить|Изменить) \d+ (?:entr(?:y|ies)|запис(?:ь|и|ей))(?:: .+)?\?/#) != nil
-            || question.wholeMatch(of: #/(Delete the whole series|Удалить всю серию) .+\?/#) != nil
-            || question.wholeMatch(of: #/(Apply|Применить) \d+ (?:changes?|изменени[еяй])\?/#) != nil
+        // "Delete 3 entries: …?", "Change 1 entry: …; Add 1 entry: …?", "Delete the whole series “X”?": the app's own forms, in
+        // either language (`ActionValidator.confirmation`).
+        question.wholeMatch(of: #/(?:Delete|Change|Add|Mark|Reopen|Skip|Удалить|Изменить|Добавить|Отметить|Вернуть|Пропустить) \d+ .+\?/#) != nil
+            || question.wholeMatch(of: #/(?:Delete the whole series|Удалить всю серию) .+\?/#) != nil
     }
 
     /// A short answer that only says yes. Every word has to be a known one: "yes, but not the third", "да, 2" (a number: which

@@ -21,8 +21,14 @@
 "Delete %lld entries?|other" = "Delete %lld entries?";
 "Change %lld entries?|one" = "Change %lld entry?";
 "Change %lld entries?|other" = "Change %lld entries?";
-"Apply %lld changes?|one" = "Apply %lld change?";
-"Apply %lld changes?|other" = "Apply %lld changes?";
+"Mark %lld entries done?|one" = "Mark %lld entry done?";
+"Mark %lld entries done?|other" = "Mark %lld entries done?";
+"Reopen %lld entries?|one" = "Reopen %lld entry?";
+"Reopen %lld entries?|other" = "Reopen %lld entries?";
+"Skip %lld occurrences?|one" = "Skip %lld occurrence?";
+"Skip %lld occurrences?|other" = "Skip %lld occurrences?";
+"Add %lld entries?|one" = "Add %lld entry?";
+"Add %lld entries?|other" = "Add %lld entries?";
 "%lld glossary words|one" = "%lld glossary word";
 "%lld glossary words|other" = "%lld glossary words";
 "%lld saved phrases|one" = "%lld saved phrase";

@@ -375,9 +375,48 @@ struct ValidatorTargetTests {
         let edit = try #require(clarification(try await validate(oneEdit, entries: entries, followUp: true, confirmAnyChange: true)))
         #expect(edit.question == "Изменить 1 запись: «Встреча с Дмитрием»?" && edit.pending?.actions.count == 1)
         let creation = try #require(clarification(try await validate(ParserResponseTests.create, entries: entries, followUp: true, confirmAnyChange: true)))
-        #expect(creation.question == "Применить 1 изменение?" && creation.options == ["Да", "Нет"] && creation.pending?.actions.count == 1)
+        #expect(creation.question == "Добавить 1 запись: «Сказать Дмитрию про доступ в Notion»?" && creation.options == ["Да", "Нет"] && creation.pending?.actions.count == 1)
         #expect(FollowUp(previous: "x", question: creation.question).askedToConfirm)
-        #expect(FollowUp(previous: "x", question: "Apply 2 changes?").askedToConfirm && FollowUp(previous: "x", question: "Apply 1 change?").askedToConfirm)
+        #expect(FollowUp(previous: "x", question: "Add 2 entries: “A”, “B”?").askedToConfirm && FollowUp(previous: "x", question: "Mark 1 entry done: “A”?").askedToConfirm)
+    }
+
+    /// The question covers the whole plan: every kind of action in it is said, not only the one that made it a question. A plan
+    /// that deletes D and changes E used to be asked about as "Delete 1 entry: D?" while the yes applied both.
+    @Test func theQuestionCoversEveryActionOfThePlan() async throws {
+        let entries = [entry(weekly, occurrence: "2026-10-05"), entry(meeting), entry(item("a", "Другое", "2026-09-29")), entry(item("b", "Ещё", "2026-09-30"))]
+        let mixed = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":3},{"op":"update","ref":2,"changes":{"title":"Встреча с Анной"}},{"op":"complete","ref":4},{"op":"skip_occurrence","ref":1},{"op":"create","item":{"kind":"note","title":"Идея"}}]}"#
+        let asked = try #require(clarification(try await validate(mixed, entries: entries, followUp: true, confirmAnyChange: true)))
+        #expect(asked.question == "Удалить 1 запись: «Другое»; Изменить 1 запись: «Встреча с Дмитрием»; Отметить 1 запись выполненной: «Ещё»; Пропустить 1 вхождение: «Планёрка»; Добавить 1 запись: «Идея»?", "\(asked.question)")
+        #expect(asked.options == ["Да", "Нет"] && asked.pending?.actions.count == 5)
+        #expect(FollowUp(previous: "x", question: asked.question).askedToConfirm)
+        // a deletion of a series beside other actions: the series question is for a lone deletion only, here the scope is in the list
+        let two = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"update","ref":2,"changes":{"title":"Встреча с Анной"}}]}"#
+        let both = try #require(clarification(try await validate(two, entries: entries)))
+        #expect(both.question == "Удалить 1 запись: «Планёрка» (вся серия); Изменить 1 запись: «Встреча с Дмитрием»?", "\(both.question)")
+    }
+
+    /// Too many entries to name, or one found by its words rather than shown: the scope of a series among them is still said.
+    @Test func theSeriesScopeSurvivesALongListAndATargetFoundByWords() async throws {
+        let store = try makeStore()
+        var entries = (1 ... 5).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+        entries.append(entry(weekly, occurrence: "2026-10-05"))
+        let six = (1 ... 6).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
+        let many = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[\#(six)]}"#, entries: entries, store: store)))
+        #expect(many.question == "Удалить 6 записей, среди них вся серия «Планёрка»?", "\(many.question)")
+        let second = item("w2", "Стендап", "2026-09-29", "09:30", recurrence: Recurrence(freq: .daily), kind: .event)
+        let twoSeries = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[\#(six),{"op":"delete","ref":7}]}"#, entries: entries + [entry(second, occurrence: "2026-10-01")], store: store)))
+        #expect(twoSeries.question == "Удалить 7 записей, среди них целиком серии «Планёрка», «Стендап»?", "\(twoSeries.question)")
+        #expect(FollowUp(previous: "x", question: many.question).askedToConfirm)
+
+        // a series found by its words, not on the model's list, is named after the listed ones
+        try await store.perform(label: "seed") { m in
+            try m.insert(Item(id: "s9", kind: .event, title: "Йога", date: LocalDate("2026-09-29"), time: LocalTime("07:00"), recurrence: Recurrence(freq: .weekly, byWeekday: [.tue])))
+        }
+        let hinted = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","target_hint":"йога"}]}"#
+        let found = try #require(clarification(try await validate(hinted, entries: entries, store: store)))
+        #expect(found.question == "Удалить 3 записи: «Запись 1», «Запись 2», «Йога» (вся серия)?", "\(found.question)")
+        let yoga = try await store.revision(of: "s9")
+        #expect(found.pending?.expectedRevisions["s9"] == yoga)
     }
 
     /// The model tends to repeat the entry's title or kind beside the one thing that differs. A repeated field is not a change:

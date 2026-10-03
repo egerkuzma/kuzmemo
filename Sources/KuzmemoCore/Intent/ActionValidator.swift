@@ -151,58 +151,93 @@ public enum ActionValidator {
                 correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1),
                 expectedRevisions: seenRevisions
             )
-            // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
-            // stand-ups this week" can name one item three times. The plan is complete when the question is asked, and the
-            // question carries it: a plain yes applies this very plan, not whatever the model would make of the yes. A plan that
-            // replaces one the person already agreed to is asked about whatever its size (`confirmAnyChange`).
-            let deleted = planned.compactMap { if case let .delete(id) = $0 { id } else { nil } }
-            let edited = planned.compactMap { if case let .update(id, _) = $0 { id } else { nil } }
-            let changed = edited + planned.compactMap { if case let .moveOccurrence(id, _, _, _) = $0 { id } else { nil } }
-            // Deleting a repeating entry deletes the whole series, and the model may have chosen that for one occurrence the
-            // person named: the question says so, and on its own it offers the occurrence instead ("only this occurrence" is
-            // an answer the model turns into a skip).
-            let seriesDeleted = Set(deleted).compactMap { seenItems[$0] }.filter { $0.recurrence != nil }
-            if !deleted.isEmpty, vc.confirmAnyChange || Set(deleted).count > policy.maxDeletesWithoutConfirmation || !seriesDeleted.isEmpty {
-                if planned.count == 1, let only = seriesDeleted.first {
-                    throw Stop(.clarify(Clarification(
-                        question: tr("Delete the whole series “%1$@”?", only.title), reason: .destructiveConfirm,
-                        options: [tr("Yes, delete"), tr("Only this occurrence"), tr("No")], pending: plan
-                    )))
-                }
-                throw Stop(.clarify(Clarification(
-                    question: naming(deleted, in: trCount("Delete %lld entries?", Set(deleted).count), seriesWide: Set(deleted)),
-                    reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")], pending: plan
-                )))
-            }
-            if !changed.isEmpty, vc.confirmAnyChange || Set(changed).count > policy.maxUpdatesWithoutConfirmation {
-                throw Stop(.clarify(Clarification(
-                    question: naming(changed, in: trCount("Change %lld entries?", Set(changed).count), seriesWide: Set(edited)),
-                    reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")], pending: plan
-                )))
-            }
-            if vc.confirmAnyChange {
-                throw Stop(.clarify(Clarification(
-                    question: trCount("Apply %lld changes?", planned.count), reason: .destructiveConfirm, options: [tr("Yes"), tr("No")], pending: plan
-                )))
-            }
+            if let question = confirmation(of: plan, planned: planned) { throw Stop(.clarify(question)) }
             return .mutate(plan)
         }
 
-        /// "Delete 3 entries?" names the entries when there are few enough to say: "Delete 3 entries: “A”, “B”, “C”?". The person
-        /// then confirms something they can see; `FollowUp.askedToConfirm` knows both forms. A repeating entry among those in
-        /// `seriesWide` is marked "(the whole series)": the scope of what will happen to it is part of what is confirmed.
-        func naming(_ itemIDs: [String], in question: String, seriesWide: Set<String>) -> String {
-            var titles: [String] = []
-            var named = Set<String>()
-            // in the order of the list the model was shown (the order the person's phrase named them, as a rule)
-            for id in vc.context.entries.map(\.item.id) where itemIDs.contains(id) && named.insert(id).inserted {
-                guard let item = seenItems[id] else { return question }
-                let quoted = Wording.quoted(item.title)
-                titles.append(item.recurrence != nil && seriesWide.contains(id) ? tr("%1$@ (the whole series)", quoted) : quoted)
+        /// The question the person is asked before a plan is applied, with the plan attached, or nil when the plan may just go
+        /// ahead. Asked when the plan deletes or changes more entries than the policy allows unasked, when it deletes a series
+        /// (the model may have chosen that for one occurrence the person named), or when it replaces a plan the person had
+        /// already agreed to (`confirmAnyChange`). The question covers the WHOLE plan: every kind of action in it, every entry
+        /// (named when there are few enough), and what happens to a series ("the whole series" when it is deleted or edited as
+        /// one, nothing when one of its occurrences moves, is ticked or skipped). A plain yes applies exactly this plan.
+        func confirmation(of plan: MutationPlan, planned: [PlannedAction]) -> Clarification? {
+            // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
+            // stand-ups this week" can name one item three times.
+            var deleted: [String] = [], edited: [String] = [], moved: [String] = [], completed: [String] = [], reopened: [String] = []
+            var skipped: [String] = [], created: [String] = []
+            for action in planned {
+                switch action {
+                case let .delete(id): deleted.append(id)
+                case let .update(id, _): edited.append(id)
+                case let .moveOccurrence(id, _, _, _): moved.append(id)
+                case let .complete(id, _): completed.append(id)
+                case let .reopen(id, _): reopened.append(id)
+                case let .skipOccurrence(id, _): skipped.append(id)
+                case let .create(new): created.append(new.title)
+                }
             }
-            // an entry found by its words, not shown to the model, has no place in the list: no half list
-            guard named.count == Set(itemIDs).count, (1 ... 4).contains(titles.count), question.hasSuffix("?") else { return question }
-            return String(question.dropLast()) + ": " + titles.joined(separator: ", ") + "?"
+            let changed = edited + moved
+            let seriesDeleted = Set(deleted).compactMap { seenItems[$0] }.filter { $0.recurrence != nil }
+            let overLimit = Set(deleted).count > policy.maxDeletesWithoutConfirmation || Set(changed).count > policy.maxUpdatesWithoutConfirmation
+            guard vc.confirmAnyChange || overLimit || !seriesDeleted.isEmpty else { return nil }
+
+            // One series deletion on its own keeps its own question, with the occurrence as a way out ("only this occurrence" is
+            // an answer the model turns into a skip).
+            if planned.count == 1, let only = seriesDeleted.first {
+                return Clarification(
+                    question: tr("Delete the whole series “%1$@”?", only.title), reason: .destructiveConfirm,
+                    options: [tr("Yes, delete"), tr("Only this occurrence"), tr("No")], pending: plan
+                )
+            }
+            var parts: [String] = []
+            if !deleted.isEmpty { parts.append(naming(deleted, in: trCount("Delete %lld entries?", Set(deleted).count), seriesWide: Set(deleted))) }
+            if !changed.isEmpty { parts.append(naming(changed, in: trCount("Change %lld entries?", Set(changed).count), seriesWide: Set(edited))) }
+            if !completed.isEmpty { parts.append(naming(completed, in: trCount("Mark %lld entries done?", Set(completed).count), seriesWide: [])) }
+            if !reopened.isEmpty { parts.append(naming(reopened, in: trCount("Reopen %lld entries?", Set(reopened).count), seriesWide: [])) }
+            if !skipped.isEmpty { parts.append(naming(skipped, in: trCount("Skip %lld occurrences?", skipped.count), seriesWide: [])) }
+            if !created.isEmpty { parts.append(listing(created.map(Wording.quoted), in: trCount("Add %lld entries?", created.count))) }
+            // several kinds of action: every part is in the question, "Delete 1 entry: “D”; Change 1 entry: “E”?"
+            let question = parts.count == 1 ? parts[0] : parts.map { String($0.dropLast()) }.joined(separator: "; ") + "?"
+            let options: [String]
+            if parts.count == 1, !deleted.isEmpty { options = [tr("Yes, delete"), tr("No")] } else if parts.count == 1, !changed.isEmpty {
+                options = [tr("Yes, change"), tr("No")]
+            } else {
+                options = [tr("Yes"), tr("No")]
+            }
+            return Clarification(question: question, reason: .destructiveConfirm, options: options, pending: plan)
+        }
+
+        /// "Delete 3 entries?" names the entries when there are few enough to say: "Delete 3 entries: “A”, “B”, “C”?", in the order
+        /// of the model's list (the order the person's phrase named them, as a rule), then the ones found by their words. The
+        /// person then confirms something they can see. A repeating entry among those in `seriesWide` is marked "(the whole
+        /// series)": the scope of what will happen to it is part of what is confirmed, and when there are too many entries to
+        /// name, the series among them are still named for that reason.
+        func naming(_ itemIDs: [String], in question: String, seriesWide: Set<String>) -> String {
+            let wanted = Set(itemIDs)
+            var ordered = vc.context.entries.map(\.item.id).filter { wanted.contains($0) }
+            ordered += wanted.subtracting(ordered).sorted()
+            var seen = Set<String>()
+            ordered = ordered.filter { seen.insert($0).inserted }
+            let items = ordered.compactMap { seenItems[$0] }
+            guard items.count == ordered.count, question.hasSuffix("?") else { return question }
+            func wording(_ item: Item) -> String {
+                let quoted = Wording.quoted(item.title)
+                return item.recurrence != nil && seriesWide.contains(item.id) ? tr("%1$@ (the whole series)", quoted) : quoted
+            }
+            if items.count <= 4 { return listing(items.map(wording), in: question) }
+            let series = items.filter { $0.recurrence != nil && seriesWide.contains($0.id) }.map { Wording.quoted($0.title) }
+            switch series.count {
+            case 0: return question
+            case 1: return tr("%1$@, among them the whole series %2$@", String(question.dropLast()), series[0]) + "?"
+            default: return tr("%1$@, among them the whole series of %2$@", String(question.dropLast()), series.joined(separator: ", ")) + "?"
+            }
+        }
+
+        /// `question` with up to four names after a colon: "Add 2 entries: “A”, “B”?".
+        func listing(_ names: [String], in question: String) -> String {
+            guard (1 ... 4).contains(names.count), question.hasSuffix("?") else { return question }
+            return String(question.dropLast()) + ": " + names.joined(separator: ", ") + "?"
         }
 
         /// One answer can name the same entry twice. A second delete of an item, or any later change to an item the plan
