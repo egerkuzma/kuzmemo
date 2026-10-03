@@ -216,6 +216,21 @@ def main():
     check("silence for the whole window keeps the phrase as a note", any(i["kind"] == "note" and "пятницу" in i["title"] for i in inbox), str(inbox))
     check("…after about seven seconds", 5 < time.time() - started < 15, f"{time.time() - started:.1f}s")
 
+    # an answer that is only a burst of noise: the level detector takes it for speech, so the recording is made and the question
+    # is taken as being answered; the recogniser then finds nothing in it. The phrase must still end up as a note, as it does
+    # when nobody answers at all (it used to stay open, invisibly, until the next launch).
+    inbox_before = len(call("GET", "/inbox")["items"])
+    memos_before = counts()["memos"]
+    call("POST", "/voice/input", {"path": wav("burst4")})
+    ask()
+    wait_idle()
+    inbox = call("GET", "/inbox")["items"]
+    check("a noise burst recorded as the answer still keeps the phrase as a note",
+          len(inbox) == inbox_before + 1 and any(i["kind"] == "note" and "пятницу" in i["title"] for i in inbox) and "question" not in call("GET", "/voice"),
+          str(inbox))
+    # two new phrases: the question's and the recorded answer's (the recogniser, not the level detector, turned it down)
+    check("…and the burst went through the recogniser", counts()["memos"] == memos_before + 2, f"memos {memos_before} → {counts()['memos']}")
+
     # Esc while listening
     inbox_before = len(call("GET", "/inbox")["items"])
     call("POST", "/voice/input", {"path": wav("silence3")})

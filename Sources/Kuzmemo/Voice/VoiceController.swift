@@ -552,8 +552,10 @@ final class VoiceController {
         Task { @MainActor in await closeUnanswered() }
     }
 
-    private func closeUnanswered() async {
-        await env.closeQuestion(keep: true)
+    /// `taken` is the question when it has already been taken out of play (the answer was recorded and could not be
+    /// recognised): without it the closing finds no question, saves nothing, and the phrase stays open until the next launch.
+    private func closeUnanswered(_ taken: AppEnvironment.PendingQuestion? = nil) async {
+        await env.closeQuestion(taken, keep: true)
         if let toast = env.toast { showBackground(.result(toast), autoHideAfter: Self.displaySeconds(for: toast)) } else { showBackground(.hidden) }
     }
 
@@ -634,14 +636,14 @@ final class VoiceController {
         lastTranscript = result.transcript ?? lastTranscript
         switch result.kind {
         case .noSpeech:
-            if question != nil { await closeUnanswered() } else {
+            if let question { await closeUnanswered(question) } else {
                 showBackground(.note(tr("No speech heard — nothing was saved."), .warning), autoHideAfter: 2.5)
             }
 
         case let .recognitionFailed(message, needsUser, retryAt):
             cues.play(.attention)
-            if question != nil {
-                await closeUnanswered()
+            if let question {
+                await closeUnanswered(question)
             } else if needsUser {
                 modelState = .missing(message)
                 problem = .modelMissing

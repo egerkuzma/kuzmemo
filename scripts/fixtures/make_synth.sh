@@ -26,4 +26,8 @@ while IFS='|' read -r id text; do
 done < answers.txt
 ffmpeg -loglevel error -y -f lavfi -i anullsrc=r=16000:cl=mono -t 3 -c:a pcm_s16le out/synth/silence3.wav
 ffmpeg -loglevel error -y -f lavfi -i "anoisesrc=d=5:c=pink:r=16000:a=0.02" -c:a pcm_s16le out/synth/noise5.wav
+# A short loud burst in quiet room noise: the level detector takes it for speech (so the recording is made and handed on), the
+# recogniser finds nothing in it. Fixed seeds keep the file, and so the recogniser's verdict, the same from run to run.
+ffmpeg -loglevel error -y -f lavfi -i "anoisesrc=d=4:c=pink:r=16000:a=0.01:s=7" -f lavfi -i "anoisesrc=d=4:c=pink:r=16000:a=0.5:s=11" \
+  -filter_complex "[1]volume='between(t,1.2,1.6)':eval=frame[b];[0][b]amix=inputs=2:normalize=0" -c:a pcm_s16le out/synth/burst4.wav
 ls -1 out/synth | wc -l | xargs echo "fixtures:"
