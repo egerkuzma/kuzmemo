@@ -19,6 +19,7 @@ public enum RecurrenceExpander {
         public var time: LocalTime?
         public var state: State
         public var wasMoved: Bool
+        public var scheduledAt: Int64? = nil
     }
 
     private static let maxPeriods = 20_000
@@ -55,8 +56,8 @@ public enum RecurrenceExpander {
             // series behind it, and an alert was planned for it; the override stays stored, for when the rule comes back.
             guard !ruleDates(rule: rule, start: start, from: exception.occDate, through: exception.occDate).isEmpty else { continue }
             result.append(Occurrence(
-                originalDate: exception.occDate, date: movedDate, time: exception.movedTime ?? item.time,
-                state: exception.action == .done ? .done : .open, wasMoved: true
+                originalDate: exception.occDate, date: movedDate, time: exception.timeCleared == true ? nil : (exception.movedTime ?? item.time),
+                state: exception.action == .done ? .done : .open, wasMoved: true, scheduledAt: exception.scheduledAt
             ))
         }
         return result.sorted {

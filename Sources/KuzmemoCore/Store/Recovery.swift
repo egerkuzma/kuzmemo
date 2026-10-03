@@ -27,6 +27,7 @@ public enum DatabaseRecovery {
     public static func open(
         at url: URL, backups directory: URL, now: Date = Date(), zone: TimeZone = .current
     ) throws -> (pool: DatabasePool, outcome: Outcome) {
+        if let resumed = try resumeReplacement(of: url) { return resumed }
         try setAsideLeftover(of: url, now: now, zone: zone)
         do {
             return (try KuzmemoDatabase.open(at: url), .opened)
@@ -42,6 +43,61 @@ public enum DatabaseRecovery {
 
     /// Where a copy is made whole and checked before it takes the database's place.
     static func stagingURL(for url: URL) -> URL { URL(fileURLWithPath: url.path + ".restoring") }
+
+    static func journalURL(for url: URL) -> URL { URL(fileURLWithPath: url.path + ".recovery.json") }
+
+    /// Written before the swap. The replacement's inode identifies which side of the atomic swap survived a crash,
+    /// including the gap between swapping the files and archiving the damaged one.
+    struct Replacement: Codable {
+        var fileNumber: UInt64
+        var backup: BackupFile?
+        var damagedFile: URL
+    }
+
+    private static func fileNumber(of url: URL) throws -> UInt64 {
+        guard let number = try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return number.uint64Value
+    }
+
+    private static func resumeReplacement(of url: URL) throws -> (DatabasePool, Outcome)? {
+        let data: Data
+        do { data = try Data(contentsOf: journalURL(for: url)) } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        }
+        let replacement = try JSONDecoder().decode(Replacement.self, from: data)
+        guard try fileNumber(of: url) == replacement.fileNumber else {
+            // Publication never happened. The original damaged file is still in place; the regular recovery can start over.
+            try FileManager.default.removeItem(at: journalURL(for: url))
+            return nil
+        }
+        return try finishReplacement(of: url, replacement: replacement)
+    }
+
+    private static func finishReplacement(of url: URL, replacement: Replacement) throws -> (DatabasePool, Outcome) {
+        let staging = stagingURL(for: url)
+        if FileManager.default.fileExists(atPath: staging.path) {
+            try FileManager.default.moveItem(at: staging, to: replacement.damagedFile)
+        }
+        let pool = try KuzmemoDatabase.open(at: url)
+        try FileManager.default.removeItem(at: journalURL(for: url))
+        let outcome: Outcome = replacement.backup.map { .restored(from: $0, damagedFile: replacement.damagedFile) }
+            ?? .startedEmpty(damagedFile: replacement.damagedFile)
+        return (pool, outcome)
+    }
+
+    private static func publish(_ staging: URL, at url: URL, backup: BackupFile?, now: Date, zone: TimeZone) throws -> (DatabasePool, Outcome) {
+        let damaged = try damagedName(for: url, now: now, zone: zone)
+        let replacement = Replacement(fileNumber: try fileNumber(of: staging), backup: backup, damagedFile: damaged)
+        try JSONEncoder().encode(replacement).write(to: journalURL(for: url), options: .atomic)
+        try PrivateFiles.file(journalURL(for: url))
+        try moveLogFiles(of: url, to: damaged)
+        guard renamex_np(staging.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "could not put the replacement in place: \(String(cString: strerror(errno)))"])
+        }
+        return try finishReplacement(of: url, replacement: replacement)
+    }
 
     private static func restore(_ url: URL, backups directory: URL, now: Date, zone: TimeZone) throws -> (DatabasePool, Outcome) {
         let staging = stagingURL(for: url)
@@ -70,18 +126,15 @@ public enum DatabaseRecovery {
             }
             // The damaged file's log files go first (they are its, and SQLite would apply them to the restored file), the two
             // database files change places in one step, and the damaged one is set aside under its own name.
-            let damaged = try damagedName(for: url, now: now, zone: zone)
-            try moveLogFiles(of: url, to: damaged)
-            guard renamex_np(staging.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "could not put the copy in place: \(String(cString: strerror(errno)))"])
-            }
-            try FileManager.default.moveItem(at: staging, to: damaged)
-            return (try KuzmemoDatabase.open(at: url), .restored(from: copy, damagedFile: damaged))
+            return try publish(staging, at: url, backup: copy, now: now, zone: zone)
         }
-        let damaged = try damagedName(for: url, now: now, zone: zone)
-        try moveLogFiles(of: url, to: damaged)
-        try FileManager.default.moveItem(at: url, to: damaged)
-        return (try KuzmemoDatabase.open(at: url), .startedEmpty(damagedFile: damaged))
+        // Even with no usable backup, build the empty database BEFORE replacing the damaged file. There is never a missing
+        // main file that the next launch could mistake for a first launch.
+        let empty = try KuzmemoDatabase.open(at: staging)
+        try empty.writeWithoutTransaction { db in _ = try db.checkpoint(.truncate) }
+        try empty.close()
+        removeLogFiles(of: staging)
+        return try publish(staging, at: url, backup: nil, now: now, zone: zone)
     }
 
     /// A launch that was killed right after the files changed places left the damaged file at the staging path: it is set

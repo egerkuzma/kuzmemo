@@ -1,6 +1,7 @@
+import Foundation
 import GRDB
 
-/// A calendar entry: reminder, event, task or note. Dates and times are floating (no time zone).
+/// A calendar entry: reminder, event, task or note. Wall-clock dates are floating; elapsed-time requests also keep their instant.
 public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "items"
 
@@ -13,6 +14,8 @@ public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
     public var date: LocalDate?
     /// `nil` means all-day / date-only.
     public var time: LocalTime?
+    /// Epoch milliseconds for an elapsed-time request (for example "in 30 minutes"); otherwise nil.
+    public var scheduledAt: Int64?
     public var durationMin: Int?
     /// IANA identifier when pinned to a zone; `nil` means floating (device time zone).
     public var tz: String?
@@ -34,7 +37,7 @@ public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         date: LocalDate? = nil, time: LocalTime? = nil, durationMin: Int? = nil, tz: String? = nil,
         approximate: Bool = false, recurrence: Recurrence? = nil, remindLeadMin: Int = 0,
         status: ItemStatus = .open, doneAt: Int64? = nil, source: ItemSource = .manual, memoID: String? = nil,
-        version: Int = 1, createdAt: Int64 = 0, updatedAt: Int64 = 0, deletedAt: Int64? = nil
+        version: Int = 1, createdAt: Int64 = 0, updatedAt: Int64 = 0, deletedAt: Int64? = nil, scheduledAt: Int64? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -43,6 +46,7 @@ public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         self.keywords = keywords
         self.date = date
         self.time = time
+        self.scheduledAt = scheduledAt
         self.durationMin = durationMin
         self.tz = tz
         self.approximate = approximate
@@ -60,6 +64,7 @@ public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
 
     enum CodingKeys: String, CodingKey {
         case id, kind, title, details, keywords, date, time
+        case scheduledAt = "scheduled_at"
         case durationMin = "duration_min"
         case tz, approximate
         case recurrence = "recurrence_json"
@@ -76,6 +81,15 @@ public struct Item: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
 
     public var isDeleted: Bool { deletedAt != nil }
     public var isRecurring: Bool { recurrence != nil }
+
+    func shown(in zone: TimeZone) -> Item {
+        guard let scheduledAt, date != nil, time != nil else { return self }
+        var shown = self
+        let moment = LocalDateTime(date: Date(timeIntervalSince1970: TimeInterval(scheduledAt) / 1000), in: zone)
+        shown.date = moment.date
+        shown.time = moment.time
+        return shown
+    }
 }
 
 /// A per-occurrence override for a recurring item (done, skipped or moved).
@@ -91,13 +105,18 @@ public struct ItemException: Codable, Hashable, Sendable, FetchableRecord, Persi
     public var action: Action
     public var movedDate: LocalDate?
     public var movedTime: LocalTime?
+    /// nil/false inherits the series time; true explicitly makes this occurrence all-day.
+    public var timeCleared: Bool?
+    public var scheduledAt: Int64?
 
-    public init(itemID: String, occDate: LocalDate, action: Action, movedDate: LocalDate? = nil, movedTime: LocalTime? = nil) {
+    public init(itemID: String, occDate: LocalDate, action: Action, movedDate: LocalDate? = nil, movedTime: LocalTime? = nil, timeCleared: Bool? = nil, scheduledAt: Int64? = nil) {
         self.itemID = itemID
         self.occDate = occDate
         self.action = action
         self.movedDate = movedDate
         self.movedTime = movedTime
+        self.timeCleared = timeCleared
+        self.scheduledAt = scheduledAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -106,5 +125,7 @@ public struct ItemException: Codable, Hashable, Sendable, FetchableRecord, Persi
         case action
         case movedDate = "moved_date"
         case movedTime = "moved_time"
+        case timeCleared = "time_cleared"
+        case scheduledAt = "scheduled_at"
     }
 }

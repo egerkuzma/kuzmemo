@@ -54,7 +54,7 @@ public struct Store: Sendable {
     public func itemSnapshot(id: String) async throws -> ItemSnapshot? {
         try await writer.read { db in
             guard let item = try Store.item(db, id: id) else { return nil }
-            return ItemSnapshot(item: item, revision: try Store.revisions(db, of: [id])[id] ?? -1)
+            return ItemSnapshot(item: item.shown(in: self.clock.timeZone), revision: try Store.revisions(db, of: [id])[id] ?? -1)
         }
     }
 
@@ -135,7 +135,7 @@ public struct Store: Sendable {
     /// The search together with the revisions of what it found, in one snapshot (for a plan that will act on the hits).
     public func searchSnapshot(_ text: String, limit: Int = 50) async throws -> (items: [Item], revisions: [String: Int]) {
         try await writer.read { db in
-            let items = try SearchIndex.search(db, query: text, limit: limit)
+            let items = try SearchIndex.search(db, query: text, limit: limit).map { $0.shown(in: self.clock.timeZone) }
             return (items, try Store.revisions(db, of: items.map(\.id)))
         }
     }
@@ -294,6 +294,20 @@ public struct Store: Sendable {
 
     public func memo(id: String) async throws -> Memo? {
         try await writer.read { db in try Memo.fetchOne(db, key: id) }
+    }
+
+    /// Retry an admission after its worker finished. Preserve the latest memo state; adding its audio must not put an
+    /// already stored transcript or final decision back into `recorded`. False means no recording is needed any more.
+    func keepRecording(for input: Memo, at path: String) async throws -> Bool {
+        let erased = self.erased
+        return try await writer.write { db in
+            guard !erased.contains(input.id) else { return false }
+            var memo = try Memo.fetchOne(db, key: input.id) ?? input
+            guard memo.transcriptRaw == nil, !MemoProcessor.finalStatuses.contains(memo.status) else { return false }
+            memo.audioPath = path
+            try memo.save(db)
+            return true
+        }
     }
 
     /// Memos that never reached a final state; the pipeline resumes them after a restart.

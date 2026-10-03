@@ -54,6 +54,8 @@ public struct ParsedItem: Codable, Hashable, Sendable {
 
 /// Fields the model wants to change on an existing item; absent fields stay as they are.
 public struct ParsedChanges: Codable, Hashable, Sendable {
+    /// Explicit removal, distinct from an absent field (leave unchanged).
+    public var clear: [ItemChanges.Field]?
     public var kind: ItemKind?
     public var title: String?
     public var details: String?
@@ -63,7 +65,7 @@ public struct ParsedChanges: Codable, Hashable, Sendable {
     public var keywords: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case kind, title, details, when
+        case kind, title, details, when, clear
         case durationMin = "duration_min"
         case recurrence, keywords
     }

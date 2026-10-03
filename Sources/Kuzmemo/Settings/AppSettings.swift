@@ -1,15 +1,9 @@
 import Foundation
 import KuzmemoCore
 import Observation
-import os
 
-/// Every preference the settings window edits. It is loaded from the database at launch and each change is saved a
-/// moment later; whoever needs to act on a change (the voice path, for instance) listens through `onChange`.
-///
-/// A group whose stored value could not be read (the database did not answer) is shown with its defaults but is not
-/// "loaded": it is read again a little later, and until it has been read none of its values is written back, because that
-/// would replace the person's stored choices with the defaults. "Nothing stored yet" is not a failed read: it loads as the
-/// defaults and may be saved.
+/// Stored settings are used only after their group has loaded. Failed writes stay dirty until a retry succeeds.
+@MainActor
 @Observable
 final class AppSettings {
     enum Group: CaseIterable { case speech, recognition, recording, notifications }
@@ -18,102 +12,87 @@ final class AppSettings {
     var recognition = RecognitionSettings() { didSet { changed(.recognition) } }
     var recording = RecordingSettings() { didSet { changed(.recording) } }
     var notifications = NotificationSettings() { didSet { changed(.notifications) } }
-    /// Every group has been read from the database (the stored values, or the defaults for a group never saved).
-    private(set) var loaded = false
-    /// The last save that failed (the control channel reports it); cleared by the next save that works.
-    private(set) var lastSaveError: String?
+    private(set) var loadedGroups: Set<Group> = []
+    var loaded: Bool { loadedGroups.count == Group.allCases.count }
+    private var readErrors: [Group: String] = [:]
+    private var saveErrors: [Group: String] = [:]
+    var lastReadError: String? { Group.allCases.compactMap { readErrors[$0] }.first }
+    var lastSaveError: String? { Group.allCases.compactMap { saveErrors[$0] }.first }
 
     @ObservationIgnored private let store: Store
-    @ObservationIgnored private var loading = false
-    @ObservationIgnored private var loadedGroups: Set<Group> = []
+    @ObservationIgnored private var applyingStoredValue = false
+    @ObservationIgnored private var reading = false
+    @ObservationIgnored private var flushing = false
+    @ObservationIgnored private var dirty: Set<Group> = []
+    @ObservationIgnored private var generations: [Group: Int] = [:]
     @ObservationIgnored private var saves: [Group: Task<Void, Never>] = [:]
     @ObservationIgnored private var observers: [(Group) -> Void] = []
     @ObservationIgnored private var retry: Task<Void, Never>?
-    private static let log = Logger(subsystem: "app.kuzmemo", category: "settings")
 
-    init(store: Store) {
-        self.store = store
-    }
+    init(store: Store) { self.store = store }
 
-    /// Calls `handler` whenever a group changes (and once per group after the saved values are loaded).
-    func observe(_ handler: @escaping (Group) -> Void) {
-        observers.append(handler)
-    }
-
-    private func notify(_ group: Group) {
-        for handler in observers { handler(group) }
-    }
+    func isLoaded(_ group: Group) -> Bool { loadedGroups.contains(group) }
+    func observe(_ handler: @escaping (Group) -> Void) { observers.append(handler) }
+    private func notify(_ group: Group) { for handler in observers { handler(group) } }
 
     func load() async {
-        // On the very first launch the recognition language is the system language (Russian is the stored default). A read
-        // that fails is not a first launch.
-        let firstLaunch: Bool
-        do { firstLaunch = try await store.setting(RecognitionSettings.storageKey) == nil } catch { firstLaunch = false }
-        await read(Set(Group.allCases))
-        if firstLaunch, loadedGroups.contains(.recognition), AppLanguage.best() == .english {
-            loading = true
-            recognition.language = "en"
-            loading = false
-        }
-        for group in Group.allCases { notify(group) }
+        await read(Set(Group.allCases).subtracting(loadedGroups))
         scheduleRetryIfNeeded()
     }
 
-    /// Reads the given groups; the ones that could not be read keep what they show and stay unloaded.
     private func read(_ groups: Set<Group>) async {
-        loading = true
-        defer { loading = false }
+        guard !reading else { return }
+        reading = true
+        defer { reading = false }
         for group in Group.allCases where groups.contains(group) {
             do {
+                // Do not suppress UI changes to already loaded groups while waiting for another group's database read.
                 switch group {
-                case .speech: speech = try await store.loadSettings(SpeechSettings.self)
-                case .recognition: recognition = try await store.loadSettings(RecognitionSettings.self)
-                case .recording: recording = try await store.loadSettings(RecordingSettings.self)
-                case .notifications: notifications = try await store.loadSettings(NotificationSettings.self)
+                case .speech:
+                    let value = try await store.loadSettings(SpeechSettings.self)
+                    applyingStoredValue = true; speech = value; applyingStoredValue = false
+                case .recognition:
+                    let firstLaunch = try await store.setting(RecognitionSettings.storageKey) == nil
+                    var value = try await store.loadSettings(RecognitionSettings.self)
+                    if firstLaunch, AppLanguage.best() == .english { value.language = "en" }
+                    applyingStoredValue = true; recognition = value; applyingStoredValue = false
+                case .recording:
+                    let value = try await store.loadSettings(RecordingSettings.self)
+                    applyingStoredValue = true; recording = value; applyingStoredValue = false
+                case .notifications:
+                    let value = try await store.loadSettings(NotificationSettings.self)
+                    applyingStoredValue = true; notifications = value; applyingStoredValue = false
                 }
                 loadedGroups.insert(group)
+                readErrors[group] = nil
+                notify(group)
             } catch {
-                Self.log.error("settings \(String(describing: group), privacy: .public) could not be read: \(error, privacy: .public)")
+                readErrors[group] = "\(error)"
             }
-        }
-        loaded = loadedGroups.count == Group.allCases.count
-    }
-
-    /// The groups that could not be read are read again, a little later and then less often, until they have been.
-    private func scheduleRetryIfNeeded() {
-        guard !loaded, retry == nil else { return }
-        retry = Task { @MainActor [weak self] in
-            var delay: Duration = .seconds(5)
-            while let self, !self.loaded, !Task.isCancelled {
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-                let missing = Set(Group.allCases).subtracting(self.loadedGroups)
-                await self.read(missing)
-                for group in missing where self.loadedGroups.contains(group) { self.notify(group) }
-                delay = min(delay * 2, .seconds(300))
-            }
-            self?.retry = nil
         }
     }
 
     private func changed(_ group: Group) {
-        guard !loading else { return }
+        guard !applyingStoredValue, isLoaded(group) else { return }
+        generations[group, default: 0] += 1
+        let generation = generations[group]!
+        dirty.insert(group)
         notify(group)
         saves[group]?.cancel()
-        saves[group] = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let self else { return }
-            await save(group)
-            saves[group] = nil // done (a newer change would have cancelled this task before taking its place)
+        guard !flushing else { return }
+        saves[group] = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard let self else { return }
+            await self.save(group)
+            // A save can suspend: it must not remove the task installed by a newer edit.
+            if self.generations[group] == generation { self.saves[group] = nil }
+            if !Task.isCancelled { self.scheduleRetryIfNeeded() }
         }
     }
 
-    /// Writes one group, unless its stored value has never been read: the defaults it shows are not the person's choices.
     private func save(_ group: Group) async {
-        guard loadedGroups.contains(group) else {
-            Self.log.error("settings \(String(describing: group), privacy: .public) not saved: the stored value has not been read yet")
-            return
-        }
+        guard dirty.contains(group), isLoaded(group) else { return }
+        let generation = generations[group, default: 0]
         do {
             switch group {
             case .speech: try await store.save(settings: speech)
@@ -121,20 +100,40 @@ final class AppSettings {
             case .recording: try await store.save(settings: recording)
             case .notifications: try await store.save(settings: notifications)
             }
-            lastSaveError = nil
+            if generations[group] == generation { dirty.remove(group); saveErrors[group] = nil }
         } catch {
-            lastSaveError = "\(error)"
-            Self.log.error("settings \(String(describing: group), privacy: .public) could not be saved: \(error, privacy: .public)")
+            if generations[group] == generation { saveErrors[group] = "\(error)" }
         }
     }
 
-    /// The app is quitting: whatever was changed in the last moment and is still waiting for its save goes to the database now
-    /// (a preference changed and the app quit within the delay used to be lost). Only the groups with a change waiting are
-    /// written: the others hold what was read, or defaults that were never read, and neither must replace the stored values.
-    func flush() async {
-        let waiting = saves.keys.sorted { Group.allCases.firstIndex(of: $0)! < Group.allCases.firstIndex(of: $1)! }
-        for task in saves.values { task.cancel() }
-        saves = [:]
-        for group in waiting { await save(group) }
+    private func scheduleRetryIfNeeded() {
+        guard !flushing, (!loaded || !dirty.isEmpty), retry == nil else { return }
+        retry = Task { @MainActor [weak self] in
+            var delay: Duration = .seconds(5)
+            while let self, !self.loaded || !self.dirty.isEmpty {
+                do { try await Task.sleep(for: delay) } catch { break }
+                await self.read(Set(Group.allCases).subtracting(self.loadedGroups))
+                for group in Group.allCases where self.dirty.contains(group) { await self.save(group) }
+                delay = min(delay * 2, .seconds(300))
+            }
+            self?.retry = nil
+        }
     }
+
+    /// A quit must know whether edits reached the database. Waiting for cancelled tasks prevents an older in-flight write
+    /// from landing after the final save. Dirty groups and errors remain available if the person cancels the quit.
+    func flush() async -> Bool {
+        guard !flushing else { return false }
+        flushing = true
+        defer { flushing = false }
+        let pending = Array(saves.values) + (retry.map { [$0] } ?? [])
+        for task in pending { task.cancel() }
+        for task in pending { await task.value }
+        saves = [:]
+        retry = nil
+        for group in Group.allCases where dirty.contains(group) { await save(group) }
+        return dirty.isEmpty
+    }
+
+    func resumeSaving() { scheduleRetryIfNeeded() }
 }
