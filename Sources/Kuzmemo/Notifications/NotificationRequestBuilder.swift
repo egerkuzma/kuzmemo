@@ -7,7 +7,7 @@ import UserNotifications
 enum NotificationRequestBuilder {
     static let category = "kuzmemo.entry"
     static let planPrefix = AlertPlanner.idPrefix
-    static let snoozePrefix = "kzs|"
+    static let snoozePrefix = AlertPlanner.snoozePrefix
     static let testPrefix = "kzt|"
 
     static func request(for alert: PlannedAlert, now: Date, timeZone: TimeZone) -> UNNotificationRequest {

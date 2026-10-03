@@ -26,6 +26,9 @@ public struct PlannedAlert: Equatable, Hashable, Sendable, Identifiable {
 public enum AlertPlanner {
     /// Identifiers of alerts made here start with this; anything else pending with the system is not ours to touch.
     public static let idPrefix = "kz|"
+    /// Identifiers of the alerts a person put off with a Snooze button. They are not planned here (a snooze is the person's own
+    /// wish, and re-planning must not take it away), but they are the app's.
+    public static let snoozePrefix = "kzs|"
 
     /// A moment that passed this recently is still worth delivering (the plan was made just after it).
     static let grace: TimeInterval = 30
@@ -106,15 +109,18 @@ public enum AlertPlanner {
     }
 }
 
-/// What has to change so that the system holds exactly the planned alerts.
+/// What has to change so that the system holds exactly the planned alerts. Snoozes are left alone while notifications are
+/// on; with them switched off nothing of the app's may stay pending, snoozes included (a put-off alert would otherwise ring
+/// after the person turned everything off).
 public struct AlertDiff: Equatable, Sendable {
     public var toAdd: [PlannedAlert]
     public var toRemove: [String]
 
-    public init(planned: [PlannedAlert], pendingIDs: Set<String>) {
+    public init(planned: [PlannedAlert], pendingIDs: Set<String>, enabled: Bool = true) {
         let ours = pendingIDs.filter { $0.hasPrefix(AlertPlanner.idPrefix) }
         let wanted = Set(planned.map(\.id))
         toAdd = planned.filter { !ours.contains($0.id) }
-        toRemove = ours.subtracting(wanted).sorted()
+        let snoozes = enabled ? [] : pendingIDs.filter { $0.hasPrefix(AlertPlanner.snoozePrefix) }
+        toRemove = ours.subtracting(wanted).union(snoozes).sorted()
     }
 }

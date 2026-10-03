@@ -145,6 +145,13 @@ struct AlertPlannerTests {
         #expect(AlertDiff(planned: planned, pendingIDs: Set(planned.map(\.id))).toAdd.isEmpty)
     }
 
+    /// Notifications switched off: the plan is empty, and a reminder the person had put off must not ring either.
+    @Test func switchingOffTakesTheSnoozesDownWithThePlannedAlerts() {
+        let diff = AlertDiff(planned: [], pendingIDs: ["kz|old|-|atTime|0|1|x", "kzs|snooze-1", "kzs|snooze-2", "other-app"], enabled: false)
+        #expect(diff.toAdd.isEmpty && Set(diff.toRemove) == ["kz|old|-|atTime|0|1|x", "kzs|snooze-1", "kzs|snooze-2"])
+        #expect(AlertDiff(planned: [], pendingIDs: ["kzs|snooze-1"], enabled: true).toRemove.isEmpty) // on: a snooze is the person's wish
+    }
+
     @Test func leadsAreWordedInRussian() {
         #expect(Wording.leadPhrase(0) == "Сейчас" && Wording.leadPhrase(1) == "Через 1 минуту")
         #expect(Wording.leadPhrase(5) == "Через 5 минут" && Wording.leadPhrase(22) == "Через 22 минуты")

@@ -133,7 +133,7 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
-        let diff = AlertDiff(planned: planned, pendingIDs: Set(pending.map(\.identifier)))
+        let diff = AlertDiff(planned: planned, pendingIDs: Set(pending.map(\.identifier)), enabled: settings.enabled)
         if !diff.toRemove.isEmpty { center.removePendingNotificationRequests(withIdentifiers: diff.toRemove) }
         lastError = nil
         for alert in diff.toAdd {
@@ -266,8 +266,10 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             }
         case let name where name.hasPrefix("snooze-"):
             let minutes = Int(name.dropFirst(7)) ?? 10
-            // A snooze that lands inside the quiet hours is silent, like every other alert there.
+            // The button is on a banner that may have been delivered before notifications were switched off: off means off.
             let settings = env.settings.notifications
+            guard settings.enabled else { return }
+            // A snooze that lands inside the quiet hours is silent, like every other alert there.
             let rings = !settings.quietHours.contains(env.clock.localNow().adding(minutes: minutes).time)
             let request = NotificationRequestBuilder.snooze(
                 title: title, subtitle: subtitle, thread: thread, info: info, minutes: minutes, sound: rings ? settings.atTimeSound : .silent
