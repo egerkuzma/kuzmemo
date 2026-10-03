@@ -68,6 +68,11 @@ final class VoiceController {
     @ObservationIgnored private var activeJob: Int?
     /// The admissions still writing (a recording that has just ended); a quit waits for them, or the last phrase would be lost.
     @ObservationIgnored private var admissions: [Int: Task<Admission, Never>] = [:]
+    /// Jobs whose recording could not be written: they exist only in the queue, and a quit waits until the worker has carried
+    /// them through (the phrase lands in the database once it is recognised).
+    @ObservationIgnored private var unkeptJobs: Set<Int> = []
+    /// Jobs finish in order (one worker): a job is done when its id is not above this one.
+    @ObservationIgnored private var lastFinishedJob = 0
     @ObservationIgnored private var workers: [Task<Void, Never>] = []
     /// Looks for the Input Monitoring grant (one at a time: each one would start a key tap of its own when it appears).
     @ObservationIgnored private var inputMonitoringWatcher: Task<Void, Never>?
@@ -610,15 +615,22 @@ final class VoiceController {
         let admission = Task { @MainActor [weak self] in
             let admitted = await utterances.admit(utterance, replyTo: reply.map { Reply(memoID: $0.memoID, question: $0.question) })
             self?.admissions[id] = nil
+            if admitted.failure != nil { self?.unkeptJobs.insert(id) }
             return admitted
         }
         admissions[id] = admission
         jobs.yield(Job(id: id, utterance: utterance, admission: admission, reply: reply, done: done))
     }
 
-    /// Waits until every recording that has just ended is on disk and in the database (the quit path).
+    /// Waits until every recording that has just ended is on disk and in the database (the quit path). A recording that could
+    /// not be written is nowhere but in the queue: the quit then waits for the worker to carry it through (recognition, the
+    /// model, the entry), within reason, rather than lose it without a word.
     func awaitAdmissions() async {
         for task in admissions.values { _ = await task.value }
+        let deadline = ContinuousClock.now + .seconds(90)
+        while let last = unkeptJobs.max(), last > lastFinishedJob, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
     }
 
     private func run(_ job: Job) async {
@@ -634,6 +646,8 @@ final class VoiceController {
             hud.showNote(tr("The recording could not be kept on disk, so a crash would have lost it: %1$@", failure), style: .warning, seconds: 6)
         }
         pendingJobs -= 1
+        lastFinishedJob = job.id
+        unkeptJobs.remove(job.id)
         job.done?(result)
     }
 

@@ -405,6 +405,30 @@ struct MemoProcessorTests {
         #expect(result.changes.map(\.item.id) == ["i4", "i5"] && provider.requests.count == 2)
     }
 
+    /// The kept plan could not be written for a reason that has nothing to do with the entries (no room, a lock): the answer fails
+    /// and waits, and a retry applies the very same plan. Asking the model to make a plan up anew would change what the yes meant.
+    @Test func aStorageErrorOnTheKeptPlanFailsTheAnswerAndARetryAppliesTheSamePlan() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(threeDeletes)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 3 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали всё на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        try await store.writer.write { db in try db.execute(sql: "ALTER TABLE ops RENAME TO ops_gone") } // the journal cannot be written
+        let yes = await processor.submit(text: "да", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .failed(error, _) = yes.kind else { Issue.record("expected the answer to fail: \(yes.kind)"); return }
+        #expect("\(error)".contains("apply") && provider.requests.count == 1) // the model was not asked to make the plan up anew
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 3)
+        #expect(try await store.memo(id: yes.memo.id)?.status == .failed)
+
+        try await store.writer.write { db in try db.execute(sql: "ALTER TABLE ops_gone RENAME TO ops") }
+        let retried = try #require(await processor.retry(memoID: yes.memo.id))
+        guard case let .applied(result) = retried.kind else { Issue.record("expected the deletions: \(retried.kind)"); return }
+        #expect(result.changes.count == 3 && provider.requests.count == 1)
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).isEmpty)
+    }
+
     /// "Да, 2" is not a plain yes (which two?): it goes to the model as a new command, and the limits hold for the answer.
     @Test func aQualifiedYesGoesToTheModelWithTheLimitsInForce() async throws {
         let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#

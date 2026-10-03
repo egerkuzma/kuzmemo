@@ -338,9 +338,13 @@ public actor MemoProcessor {
                         return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: nil)
                     } catch StoreError.memoErased {
                         return ProcessOutcome(memo: memo, kind: .erased, interpretation: nil)
-                    } catch {
+                    } catch StoreError.changedMeanwhile {
                         // An entry of the plan changed since the question was asked (or is gone): the yes no longer means what it
                         // meant. The phrase is read again below, and whatever comes out is asked about once more.
+                    } catch {
+                        // No room, no access, a lock: the plan itself is fine. The answer fails and waits in the Inbox, and a retry
+                        // applies this very plan again; asking the model to make a plan up anew would change what the yes meant.
+                        return await fail(memo, .processFailed(exitCode: -2, stderr: "apply: \(error)"), elapsed: 0, stage: "apply")
                     }
                 }
                 confirmAnyChange = true
