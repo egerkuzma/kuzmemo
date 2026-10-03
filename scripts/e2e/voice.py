@@ -225,6 +225,18 @@ def main():
     wait_idle()
     check("\"no, never mind, cancel\" saves nothing", counts()["items"] == items and "question" not in call("GET", "/voice"))
 
+    # a bulk deletion: the app asks about a complete plan, and a plain yes applies that very plan without asking the model again
+    call("POST", "/dev/seed")  # six entries on the seed's today
+    r = call("POST", "/memo/transcript", {"text": "удали все записи на сегодня"})
+    q = call("GET", "/voice").get("question")
+    check("deleting everything today is asked about first", r["kind"] == "clarify" and q is not None and q["text"].startswith("Удалить"),
+          json.dumps(r, ensure_ascii=False)[:300])
+    items = counts()["items"]
+    r = call("POST", "/answer", {"option": q["options"][0]})  # "Да, удалить"
+    check("the yes applies the asked plan itself, without the model", r["kind"] == "applied" and "llm" not in r and len(r["changes"]) >= 3
+          and counts()["items"] == items - len(r["changes"]), json.dumps(r, ensure_ascii=False)[:300])
+    check("…and the question is closed", "question" not in call("GET", "/voice"))
+
     # no answer at all: the words are kept as a note
     call("POST", "/voice/input", {"path": wav("silence3")})
     ask()

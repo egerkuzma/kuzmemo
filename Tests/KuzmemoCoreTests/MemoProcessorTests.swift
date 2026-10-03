@@ -320,7 +320,7 @@ struct MemoProcessorTests {
             for n in 1 ... 3 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
         }
         let asked = await processor.submit(text: "удали всё на завтра", inputKind: .voice)
-        guard case let .clarify(question) = asked.kind, question.question == "Удалить 3 записи?" else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        guard case let .clarify(question) = asked.kind, question.question.hasPrefix("Удалить 3 записи") else { Issue.record("expected the bulk question: \(asked.kind)"); return }
         #expect(provider.requests.count == 1)
 
         let declined = await processor.submit(text: "нет, не надо", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
@@ -332,26 +332,69 @@ struct MemoProcessorTests {
         #expect(try await store.unfinishedMemos().isEmpty)
     }
 
-    /// The yes goes to the model (it has to say which entries), and its answer counts as confirmed only within what was agreed to.
-    @Test func aYesToTheAppsOwnBulkQuestionIsAppliedWithinWhatWasAgreedTo() async throws {
-        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
-        let fourDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3},{"op":"delete","ref":4}]}"#
-        let (processor, store, provider) = try processor([.json(threeDeletes), .json(fourDeletes), .json(threeDeletes), .json(threeDeletes)])
+    /// The yes applies the plan the question was asked about, to the entries it named: the model is not asked to make the plan up
+    /// again (it could name other entries this time), and its answer to the yes, had it been asked, is never consulted.
+    @Test func aYesToTheAppsOwnBulkQuestionAppliesExactlyThePlanThatWasAsked() async throws {
+        let firstThree = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let otherThree = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":2},{"op":"delete","ref":3},{"op":"delete","ref":4}]}"#
+        let (processor, store, provider) = try processor([.json(firstThree), .json(otherThree)])
         try await store.perform(label: "fixtures") { m in
             for n in 1 ... 4 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
         }
         let asked = await processor.submit(text: "удали три записи на завтра", inputKind: .voice)
         guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
-        // the model's answer to the yes names four: more than the three the person agreed to, so it is asked about again
-        let more = await processor.submit(text: "да, удалить", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
-        guard case let .clarify(again) = more.kind else { Issue.record("expected a new question: \(more.kind)"); return }
-        #expect(again.question == "Удалить 4 записи?" && provider.requests.count == 2)
-        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 4)
-        // the same yes, with an answer that stays within the agreed three, is applied
-        let fine = await processor.submit(text: "да", inputKind: .voice, parentMemoID: more.memo.id, followupQuestion: again.question)
-        guard case let .applied(result) = fine.kind else { Issue.record("expected the deletions: \(fine.kind)"); return }
-        #expect(result.changes.count == 3 && provider.requests.count == 3)
-        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 1)
+        #expect(question.question == "Удалить 3 записи: «Запись 1», «Запись 2», «Запись 3»?" && question.pending?.actions.count == 3)
+        #expect(try await store.memo(id: asked.memo.id)?.pendingPlanJSON?.contains("\"i1\"") == true) // kept with the question
+
+        let yes = await processor.submit(text: "да, удалить", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .applied(result) = yes.kind else { Issue.record("expected the deletions: \(yes.kind)"); return }
+        #expect(result.changes.map(\.item.id) == ["i1", "i2", "i3"] && provider.requests.count == 1) // the model was asked once, for the plan
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).map(\.id) == ["i4"])
+        let answer = try #require(try await store.memo(id: yes.memo.id))
+        #expect(answer.status == .applied && answer.llmModel == "local-router" && answer.intent == "delete" && answer.opID == result.op?.id)
+        #expect(try await store.memo(id: asked.memo.id)?.status == .superseded)
+        #expect(try await store.unfinishedMemos().isEmpty)
+    }
+
+    /// An entry of the kept plan changed between the question and the yes: the yes no longer means what it meant. The phrase is
+    /// read again and, being a bulk change still, asked about again; the yes to that applies the new plan.
+    @Test func aYesAfterAnEntryOfThePlanChangedAsksAgain() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(threeDeletes)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 3 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали всё на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        // meanwhile the second entry is edited
+        var draft = ItemDraft(try #require(try await store.item(id: "i2")))
+        draft.title = "Запись 2, уточнённая"
+        try await store.save(draft, as: "i2")
+
+        let yes = await processor.submit(text: "да", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .clarify(again) = yes.kind else { Issue.record("expected to be asked again: \(yes.kind)"); return }
+        #expect(again.question.hasPrefix("Удалить 3 записи") && again.question.contains("«Запись 2, уточнённая»") && provider.requests.count == 2) // read again, against the entries as they are
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).count == 3) // nothing deleted yet
+        let yesAgain = await processor.submit(text: "да", inputKind: .voice, parentMemoID: yes.memo.id, followupQuestion: again.question)
+        guard case let .applied(result) = yesAgain.kind else { Issue.record("expected the deletions: \(yesAgain.kind)"); return }
+        #expect(result.changes.count == 3 && provider.requests.count == 2)
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).isEmpty)
+    }
+
+    /// "Да, 2" is not a plain yes (which two?): it goes to the model as a new command, and the limits hold for the answer.
+    @Test func aQualifiedYesGoesToTheModelWithTheLimitsInForce() async throws {
+        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
+        let twoDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#
+        let (processor, store, provider) = try processor([.json(threeDeletes), .json(twoDeletes)])
+        try await store.perform(label: "fixtures") { m in
+            for n in 1 ... 3 { try m.insert(Item(id: "i\(n)", kind: .reminder, title: "Запись \(n)", date: LocalDate("2026-09-29"))) }
+        }
+        let asked = await processor.submit(text: "удали всё на завтра", inputKind: .voice)
+        guard case let .clarify(question) = asked.kind else { Issue.record("expected the bulk question: \(asked.kind)"); return }
+        let qualified = await processor.submit(text: "да, 2", inputKind: .voice, parentMemoID: asked.memo.id, followupQuestion: question.question)
+        guard case let .applied(result) = qualified.kind else { Issue.record("expected the model's two deletions: \(qualified.kind)"); return }
+        #expect(provider.requests.count == 2 && result.changes.count == 2)
+        #expect(try await store.items(on: LocalDate("2026-09-29")!).map(\.id) == ["i3"])
     }
 
     @Test func aRetryAfterAFailureKeepsTheConversation() async throws {

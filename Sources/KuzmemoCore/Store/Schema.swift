@@ -76,6 +76,12 @@ public enum Schema {
             try db.execute(sql: "ALTER TABLE memos ADD COLUMN followup_question TEXT")
         }
 
+        // A plan the app itself stopped to ask about ("Delete 3 entries?") is kept with the question, so that a plain yes
+        // applies exactly that plan, to the entries as they were, without asking the model to make it up again.
+        migrator.registerMigration("v3-pending-plan") { db in
+            try db.execute(sql: "ALTER TABLE memos ADD COLUMN pending_plan_json TEXT")
+        }
+
         return migrator
     }
 }

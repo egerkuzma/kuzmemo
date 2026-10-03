@@ -148,7 +148,7 @@ enum Golden {
         // The same flags the pipeline derives from the question that was asked (a replay must not be easier or harder).
         let followUp = c.followUp.map { FollowUp(previous: $0.previous, question: $0.question) }
         let interpretation = await ActionValidator.validate(response, in: ValidationContext(
-            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store, followUp: followUp, answer: transcript
+            context: context, resolver: RelativeDateResolver(anchor: anchor), store: store, followUp: followUp
         ))
         return (interpretation, response)
     }

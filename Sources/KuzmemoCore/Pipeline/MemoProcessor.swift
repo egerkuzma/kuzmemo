@@ -175,6 +175,13 @@ public actor MemoProcessor {
         return parts
     }
 
+    /// The plan the question behind `memo` (its parent) was asked about, if the question carried one.
+    private func pendingPlan(behind memo: Memo) async -> MutationPlan? {
+        guard let parentID = memo.parentMemoID, let parent = try? await store.memo(id: parentID),
+              let json = parent.pendingPlanJSON else { return nil }
+        return try? JSONDecoder().decode(MutationPlan.self, from: Data(json.utf8))
+    }
+
     private func followUp(for memo: Memo) async -> FollowUp? {
         guard let question = memo.followupQuestion, let parentID = memo.parentMemoID, let parent = try? await store.memo(id: parentID) else { return nil }
         let earlier = await chainTranscripts(endingAt: parent)
@@ -298,16 +305,39 @@ public actor MemoProcessor {
         try? await store.save(memo: memo)
 
         let followUp = await followUp(for: memo)
-        // A plain no to the app's own "Delete 3 entries?" is decided here, without the model: the limits were lifted for the
-        // answer to that question, and a model that misread the no could have come back with the deletions.
-        if let followUp, followUp.askedToConfirmBulk, FollowUp.declines(transcript) {
-            memo.llmModel = "local-router"
-            memo.intent = Intent.unknown.rawValue
-            memo.confidence = 1
-            memo.status = .discarded
-            memo.failReason = "the person said no"
-            try? await store.save(memo: memo)
-            return ProcessOutcome(memo: memo, kind: .unknown, interpretation: nil)
+        // The app's own "Delete 3 entries?" was asked about a plan that is kept with the question. A plain no drops it and a plain
+        // yes applies it, exactly as it was, without the model: a model asked to make the plan up again could name other
+        // entries, and one that misread the no could come back with the deletions. Anything in between goes to the model as a
+        // new command, with the limits in force (so the model's answer is asked about again if it is still a bulk change).
+        if let followUp, followUp.askedToConfirmBulk {
+            if FollowUp.declines(transcript) {
+                memo.llmModel = "local-router"
+                memo.intent = Intent.unknown.rawValue
+                memo.confidence = 1
+                memo.status = .discarded
+                memo.failReason = "the person said no"
+                try? await store.save(memo: memo)
+                return ProcessOutcome(memo: memo, kind: .unknown, interpretation: nil)
+            }
+            if FollowUp.affirms(transcript), let plan = await pendingPlan(behind: memo) {
+                do {
+                    let applied = try await store.apply(
+                        plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id, label: Self.label(for: plan)
+                    )
+                    memo.llmModel = "local-router"
+                    memo.intent = plan.actions.contains { if case .delete = $0 { true } else { false } } ? Intent.delete.rawValue : Intent.update.rawValue
+                    memo.confidence = 1
+                    memo.status = .applied
+                    memo.opID = applied.op?.id
+                    try? await store.save(memo: memo)
+                    return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: nil)
+                } catch StoreError.memoErased {
+                    return ProcessOutcome(memo: memo, kind: .erased, interpretation: nil)
+                } catch {
+                    // An entry of the plan changed since the question was asked (or is gone): the yes no longer means what it
+                    // meant. The phrase is read again below, and a bulk change is asked about once more.
+                }
+            }
         }
 
         let anchor = Self.parseAnchor(memo.anchorLocal) ?? clock.localNow()
@@ -370,6 +400,7 @@ public actor MemoProcessor {
                 return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: result)
             case let .clarify(clarification):
                 memo.status = .clarifying
+                memo.pendingPlanJSON = clarification.pending.flatMap { try? String(decoding: JSONEncoder().encode($0), as: UTF8.self) }
                 try? await store.save(memo: memo)
                 return ProcessOutcome(memo: memo, kind: .clarify(clarification), interpretation: result)
             case .unknown:

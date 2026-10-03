@@ -32,6 +32,9 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
     public var parentMemoID: String?
     /// For a spoken or chosen answer: the question it answers.
     public var followupQuestion: String?
+    /// For a phrase the app stopped to ask about before changing anything ("Delete 3 entries?"): the plan it would apply, as
+    /// JSON of `MutationPlan`, with the versions of the entries it was made for. A plain yes applies this plan, nothing else.
+    public var pendingPlanJSON: String?
 
     public init(
         id: String, createdAt: Int64, anchorLocal: String, tz: String, inputKind: MemoInputKind,
@@ -40,7 +43,7 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         llmModel: String? = nil, llmMs: Int? = nil, llmUsageJSON: String? = nil, llmResponseJSON: String? = nil,
         intent: String? = nil, confidence: Double? = nil, failStage: String? = nil, failReason: String? = nil,
         attempts: Int = 0, nextRetryAt: Int64? = nil, opID: String? = nil, parentMemoID: String? = nil,
-        followupQuestion: String? = nil
+        followupQuestion: String? = nil, pendingPlanJSON: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -67,6 +70,7 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         self.opID = opID
         self.parentMemoID = parentMemoID
         self.followupQuestion = followupQuestion
+        self.pendingPlanJSON = pendingPlanJSON
     }
 
     enum CodingKeys: String, CodingKey {
@@ -94,6 +98,7 @@ public struct Memo: Codable, Hashable, Sendable, Identifiable, FetchableRecord, 
         case opID = "op_id"
         case parentMemoID = "parent_memo_id"
         case followupQuestion = "followup_question"
+        case pendingPlanJSON = "pending_plan_json"
     }
 }
 

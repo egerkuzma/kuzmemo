@@ -26,14 +26,9 @@ public struct ValidationContext: Sendable {
     /// The question this transcript answers was about the time: an event that still has none is then an all-day event
     /// (the person said it does not matter), not a reason to ask once more.
     public var timeWasAsked: Bool
-    /// The transcript is the person's plain yes to the app's own "Delete 3 entries?" / "Change 4 entries?": the limit for that
-    /// operation is lifted, up to the number of entries the person agreed to. Any other answer is a new command with the
-    /// limits in force.
-    public var bulkConfirmation: BulkConfirmation?
-
     public init(
         context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
-        isFollowUp: Bool = false, timeWasAsked: Bool = false, bulkConfirmation: BulkConfirmation? = nil
+        isFollowUp: Bool = false, timeWasAsked: Bool = false
     ) {
         self.context = context
         self.resolver = resolver
@@ -41,18 +36,15 @@ public struct ValidationContext: Sendable {
         self.policy = policy
         self.isFollowUp = isFollowUp
         self.timeWasAsked = timeWasAsked
-        self.bulkConfirmation = bulkConfirmation
     }
 
-    /// The flags of an answer to a question come from the question and the answer themselves, in one place for the pipeline
-    /// and for the replay of recorded answers.
-    public init(
-        context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard,
-        followUp: FollowUp?, answer: String
-    ) {
+    /// The flags of an answer to a question come from the question itself, in one place for the pipeline and for the replay
+    /// of recorded answers. The bulk limits are never lifted here: a plain yes to the app's own "Delete 3 entries?" applies the
+    /// plan that was kept with the question (`MemoProcessor`) and never reaches the model; any other answer is a new command.
+    public init(context: ContextPlan, resolver: RelativeDateResolver, store: Store, policy: ValidationPolicy = .standard, followUp: FollowUp?) {
         self.init(
             context: context, resolver: resolver, store: store, policy: policy, isFollowUp: followUp != nil,
-            timeWasAsked: followUp?.askedForTime ?? false, bulkConfirmation: followUp?.confirmedBulk(by: answer)
+            timeWasAsked: followUp?.askedForTime ?? false
         )
     }
 }
@@ -136,22 +128,6 @@ public enum ActionValidator {
                 actions = Array(actions.prefix(policy.maxActions))
                 warnings.append("more than \(policy.maxActions) actions: truncated")
             }
-            // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
-            // stand-ups this week" can name one item three times.
-            let deletes = distinctTargets(actions.filter { $0.op == .delete })
-            if deletes > allowed(.delete, without: policy.maxDeletesWithoutConfirmation) {
-                throw Stop(.clarify(Clarification(
-                    question: trCount("Delete %lld entries?", deletes),
-                    reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")]
-                )))
-            }
-            let updates = distinctTargets(actions.filter { $0.op == .update })
-            if updates > allowed(.update, without: policy.maxUpdatesWithoutConfirmation) {
-                throw Stop(.clarify(Clarification(
-                    question: trCount("Change %lld entries?", updates),
-                    reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")]
-                )))
-            }
             if !vc.isFollowUp {
                 try nextWeekdayGuard(actions)
                 try lateNightGuard(actions)
@@ -161,34 +137,46 @@ public enum ActionValidator {
             for action in actions { planned.append(try await plan(action)) }
             planned = settle(planned)
             guard !planned.isEmpty else { return .unknown("no valid actions") }
-            return .mutate(MutationPlan(
+            let plan = MutationPlan(
                 actions: planned, warnings: warnings,
                 correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1),
                 expectedVersions: seenVersions
-            ))
-        }
-
-        /// How many entries one answer may touch with this operation before the person is asked: the policy's limit, or what the
-        /// person has just agreed to ("Delete 3 entries?" — "yes"). The model's answer to the yes is made anew; one that names
-        /// more entries than were agreed to is asked about again.
-        func allowed(_ operation: BulkConfirmation.Operation, without confirmation: Int) -> Int {
-            guard let confirmed = vc.bulkConfirmation, confirmed.operation == operation else { return confirmation }
-            return max(confirmed.count, confirmation)
-        }
-
-        /// How many different entries the actions are about (a ref the model was shown, else the words it used to find one).
-        func distinctTargets(_ actions: [ParsedAction]) -> Int {
-            var keys = Set<String>()
-            for (index, action) in actions.enumerated() {
-                if let ref = action.ref, let entry = vc.context.entry(number: ref) {
-                    keys.insert("item:\(entry.item.id)")
-                } else if let hint = clean(action.targetHint) {
-                    keys.insert("hint:\(SearchText.normalize(hint))")
-                } else {
-                    keys.insert("action:\(index)")
+            )
+            // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
+            // stand-ups this week" can name one item three times. The plan is complete when the question is asked, and the
+            // question carries it: a plain yes applies this very plan, not whatever the model would make of the yes.
+            let deleted = planned.compactMap { if case let .delete(id) = $0 { id } else { nil } }
+            if Set(deleted).count > policy.maxDeletesWithoutConfirmation {
+                throw Stop(.clarify(Clarification(
+                    question: naming(deleted, in: trCount("Delete %lld entries?", Set(deleted).count)),
+                    reason: .destructiveConfirm, options: [tr("Yes, delete"), tr("No")], pending: plan
+                )))
+            }
+            let changed = planned.compactMap { action -> String? in
+                switch action {
+                case let .update(id, _), let .moveOccurrence(id, _, _, _): id
+                default: nil
                 }
             }
-            return keys.count
+            if Set(changed).count > policy.maxUpdatesWithoutConfirmation {
+                throw Stop(.clarify(Clarification(
+                    question: naming(changed, in: trCount("Change %lld entries?", Set(changed).count)),
+                    reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")], pending: plan
+                )))
+            }
+            return .mutate(plan)
+        }
+
+        /// "Delete 3 entries?" names the entries when there are few enough to say: "Delete 3 entries: “A”, “B”, “C”?". The person
+        /// then confirms something they can see; `FollowUp.askedToConfirmBulk` knows both forms.
+        func naming(_ itemIDs: [String], in question: String) -> String {
+            var titles: [String] = []
+            for id in Set(itemIDs).sorted() {
+                guard let title = vc.context.entries.first(where: { $0.item.id == id })?.item.title else { return question } // found by words, not shown: no half list
+                titles.append(Wording.quoted(title))
+            }
+            guard (1 ... 4).contains(titles.count), question.hasSuffix("?") else { return question }
+            return String(question.dropLast()) + ": " + titles.joined(separator: ", ") + "?"
         }
 
         /// One answer can name the same entry twice. A second delete of an item, or any later change to an item the plan

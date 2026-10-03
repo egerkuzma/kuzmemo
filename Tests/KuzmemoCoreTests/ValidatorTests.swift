@@ -10,14 +10,13 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
     _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
-    followUp: Bool = false, timeAsked: Bool = false, confirmed: BulkConfirmation? = nil
+    followUp: Bool = false, timeAsked: Bool = false
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
         context: ContextPlan(entries: entries, expanded: false),
-        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked,
-        bulkConfirmation: confirmed
+        resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked
     )
     return await ActionValidator.validate(response, in: context)
 }
@@ -134,71 +133,56 @@ struct ValidatorCreateTests {
         #expect(created(try await validate(tomorrow, at: "2026-09-29 00:40", followUp: true)).count == 1)
     }
 
-    @Test func aConfirmedBulkChangeIsApplied() async throws {
-        let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+    /// The bulk question is asked about a complete plan, and carries it: a plain yes applies this very plan (`MemoProcessor`),
+    /// to the entries at the versions it was made for, instead of asking the model to make the plan up again.
+    @Test func theBulkQuestionCarriesTheCompletePlan() async throws {
+        var third = item("i3", "Запись 3", "2026-10-01")
+        third.version = 5
+        let entries = [entry(item("i1", "Запись 1", "2026-10-01")), entry(item("i2", "Запись 2", "2026-10-01")), entry(third), entry(item("i4", "Запись 4", "2026-10-01"))]
         let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
         let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
-        #expect(clarification(try await validate(json, entries: entries))?.reason == .destructiveConfirm)
-        let agreed = BulkConfirmation(operation: .delete, count: 3)
-        guard case let .mutate(plan) = try await validate(json, entries: entries, followUp: true, confirmed: agreed) else { Issue.record("expected the deletions"); return }
-        #expect(plan.actions.count == 3)
-    }
+        let asked = try #require(clarification(try await validate(json, entries: entries)))
+        #expect(asked.reason == .destructiveConfirm && asked.question == "Удалить 3 записи: «Запись 1», «Запись 2», «Запись 3»?")
+        let plan = try #require(asked.pending)
+        #expect(plan.actions == [.delete(itemID: "i1"), .delete(itemID: "i2"), .delete(itemID: "i3")])
+        #expect(plan.expectedVersions == ["i1": 1, "i2": 1, "i3": 5])
 
-    /// The model's answer to the yes is made anew: it covers what the person agreed to (the operation and the number of entries),
-    /// not whatever the model names this time.
-    @Test func aConfirmationCoversOnlyWhatWasAgreedTo() async throws {
-        let entries = (1 ... 5).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
-        let agreedToDeleteThree = BulkConfirmation(operation: .delete, count: 3)
-        let fourDeletes = #"{"intent":"delete","confidence":0.9,"actions":[\#((1 ... 4).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ","))]}"#
-        #expect(clarification(try await validate(fourDeletes, entries: entries, followUp: true, confirmed: agreedToDeleteThree))?.question == "Удалить 4 записи?")
-        let twoDeletes = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#
-        guard case .mutate = try await validate(twoDeletes, entries: entries, followUp: true, confirmed: agreedToDeleteThree) else { Issue.record("fewer than agreed is fine"); return }
-        // a yes to deleting does not cover changing, and the other way round
-        let fourUpdates = #"{"intent":"update","confidence":0.9,"actions":[\#((1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# }.joined(separator: ","))]}"#
-        #expect(clarification(try await validate(fourUpdates, entries: entries, followUp: true, confirmed: agreedToDeleteThree))?.question == "Изменить 4 записи?")
-        let threeDeletes = #"{"intent":"delete","confidence":0.9,"actions":[\#((1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ","))]}"#
-        #expect(clarification(try await validate(threeDeletes, entries: entries, followUp: true, confirmed: BulkConfirmation(operation: .update, count: 4)))?.question == "Удалить 3 записи?")
-    }
-
-    /// Only a plain yes is a confirmation. A no is decided before the model is asked (`MemoProcessor`); anything in between
-    /// ("yes, but not the third") is left to the model, with the limits in force.
-    @Test func onlyAPlainYesLiftsTheLimitAndOnlyAPlainNoDeclines() {
-        let asked = FollowUp(previous: "удали всё на завтра", question: "Удалить 3 записи?")
-        #expect(asked.bulkQuestion == BulkConfirmation(operation: .delete, count: 3))
-        #expect(FollowUp(previous: "x", question: "Change 4 entries?").bulkQuestion == BulkConfirmation(operation: .update, count: 4))
-        #expect(FollowUp(previous: "x", question: "Изменить 1 запись?").bulkQuestion == BulkConfirmation(operation: .update, count: 1))
-        #expect(FollowUp(previous: "x", question: "Delete 12 entries?").bulkQuestion == BulkConfirmation(operation: .delete, count: 12))
-        for yes in ["да, удалить", "Да, удалить", "Yes, delete", "yes", "да", "удаляй их все", "Ок", "давай", "delete them all", "Sure, go ahead."] {
-            #expect(asked.confirmedBulk(by: yes) == BulkConfirmation(operation: .delete, count: 3), "'\(yes)'")
-            #expect(!FollowUp.declines(yes), "'\(yes)'")
-        }
-        for no in ["нет", "Нет", "нет, не надо", "не надо", "отмена", "не удаляй", "ничего не делай", "No", "no, cancel", "never mind", "don't"] {
-            #expect(FollowUp.declines(no), "'\(no)'")
-            #expect(asked.confirmedBulk(by: no) == nil, "'\(no)'")
-        }
-        for unclear in ["да, но не третью", "только первые две", "yes, except the dentist", "удали только созвон", "", "да нет"] {
-            #expect(asked.confirmedBulk(by: unclear) == nil && !FollowUp.declines(unclear), "'\(unclear)'")
-        }
-        // the yes to another question is not a confirmation of anything
-        #expect(FollowUp(previous: "x", question: "На какую дату напомнить?").confirmedBulk(by: "да") == nil)
-    }
-
-    /// Only the person's yes to the app's own "Delete 3 entries?" lifts the bulk limit. Any other follow-up (the answer to
-    /// "At what time?", or something that has nothing to do with the question) is a new command.
-    @Test func anAnswerToAnotherQuestionMeetsTheBulkLimitAgain() async throws {
-        let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
-        let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
-        let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
-        let result = try await validate(json, entries: entries, followUp: true, confirmed: nil)
-        #expect(clarification(result)?.reason == .destructiveConfirm)
         let updates = (1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# }.joined(separator: ",")
         let bulkUpdate = #"{"intent":"update","confidence":0.9,"actions":[\#(updates)]}"#
-        #expect(clarification(try await validate(bulkUpdate, entries: entries, followUp: true))?.reason == .destructiveConfirm)
-        guard case .mutate = try await validate(bulkUpdate, entries: entries, followUp: true, confirmed: BulkConfirmation(operation: .update, count: 4)) else { Issue.record("expected the changes"); return }
+        let askedToChange = try #require(clarification(try await validate(bulkUpdate, entries: entries)))
+        #expect(askedToChange.question.hasPrefix("Изменить 4 записи: ") && askedToChange.pending?.actions.count == 4)
+        // within the limits nothing is asked, and a plain plan carries no pending one
+        let two = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#
+        guard case let .mutate(small) = try await validate(two, entries: entries) else { Issue.record("expected the deletions"); return }
+        #expect(small.actions.count == 2)
+    }
+
+    /// The limits are never lifted in the validator, not even for an answer to the app's own bulk question: a plain yes never
+    /// gets here (the kept plan is applied instead), and anything else is a new command.
+    @Test func anAnswerToAQuestionMeetsTheBulkLimitAgain() async throws {
+        let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+        let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
+        let json = #"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#
+        let result = try await validate(json, entries: entries, followUp: true)
+        #expect(clarification(result)?.reason == .destructiveConfirm && clarification(result)?.pending?.actions.count == 3)
+    }
+
+    /// Only a plain yes or a plain no is decided without the model; every word has to be a known one ("да, 2": which two?).
+    @Test func onlyAPlainYesOrNoIsDecidedWithoutTheModel() {
+        for yes in ["да, удалить", "Да, удалить", "Yes, delete", "yes", "да", "удаляй их все", "Ок", "давай", "delete them all", "Sure, go ahead."] {
+            #expect(FollowUp.affirms(yes) && !FollowUp.declines(yes), "'\(yes)'")
+        }
+        for no in ["нет", "Нет", "нет, не надо", "не надо", "отмена", "не удаляй", "ничего не делай", "No", "no, cancel", "never mind", "don't"] {
+            #expect(FollowUp.declines(no) && !FollowUp.affirms(no), "'\(no)'")
+        }
+        for unclear in ["да, но не третью", "только первые две", "yes, except the dentist", "удали только созвон", "", "да нет", "да, 2", "yes, 2 of them", "да, первые 2"] {
+            #expect(!FollowUp.affirms(unclear) && !FollowUp.declines(unclear), "'\(unclear)'")
+        }
     }
 
     @Test func theAppsOwnBulkQuestionIsRecognisedInBothLanguages() {
-        for question in ["Delete 3 entries?", "Delete 1 entry?", "Change 4 entries?", "Удалить 3 записи?", "Удалить 5 записей?", "Удалить 1 запись?", "Изменить 4 записи?"] {
+        for question in ["Delete 3 entries?", "Delete 1 entry?", "Change 4 entries?", "Удалить 3 записи?", "Удалить 5 записей?", "Удалить 1 запись?", "Изменить 4 записи?",
+                         "Удалить 3 записи: «Созвон», «Ставки?», «Банк»?", "Delete 2 entries: “Call”, “Rates”?"] {
             #expect(FollowUp(previous: "x", question: question).askedToConfirmBulk, "question '\(question)'")
         }
         for question in ["На какую дату напомнить?", "Во сколько встреча?", "Удалить запись «Созвон»?", "Delete the call with Anna?", "Какую пятницу имеешь в виду?"] {
@@ -294,12 +278,16 @@ struct ValidatorCreateTests {
         let entries = (1 ... 4).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
         let deletes = (1 ... 3).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
         let bulk = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[\#(deletes)]}"#, entries: entries)
-        #expect(clarification(bulk)?.reason == .destructiveConfirm && clarification(bulk)?.question == "Удалить 3 записи?")
+        #expect(clarification(bulk)?.reason == .destructiveConfirm && clarification(bulk)?.question == "Удалить 3 записи: «Запись 1», «Запись 2», «Запись 3»?")
         let two = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#, entries: entries)
         if case .mutate = two {} else { Issue.record("two deletions are allowed") }
         let updates = (1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое"}}"# }.joined(separator: ",")
         let bulkUpdate = try await validate(#"{"intent":"update","confidence":0.9,"actions":[\#(updates)]}"#, entries: entries)
-        #expect(clarification(bulkUpdate)?.question == "Изменить 4 записи?")
+        #expect(clarification(bulkUpdate)?.question == "Изменить 4 записи: «Запись 1», «Запись 2», «Запись 3», «Запись 4»?")
+        // five and more are too many to name; an entry found by its words, not shown to the model, has no name to give either
+        let five = (1 ... 5).map { entry(item("i\($0)", "Запись \($0)", "2026-10-01")) }
+        let fiveDeletes = (1 ... 5).map { #"{"op":"delete","ref":\#($0)}"# }.joined(separator: ",")
+        #expect(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[\#(fiveDeletes)]}"#, entries: five))?.question == "Удалить 5 записей?")
     }
 }
 

@@ -14,11 +14,15 @@ public struct Clarification: Equatable, Sendable {
     public var question: String
     public var reason: ClarificationReason
     public var options: [String]
+    /// The plan the app stopped to ask about (a bulk deletion), complete and ready: a plain yes applies exactly this, to the
+    /// entries at the versions it was made for, without asking the model to make the plan up again.
+    public var pending: MutationPlan?
 
-    public init(question: String, reason: ClarificationReason, options: [String] = []) {
+    public init(question: String, reason: ClarificationReason, options: [String] = [], pending: MutationPlan? = nil) {
         self.question = question
         self.reason = reason
         self.options = options
+        self.pending = pending
     }
 }
 
