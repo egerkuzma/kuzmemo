@@ -1,3 +1,5 @@
+import Foundation
+
 /// The result of turning a `When` into a concrete local date/time.
 public struct ResolvedWhen: Equatable, Sendable {
     public enum Issue: Equatable, Sendable {
@@ -12,12 +14,15 @@ public struct ResolvedWhen: Equatable, Sendable {
     public var time: LocalTime?
     public var approximate: Bool
     public var issues: [Issue]
+    /// Epoch milliseconds for elapsed-time requests; a wall-clock reading alone loses the second reading of a DST fold.
+    public var scheduledAt: Int64?
 
-    public init(date: LocalDate?, time: LocalTime?, approximate: Bool = false, issues: [Issue] = []) {
+    public init(date: LocalDate?, time: LocalTime?, approximate: Bool = false, issues: [Issue] = [], scheduledAt: Int64? = nil) {
         self.date = date
         self.time = time
         self.approximate = approximate
         self.issues = issues
+        self.scheduledAt = scheduledAt
     }
 }
 
@@ -26,10 +31,14 @@ public struct ResolvedWhen: Equatable, Sendable {
 public struct RelativeDateResolver: Sendable {
     public let anchor: LocalDateTime
     public let dayParts: DayPartDefaults
+    public let timeZone: TimeZone
+    public let anchorInstant: Date?
 
-    public init(anchor: LocalDateTime, dayParts: DayPartDefaults = .standard) {
+    public init(anchor: LocalDateTime, dayParts: DayPartDefaults = .standard, timeZone: TimeZone = .current, anchorInstant: Date? = nil) {
         self.anchor = anchor
         self.dayParts = dayParts
+        self.timeZone = timeZone
+        self.anchorInstant = anchorInstant
     }
 
     /// The model's numbers are not trusted: a date further from today than a person plans (a hundred years) is read as
@@ -44,6 +53,7 @@ public struct RelativeDateResolver: Sendable {
         var time = explicitTime(of: when)
         var approximate = when.approximate ?? false
         var issues: [ResolvedWhen.Issue] = []
+        var scheduledAt: Int64?
 
         switch when.mode {
         case .none:
@@ -68,7 +78,9 @@ public struct RelativeDateResolver: Sendable {
             }
         case .minutesFromNow:
             if let n = when.minutesFromNow, (-Self.maxMinutes ... Self.maxMinutes).contains(n) {
-                let moment = anchor.adding(minutes: n)
+                let instant = (anchorInstant ?? anchor.instant(in: timeZone)).addingTimeInterval(TimeInterval(n) * 60)
+                let moment = LocalDateTime(date: instant, in: timeZone)
+                scheduledAt = Int64(instant.timeIntervalSince1970 * 1000)
                 date = moment.date
                 time = moment.time
             } else {
@@ -86,13 +98,18 @@ public struct RelativeDateResolver: Sendable {
 
         // "This evening" said at 20:00 is not a moment in the past: the default hour of the part (19:00) has gone, the part
         // has not. Such a reminder is set for a little later in the part instead of asking for another date.
-        if let date, date == anchor.date, when.time == nil, let part = when.dayPart, let current = time, current < anchor.time,
+        if when.mode != .minutesFromNow, let date, date == anchor.date, when.time == nil, let part = when.dayPart, let current = time, current < anchor.time,
            let later = laterInThePart(part) {
             time = later
         }
 
-        if let date, isPast(date: date, time: time) { issues.append(.inThePast) }
-        return ResolvedWhen(date: date, time: time, approximate: approximate, issues: issues)
+        // On a DST fold a future instant can have an earlier wall-clock time. Durations are judged by their sign.
+        if when.mode == .minutesFromNow {
+            if let n = when.minutesFromNow, n < 0, date != nil { issues.append(.inThePast) }
+        } else if let date, isPast(date: date, time: time) {
+            issues.append(.inThePast)
+        }
+        return ResolvedWhen(date: date, time: time, approximate: approximate, issues: issues, scheduledAt: scheduledAt)
     }
 
     /// A time inside the part of the day that is going on now (an hour from now, on a quarter, not past the part's end),

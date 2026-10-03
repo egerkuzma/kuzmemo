@@ -58,17 +58,17 @@ public struct ContextPlanner: Sendable {
     /// are checked against at apply belong to the same moment. Read apart, a change landing between the two gave an old entry
     /// the new revision, and a plan made from the old entry passed the check.
     public func plan(transcript: String, anchor: LocalDateTime, store: Store) async throws -> ContextPlan {
-        try await store.writer.read { db in try self.plan(db, transcript: transcript, anchor: anchor) }
+        try await store.writer.read { db in try self.plan(db, transcript: transcript, anchor: anchor, timeZone: store.clock.timeZone) }
     }
 
-    func plan(_ db: Database, transcript: String, anchor: LocalDateTime) throws -> ContextPlan {
+    func plan(_ db: Database, transcript: String, anchor: LocalDateTime, timeZone: TimeZone) throws -> ContextPlan {
         let words = SearchText.tokens(transcript)
         let expanded = words.contains { word in Self.editCues.contains { word.hasPrefix($0) } }
         let days = expanded ? expandedDays : baseDays
         let limit = expanded ? expandedLimit : baseLimit
         let today = anchor.date
 
-        var entries = try Store.agenda(db, in: today...today.adding(days: days), includeDone: false)
+        var entries = try Store.agenda(db, in: today...today.adding(days: days), includeDone: false, timeZone: timeZone)
         let overdue = try Store.overdue(db, before: today, limit: 10)
         var seen = Set(entries.map(\.id))
         for item in overdue {
@@ -92,11 +92,12 @@ public struct ContextPlanner: Sendable {
             // started, and "complete", "skip" or "move" on that would hit an occurrence from months ago.
             var upcoming: [String: AgendaEntry]?
             found = Set(hits.prefix(searchHitLimit).map(\.id))
-            for item in hits.prefix(searchHitLimit) where !entries.contains(where: { $0.item.id == item.id }) {
+            for hit in hits.prefix(searchHitLimit) where !entries.contains(where: { $0.item.id == hit.id }) {
+                let item = hit.recurrence == nil ? hit.shown(in: timeZone) : hit
                 let entry: AgendaEntry
                 if item.recurrence != nil {
                     if upcoming == nil {
-                        let year = try Store.agenda(db, in: today...today.adding(days: 366), includeDone: false)
+                        let year = try Store.agenda(db, in: today...today.adding(days: 366), includeDone: false, timeZone: timeZone)
                         upcoming = Dictionary(year.map { ($0.item.id, $0) }, uniquingKeysWith: { first, _ in first })
                     }
                     // a series with nothing ahead has no occurrence to name: the entry carries none and the validator asks
@@ -106,7 +107,7 @@ public struct ContextPlanner: Sendable {
                 } else {
                     entry = AgendaEntry(
                         item: item, date: item.date ?? today, time: item.time, isDone: item.status == .done,
-                        occurrenceDate: nil, wasMoved: false
+                        occurrenceDate: nil, wasMoved: false, scheduledAt: item.scheduledAt
                     )
                 }
                 if seen.insert(entry.id).inserted { entries.append(entry) }
@@ -121,18 +122,19 @@ public struct ContextPlanner: Sendable {
         return ContextPlan(entries: listed, expanded: expanded, revisions: try Store.revisions(db, of: Array(Set(listed.map(\.item.id)))))
     }
 
-    /// The first `limit` entries, except that an entry of an item the words pointed at is never the one dropped: a full fortnight
-    /// of nearer entries used to push "the meeting with Dmitry" in a month out of the list, and the model could not see what it
-    /// was asked to change. The latest entries go first; found ones go only when they alone exceed the limit.
+    /// Reserve one entry per found target before spending the remaining space on its other occurrences or nearby entries.
+    /// Otherwise a few daily series consume the whole limit and hide a later target that was also found by the words.
     static func cut(_ entries: [AgendaEntry], to limit: Int, keeping found: Set<String>) -> [AgendaEntry] {
+        guard limit > 0 else { return [] }
         guard entries.count > limit else { return entries }
-        var kept = entries
-        var index = kept.count - 1
-        while kept.count > limit, index >= 0 {
-            if !found.contains(kept[index].item.id) { kept.remove(at: index) }
-            index -= 1
+        var reserved = Set<Int>()
+        var represented = Set<String>()
+        for (index, entry) in entries.enumerated() where found.contains(entry.item.id) {
+            if represented.insert(entry.item.id).inserted { reserved.insert(index) }
+            if reserved.count == limit { break }
         }
-        return Array(kept.prefix(limit))
+        for index in entries.indices where reserved.count < limit { reserved.insert(index) }
+        return reserved.sorted().map { entries[$0] }
     }
 }
 

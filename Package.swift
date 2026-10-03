@@ -60,6 +60,11 @@ let package = Package(
             swiftSettings: [.enableUpcomingFeature("ExistentialAny")]
         ),
         .testTarget(
+            name: "KuzmemoAppTests",
+            dependencies: ["Kuzmemo", "KuzmemoCore"],
+            swiftSettings: [.enableUpcomingFeature("ExistentialAny"), .defaultIsolation(MainActor.self)]
+        ),
+        .testTarget(
             name: "KuzmemoCoreTests",
             dependencies: ["KuzmemoCore"],
             exclude: ["Golden/phrases.jsonl", "Golden/cassettes"],

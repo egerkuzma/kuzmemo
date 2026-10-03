@@ -35,7 +35,7 @@ extension Store {
                     let item = Item(
                         id: "", kind: new.kind, title: new.title, details: new.details, keywords: new.keywords,
                         date: new.date, time: new.time, durationMin: new.durationMin, approximate: new.approximate,
-                        recurrence: new.recurrence, source: source, memoID: memoID
+                        recurrence: new.recurrence, source: source, memoID: memoID, scheduledAt: new.scheduledAt
                     )
                     applied.append(AppliedChange(kind: .created, item: try mutator.insert(item)))
 
@@ -43,12 +43,14 @@ extension Store {
                     let saved = try mutator.update(id: id) { changes.apply(to: &$0) }
                     applied.append(AppliedChange(kind: .updated, item: saved))
 
-                case let .moveOccurrence(id, occurrence, newDate, newTime):
+                case let .moveOccurrence(id, occurrence, newDate, newTime, clearsTime, scheduledAt):
                     guard let item = try mutator.item(id: id) else { throw StoreError.itemNotFound(id) }
                     // An occurrence that is done stays done at its new place.
-                    let wasDone = try mutator.exception(itemID: id, occDate: occurrence)?.action == .done
+                    let existing = try mutator.exception(itemID: id, occDate: occurrence)
+                    let wasDone = existing?.action == .done
                     try mutator.setException(ItemException(
-                        itemID: id, occDate: occurrence, action: wasDone ? .done : .moved, movedDate: newDate, movedTime: newTime
+                        itemID: id, occDate: occurrence, action: wasDone ? .done : .moved, movedDate: newDate, movedTime: newTime,
+                        timeCleared: clearsTime ?? (newTime == nil ? existing?.timeCleared : nil), scheduledAt: scheduledAt
                     ))
                     applied.append(AppliedChange(
                         kind: .moved, item: item, occurrenceDate: occurrence, newDate: newDate, newTime: newTime
@@ -61,7 +63,7 @@ extension Store {
                         // where it stands now: the move is kept, not replaced by a plain "done" on the rule's day.
                         let moved = try mutator.exception(itemID: id, occDate: occurrence).flatMap { $0.movedDate == nil ? nil : $0 }
                         try mutator.setException(ItemException(
-                            itemID: id, occDate: occurrence, action: .done, movedDate: moved?.movedDate, movedTime: moved?.movedTime
+                            itemID: id, occDate: occurrence, action: .done, movedDate: moved?.movedDate, movedTime: moved?.movedTime, timeCleared: moved?.timeCleared, scheduledAt: moved?.scheduledAt
                         ))
                         applied.append(AppliedChange(kind: .completed, item: item, occurrenceDate: occurrence))
                     } else {
@@ -77,7 +79,7 @@ extension Store {
                             // A done occurrence that was moved becomes an open moved one again; the move stays.
                             if existing.action == .done {
                                 try mutator.setException(ItemException(
-                                    itemID: id, occDate: occurrence, action: .moved, movedDate: existing.movedDate, movedTime: existing.movedTime
+                                    itemID: id, occDate: occurrence, action: .moved, movedDate: existing.movedDate, movedTime: existing.movedTime, timeCleared: existing.timeCleared, scheduledAt: existing.scheduledAt
                                 ))
                             }
                         } else {

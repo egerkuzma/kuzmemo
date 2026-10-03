@@ -57,9 +57,10 @@ public enum AlertPlanner {
     private static func timedAlerts(for entry: AgendaEntry, at time: LocalTime, settings: NotificationSettings, timeZone: TimeZone) -> [PlannedAlert] {
         var leads = entry.item.kind == .event ? settings.eventLeads : settings.reminderLeads
         if entry.item.remindLeadMin > 0, !leads.contains(entry.item.remindLeadMin) { leads.append(entry.item.remindLeadMin) }
-        let start = LocalDateTime(date: entry.date, time: time)
+        let start = entry.scheduledAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+            ?? LocalDateTime(date: entry.date, time: time).instant(in: timeZone)
         return leads.sorted(by: >).map { lead in
-            let moment = start.adding(minutes: -lead)
+            let moment = start.addingTimeInterval(-TimeInterval(lead) * 60)
             let kind: PlannedAlert.Kind = lead == 0 ? .atTime : .headsUp
             let body = "\(Wording.leadPhrase(lead)) · \(time)"
             return make(entry, kind: kind, lead: lead, at: moment, body: body, settings: settings, timeZone: timeZone)
@@ -71,14 +72,14 @@ public enum AlertPlanner {
     private static func allDayAlerts(for entry: AgendaEntry, settings: NotificationSettings, timeZone: TimeZone) -> [PlannedAlert] {
         guard entry.item.kind != .event else { return [] } // an event without a time is a question for the person, not an alarm
         return settings.allDayTimes.map { time in
-            make(entry, kind: .allDay, lead: 0, at: LocalDateTime(date: entry.date, time: time), body: tr("Today · all day"), settings: settings, timeZone: timeZone)
+            make(entry, kind: .allDay, lead: 0, at: LocalDateTime(date: entry.date, time: time).instant(in: timeZone), body: tr("Today · all day"), settings: settings, timeZone: timeZone)
         }
     }
 
     // MARK: - Building one alert
 
     private static func make(
-        _ entry: AgendaEntry, kind: PlannedAlert.Kind, lead: Int, at moment: LocalDateTime, body: String,
+        _ entry: AgendaEntry, kind: PlannedAlert.Kind, lead: Int, at fireAt: Date, body: String,
         settings: NotificationSettings, timeZone: TimeZone
     ) -> PlannedAlert {
         let sound: AlertSound = switch kind {
@@ -86,8 +87,7 @@ public enum AlertPlanner {
         case .atTime: settings.atTimeSound
         case .allDay: settings.allDaySound
         }
-        let silent = settings.quietHours.contains(moment.time)
-        let fireAt = moment.instant(in: timeZone)
+        let silent = settings.quietHours.contains(LocalDateTime(date: fireAt, in: timeZone).time)
         let subtitle = entry.item.kind.displayName
         let occurrence = entry.occurrenceDate.map { "\($0)" } ?? "-"
         let content = "\(entry.item.title)|\(subtitle)|\(body)|\(sound.kind.rawValue):\(sound.name)|\(silent)"

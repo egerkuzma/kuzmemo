@@ -58,7 +58,7 @@ struct ItemEditorView: View {
     private var isNew: Bool { if case .new = request { true } else { false } }
 
     /// The form's controls for a draft.
-    private struct Fields {
+    private struct Fields: Equatable {
         var hasDate: Bool, dateValue: Date, hasTime: Bool, timeValue: Date, form: RecurrenceForm, untilValue: Date, countValue: Int
     }
 
@@ -94,7 +94,9 @@ struct ItemEditorView: View {
             return
         }
         let shown = ItemDraft(item)
-        if draft == shown {
+        let controls = Fields(hasDate: hasDate, dateValue: dateValue, hasTime: hasTime, timeValue: timeValue,
+                              form: form, untilValue: untilValue, countValue: countValue)
+        if draft == shown && controls == Self.fields(for: shown, selectedDate: env.calendar.selectedDate) {
             if ItemDraft(snapshot.item) != shown { show(ItemDraft(snapshot.item)) }
             revision = .loaded(snapshot.revision)
         } else if ItemDraft(snapshot.item) == shown {
@@ -175,6 +177,7 @@ struct ItemEditorView: View {
                 }
             }
             .formStyle(.grouped)
+            .disabled(!isNew && revision == .loading)
             Divider()
             footer
         }
