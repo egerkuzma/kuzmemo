@@ -102,7 +102,6 @@ public actor ClaudeCLIProvider: LLMProvider {
         )
         try Task.checkCancellation()
         if result.timedOut { throw LLMError.timedOut(seconds: request.timeout) }
-        if result.outputTruncated { throw LLMError.processFailed(exitCode: -3, stderr: "CLI output exceeded the size limit") }
 
         let stdoutText = String(decoding: result.stdout, as: UTF8.self)
         guard let envelope = ClaudeEnvelope(parsing: stdoutText) else {
@@ -187,7 +186,6 @@ public actor ClaudeCLIProvider: LLMProvider {
         // start after a silent update, or a wake from sleep, can make `--help` slow. These errors are transient (the memo is
         // tried again); the answer is remembered only when the CLI really described itself.
         if result.timedOut { throw LLMError.timedOut(seconds: 15) }
-        if result.outputTruncated { throw LLMError.processFailed(exitCode: -3, stderr: "CLI output exceeded the size limit") }
         if result.exitCode != 0 || result.killedBySignal {
             throw LLMError.processFailed(exitCode: result.exitCode, stderr: Self.tail(result.stderr))
         }

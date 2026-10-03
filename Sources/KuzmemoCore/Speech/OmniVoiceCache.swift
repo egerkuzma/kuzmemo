@@ -61,12 +61,11 @@ public struct OmniVoiceCache: Sendable {
     public func store(_ segment: SpokenSegment, for line: String, voice: Voice) {
         guard segment.seconds > 0.2 else { return }
         let files = FileManager.default
+        try? files.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = file(for: line, voice: voice)
         let partial = url.appendingPathExtension("partial")
         do {
-            try PrivateFiles.directory(directory)
             try segment.wav.write(to: partial)
-            try PrivateFiles.file(partial)
             _ = try? files.removeItem(at: url)
             try files.moveItem(at: partial, to: url)
         } catch {

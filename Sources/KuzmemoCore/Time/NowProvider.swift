@@ -58,16 +58,4 @@ extension LocalDateTime {
         )
         return calendar.date(from: components) ?? Date(timeIntervalSince1970: TimeInterval(epochMinutes * 60))
     }
-
-    /// Recover the reading of a folded clock nearest the recording's creation time. Both date and time are still the
-    /// original spoken anchor; the timestamp disambiguates the two readings without moving the anchor to the end of STT.
-    public func instant(in timeZone: TimeZone, near timestamp: Date) -> Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let first = instant(in: timeZone)
-        let start = calendar.startOfDay(for: first).addingTimeInterval(-1)
-        let components = DateComponents(year: date.year, month: date.month, day: date.day, hour: time.hour, minute: time.minute, second: 0)
-        let last = calendar.nextDate(after: start, matching: components, matchingPolicy: .strict, repeatedTimePolicy: .last) ?? first
-        return abs(first.timeIntervalSince(timestamp)) <= abs(last.timeIntervalSince(timestamp)) ? first : last
-    }
 }

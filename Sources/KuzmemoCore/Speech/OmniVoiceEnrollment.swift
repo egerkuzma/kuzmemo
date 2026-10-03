@@ -37,7 +37,7 @@ public struct OmniVoiceEnrollment: Sendable {
         let files = FileManager.default
         let parent = locator.voiceDirectory.deletingLastPathComponent()
         let staging = parent.appendingPathComponent("voice-new-\(UUID().uuidString)", isDirectory: true)
-        try PrivateFiles.directory(staging)
+        try files.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: staging) } // nothing is left behind, whether the swap happened or not
         let wav = staging.appendingPathComponent("ref.wav")
         try files.copyItem(at: recording, to: wav)
@@ -47,7 +47,6 @@ public struct OmniVoiceEnrollment: Sendable {
         let codes = staging.appendingPathComponent("ref.rvq")
         let size = (try? files.attributesOfItem(atPath: codes.path)[.size] as? Int) ?? 0
         guard size > 0 else { throw OmniVoiceError.encoderWroteNothing }
-        for file in [wav, staging.appendingPathComponent("ref.txt"), codes] { try PrivateFiles.file(file) }
 
         if files.fileExists(atPath: locator.voiceDirectory.path) {
             _ = try files.replaceItemAt(locator.voiceDirectory, withItemAt: staging)

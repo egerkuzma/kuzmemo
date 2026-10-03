@@ -227,21 +227,6 @@ public enum ResponseSchema {
      "items": {
       "type": "string"
      }
-    },
-    "clear": {
-     "type": "array",
-     "uniqueItems": true,
-     "maxItems": 6,
-     "items": {
-      "enum": [
-       "date",
-       "time",
-       "details",
-       "duration_min",
-       "recurrence",
-       "keywords"
-      ]
-     }
     }
    }
   },

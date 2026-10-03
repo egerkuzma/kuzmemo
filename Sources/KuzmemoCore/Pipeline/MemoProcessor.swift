@@ -353,13 +353,6 @@ public actor MemoProcessor {
 
         let anchor = Self.parseAnchor(memo.anchorLocal) ?? clock.localNow()
         let timeZone = TimeZone(identifier: memo.tz) ?? clock.timeZone
-        var original = memo
-        for _ in 0 ..< 6 {
-            guard let parentID = original.parentMemoID, let parent = try? await store.memo(id: parentID),
-                  parent.anchorLocal == memo.anchorLocal, parent.tz == memo.tz else { break }
-            original = parent
-        }
-        let anchorInstant = anchor.instant(in: timeZone, near: Date(timeIntervalSince1970: TimeInterval(original.createdAt) / 1000))
         // Read once more when an entry the plan was made for changed while the model was answering (the person edited it
         // meanwhile): the second reading sees the entry as it is now. A second conflict is reported.
         var readings = 0
@@ -369,7 +362,7 @@ public actor MemoProcessor {
             let result: InterpretResult
             do {
                 result = try await interpreter.interpret(InterpretRequest(
-                    transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp, confirmAnyChange: confirmAnyChange, anchorInstant: anchorInstant
+                    transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp, confirmAnyChange: confirmAnyChange
                 ))
             } catch let error as LLMError {
                 return await fail(memo, error, elapsed: Date().timeIntervalSince(started))

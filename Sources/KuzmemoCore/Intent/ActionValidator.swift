@@ -170,7 +170,7 @@ public enum ActionValidator {
                 switch action {
                 case let .delete(id): deleted.append(id)
                 case let .update(id, _): edited.append(id)
-                case let .moveOccurrence(id, _, _, _, _, _): moved.append(id)
+                case let .moveOccurrence(id, _, _, _): moved.append(id)
                 case let .complete(id, _): completed.append(id)
                 case let .reopen(id, _): reopened.append(id)
                 case let .skipOccurrence(id, _): skipped.append(id)
@@ -180,8 +180,7 @@ public enum ActionValidator {
             let changed = edited + moved
             let seriesDeleted = Set(deleted).compactMap { seenItems[$0] }.filter { $0.recurrence != nil }
             let overLimit = Set(deleted).count > policy.maxDeletesWithoutConfirmation || Set(changed).count > policy.maxUpdatesWithoutConfirmation
-            let seriesEdited = edited.contains { seenItems[$0]?.recurrence != nil }
-            guard vc.confirmAnyChange || overLimit || !seriesDeleted.isEmpty || seriesEdited else { return nil }
+            guard vc.confirmAnyChange || overLimit || !seriesDeleted.isEmpty else { return nil }
 
             // One series deletion on its own keeps its own question, with the occurrence as a way out ("only this occurrence" is
             // an answer the model turns into a skip).
@@ -308,15 +307,7 @@ public enum ActionValidator {
             let (target, revision) = try await findTarget(action)
             // The revision belongs to the same snapshot as the entry (the model's list, or the search that found it). An entry
             // without one (not in the database) gets a revision nothing can match, and the plan is refused at apply.
-            let current = revision ?? -1
-            if let previous = seenRevisions[target.item.id], previous != current {
-                // A ref can come from the old model context and a hint from a newer search, in either order. Neither
-                // snapshot may lend its revision to actions made from the other. An impossible revision refuses the whole
-                // plan at apply, where the pipeline already handles a conflict by reading the context again.
-                seenRevisions[target.item.id] = -1
-            } else {
-                seenRevisions[target.item.id] = current
-            }
+            seenRevisions[target.item.id] = revision ?? -1
             seenItems[target.item.id] = target.item
             return target
         }
@@ -405,7 +396,7 @@ public enum ActionValidator {
                 keywords: (parsed.keywords ?? []).compactMap { clean($0) }.prefix(6).joined(separator: " "),
                 date: resolved.date, time: resolved.date == nil ? nil : resolved.time, // a time alone belongs to nothing
                 durationMin: parsed.durationMin.flatMap { (1 ... 1440).contains($0) ? $0 : nil },
-                approximate: resolved.approximate, recurrence: recurrence, scheduledAt: resolved.scheduledAt
+                approximate: resolved.approximate, recurrence: recurrence
             )
         }
 
@@ -413,17 +404,6 @@ public enum ActionValidator {
 
         mutating func updateActions(target: Target, action: ParsedAction, changes parsed: ParsedChanges) throws -> [PlannedAction] {
             var changes = ItemChanges()
-            var cleared = Set(parsed.clear ?? [])
-            let conflicts = (cleared.contains(.date) && parsed.when.map { $0.mode != .none } == true)
-                || (cleared.contains(.time) && parsed.when.map { $0.time != nil || $0.dayPart != nil || $0.mode == .minutesFromNow } == true)
-                || (cleared.contains(.details) && parsed.details != nil)
-                || (cleared.contains(.durationMin) && parsed.durationMin != nil)
-                || (cleared.contains(.recurrence) && parsed.recurrence != nil)
-                || (cleared.contains(.keywords) && parsed.keywords != nil)
-                || (cleared.contains(.date) && (parsed.recurrence != nil || parsed.when?.time != nil || parsed.when?.dayPart != nil))
-            guard !conflicts else {
-                throw Stop(.clarify(Clarification(question: tr("Should I remove these fields or set new values?"), reason: .other)))
-            }
             changes.kind = parsed.kind
             changes.title = clean(parsed.title).map { String($0.prefix(policy.maxTitleLength)) }
             changes.details = clean(parsed.details).map { String($0.prefix(policy.maxDetailsLength)) }
@@ -434,7 +414,6 @@ public enum ActionValidator {
 
             var newDate: LocalDate?
             var newTime: LocalTime?
-            var scheduledAt: Int64?
             if let when = parsed.when, when.mode != .none || when.time != nil || when.dayPart != nil {
                 let resolved = resolveWhen(when)
                 if resolved.issues.contains(where: { if case .incomplete = $0 { true } else { false } }) {
@@ -447,28 +426,21 @@ public enum ActionValidator {
                 }
                 if when.mode != .none { newDate = resolved.date }
                 newTime = resolved.time
-                scheduledAt = resolved.scheduledAt
             }
 
-            if target.item.recurrence != nil, !cleared.contains(.date), !cleared.contains(.recurrence),
-               newDate != nil || newTime != nil || cleared.contains(.time), let occurrence = target.occurrenceDate ?? action.occurrenceDate {
+            if target.item.recurrence != nil, newDate != nil || newTime != nil, let occurrence = target.occurrenceDate ?? action.occurrenceDate {
                 // A new date or time for one occurrence of a series moves that occurrence, never the series: "move it to 18:00"
                 // keeps the day the entry is on now, "to Friday" keeps its time (for an occurrence that was moved before, that is
                 // where it stands, not the rule's day and the series' hour). Whatever else changes (a title, details) has no
                 // per-occurrence home and is an edit of the series, beside the move.
-                let clearTime = cleared.remove(.time) != nil || (newTime == nil && target.shownDate != nil && target.shownTime == nil && target.item.time != nil)
-                changes.clear = cleared.isEmpty ? nil : cleared
                 let move = PlannedAction.moveOccurrence(
                     itemID: target.item.id, occurrenceDate: occurrence,
-                    newDate: newDate ?? target.shownDate ?? occurrence, newTime: clearTime ? nil : (newTime ?? target.shownTime ?? target.item.time),
-                    clearsTime: clearTime ? true : nil, scheduledAt: clearTime ? nil : scheduledAt
+                    newDate: newDate ?? target.shownDate ?? occurrence, newTime: newTime ?? target.shownTime ?? target.item.time
                 )
                 return changes.isEmpty ? [move] : [move, .update(itemID: target.item.id, changes: changes)]
             }
             changes.date = newDate
-            changes.time = newTime ?? (newDate != nil && target.item.scheduledAt != nil ? target.item.time : nil)
-            changes.scheduledAt = scheduledAt
-            changes.clear = cleared.isEmpty ? nil : cleared
+            changes.time = newTime
             guard !changes.isEmpty else { throw Stop(.unknown("update changes nothing")) }
             return [.update(itemID: target.item.id, changes: changes)]
         }
@@ -481,7 +453,6 @@ public enum ActionValidator {
             if case let .disagrees(local) = resolver.crossCheck(when, resolved: resolved) {
                 warnings.append("«\(when.phrase ?? "")»: model gave \(resolved.date.map(\.description) ?? "no date"), local reading \(local)")
                 resolved.date = local
-                resolved.scheduledAt = nil
                 resolved.issues.removeAll()
                 if resolver.isPast(date: local, time: resolved.time) { resolved.issues.append(.inThePast) }
             }
@@ -650,7 +621,7 @@ extension PlannedAction {
     var targetItemID: String? {
         switch self {
         case .create: nil
-        case let .update(id, _), let .moveOccurrence(id, _, _, _, _, _), let .complete(id, _), let .reopen(id, _), let .delete(id),
+        case let .update(id, _), let .moveOccurrence(id, _, _, _), let .complete(id, _), let .reopen(id, _), let .delete(id),
              let .skipOccurrence(id, _): id
         }
     }

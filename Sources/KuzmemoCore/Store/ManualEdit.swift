@@ -85,8 +85,6 @@ extension Store {
         return try await perform(label: label) { mutator in
             if let expectingRevision { try mutator.require(revisions: [itemID: expectingRevision]) }
             _ = try mutator.update(id: itemID) { item in
-                let shown = item.shown(in: self.clock.timeZone)
-                if clean.date != shown.date || clean.time != shown.time { item.scheduledAt = nil }
                 item.kind = clean.kind
                 item.title = clean.title
                 item.details = clean.details.isEmpty ? nil : clean.details

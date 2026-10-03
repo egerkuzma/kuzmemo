@@ -88,7 +88,6 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
 
     /// Plans again shortly (calendar edits often come in bursts).
     func requestSync(after delay: Duration = .milliseconds(800)) {
-        if env.settings.isLoaded(.notifications), !env.settings.notifications.enabled { voice?.cancel() }
         pendingSync?.cancel()
         pendingSync = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
@@ -110,25 +109,8 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func performSync() async {
-        // Defaults of a group that failed to load are not the person's permission to schedule or speak reminders.
-        guard env.settings.isLoaded(.notifications) else { return }
         let settings = env.settings.notifications
         let now = env.clock.now()
-        if !settings.enabled {
-            planned = []
-            submitted = []
-            voice?.cancel()
-            voice = nil
-            lastSync = now
-            if isLive {
-                let center = UNUserNotificationCenter.current()
-                let pending = await center.pendingNotificationRequests()
-                let diff = AlertDiff(planned: [], pendingIDs: Set(pending.map(\.identifier)), enabled: false)
-                center.removePendingNotificationRequests(withIdentifiers: diff.toRemove)
-            }
-            lastError = nil
-            return // turning off must not depend on either reading the calendar or notification authorization
-        }
         let zone = env.clock.timeZone
         let today = env.clock.localNow().date
         // A calendar that cannot be read is not an empty calendar: the system keeps what it holds until a read works.
@@ -139,7 +121,6 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             lastError = "\(error)"
             return
         }
-        guard settings == env.settings.notifications else { again = true; return }
         planned = AlertPlanner.plan(entries: entries, settings: settings, now: now, timeZone: zone)
         submitted.formIntersection(planned.map(\.id))
         lastSync = now
@@ -156,7 +137,6 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         if !diff.toRemove.isEmpty { center.removePendingNotificationRequests(withIdentifiers: diff.toRemove) }
         lastError = nil
         for alert in diff.toAdd {
-            guard settings == env.settings.notifications else { again = true; return }
             // An alert whose moment has come and that was handed over already (or is on screen) has fired: it is not pending
             // for that reason, and adding it again would show it again.
             if alert.fireAt <= now.addingTimeInterval(1), submitted.contains(alert.id) || delivered.contains(alert.id) { continue }
@@ -237,7 +217,6 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             try? await Task.sleep(for: .seconds(max(0, next.fireAt.timeIntervalSince(now))))
             guard !Task.isCancelled, let self else { return }
             spoken.insert(next.id)
-            guard env.settings.isLoaded(.notifications), env.settings.notifications.enabled else { return }
             // The sleep runs on the clock that stops while the Mac sleeps: a title due an hour ago must not be read out at wake.
             guard env.clock.now().timeIntervalSince(next.fireAt) < 60 else { return }
             let glossary = (try? await env.store.glossary()) ?? []
@@ -289,10 +268,9 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
             let minutes = Int(name.dropFirst(7)) ?? 10
             // The button is on a banner that may have been delivered before notifications were switched off: off means off.
             let settings = env.settings.notifications
-            guard env.settings.isLoaded(.notifications), settings.enabled else { return }
+            guard settings.enabled else { return }
             // A snooze that lands inside the quiet hours is silent, like every other alert there.
-            let moment = LocalDateTime(date: env.clock.now().addingTimeInterval(TimeInterval(minutes) * 60), in: env.clock.timeZone)
-            let rings = !settings.quietHours.contains(moment.time)
+            let rings = !settings.quietHours.contains(env.clock.localNow().adding(minutes: minutes).time)
             let request = NotificationRequestBuilder.snooze(
                 title: title, subtitle: subtitle, thread: thread, info: info, minutes: minutes, sound: rings ? settings.atTimeSound : .silent
             )

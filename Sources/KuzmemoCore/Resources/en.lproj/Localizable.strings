@@ -33,12 +33,3 @@
 "%lld glossary words|other" = "%lld glossary words";
 "%lld saved phrases|one" = "%lld saved phrase";
 "%lld saved phrases|other" = "%lld saved phrases";
-
-/* Persistence and field removal */
-"Should I remove these fields or set new values?" = "Should I remove these fields or set new values?";
-"Settings could not be loaded or saved: %1$@" = "Settings could not be loaded or saved: %1$@";
-"Recording settings are still loading. Please try again." = "Recording settings are still loading. Please try again.";
-"Some recordings or settings could not be saved" = "Some recordings or settings could not be saved";
-"Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway." = "Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway.";
-"Stay in Kuzmemo" = "Stay in Kuzmemo";
-"Quit anyway" = "Quit anyway";

@@ -315,9 +315,7 @@ struct ValidatorTargetTests {
         #expect(plan.actions == [.moveOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!, newDate: LocalDate("2026-09-30")!, newTime: LocalTime("16:00"))])
 
         let rename = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Стендап"}}]}"#, entries: entries)
-        let question = try #require(clarification(rename))
-        #expect(question.question.contains("вся серия"))
-        let renamePlan = try #require(question.pending)
+        guard case let .mutate(renamePlan) = rename else { Issue.record("expected mutate"); return }
         #expect(renamePlan.actions == [.update(itemID: "w1", changes: ItemChanges(title: "Стендап"))])
     }
 
@@ -326,9 +324,7 @@ struct ValidatorTargetTests {
     @Test func aMoveOfAnOccurrenceWithOtherChangesIsAMoveAndASeriesEdit() async throws {
         let entries = [entry(weekly, occurrence: "2026-10-05")]
         let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Стендап","when":{"mode":"none","time":"11:00"}}}]}"#
-        let asked = try #require(clarification(try await validate(json, entries: entries)))
-        #expect(asked.question.contains("вся серия"))
-        let plan = try #require(asked.pending)
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected mutate"); return }
         #expect(plan.actions == [
             .moveOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!, newDate: LocalDate("2026-10-05")!, newTime: LocalTime("11:00")),
             .update(itemID: "w1", changes: ItemChanges(title: "Стендап")),

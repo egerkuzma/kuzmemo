@@ -49,7 +49,6 @@ struct KuzmemoApp: App {
 /// The app has no Dock icon while only the menu bar item is in use; it becomes a regular app while a real
 /// window is open and returns to the background when the last one closes.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var terminationPending = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(
@@ -61,28 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The Silero helper and the program of the cloned voice are child processes: stop them (briefly) before the app goes away.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !terminationPending else { return .terminateLater }
-        terminationPending = true
         Task { @MainActor in
-            defer { terminationPending = false }
             let voice = AppEnvironment.shared.voice!
             voice.beginTermination() // the sound comes back before the slow part, and no new recording can start during it
-            let kept = await AppEnvironment.shared.prepareToQuit()
-            if !kept {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = tr("Some recordings or settings could not be saved")
-                alert.informativeText = tr("Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway.")
-                alert.addButton(withTitle: tr("Stay in Kuzmemo"))
-                alert.addButton(withTitle: tr("Quit anyway"))
-                guard alert.runModal() == .alertSecondButtonReturn else {
-                    voice.cancelTermination()
-                    AppEnvironment.shared.settings.resumeSaving()
-                    NSApp.reply(toApplicationShouldTerminate: false)
-                    return
-                }
-            }
-            AppEnvironment.shared.finishTermination()
+            await AppEnvironment.shared.prepareToQuit()
             await voice.speech.silero.shutDown()
             voice.speech.clone.shutDown()
             try? await AppEnvironment.shared.store.checkpoint() // the file alone holds everything after a clean quit

@@ -66,15 +66,6 @@ enum NotificationRequestBuilder {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         var parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireAt)
-        // Repeated wall-clock readings cannot identify the first/second occurrence of a DST fold. Preserve the planner's
-        // instant for those readings, rather than letting UNCalendarNotificationTrigger choose the other one.
-        let dayStart = calendar.startOfDay(for: fireAt).addingTimeInterval(-1)
-        let clock = DateComponents(hour: parts.hour, minute: parts.minute, second: parts.second)
-        let first = calendar.nextDate(after: dayStart, matching: clock, matchingPolicy: .strict, repeatedTimePolicy: .first)
-        let last = calendar.nextDate(after: dayStart, matching: clock, matchingPolicy: .strict, repeatedTimePolicy: .last)
-        if first != last {
-            return UNTimeIntervalNotificationTrigger(timeInterval: max(1, fireAt.timeIntervalSince(now)), repeats: false)
-        }
         // Components carry their calendar: without it the system reads year 2026 in the person's own calendar (Buddhist,
         // Japanese ...) and the alert never fires. The time zone is left out on purpose: a "15:00" stays 15:00 wherever the Mac is.
         parts.calendar = Calendar(identifier: .gregorian)

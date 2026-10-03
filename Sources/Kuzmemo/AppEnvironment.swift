@@ -123,7 +123,6 @@ final class AppEnvironment {
         version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
         let opened: (store: Store, outcome: DatabaseRecovery.Outcome)
         do {
-            try PrivateFiles.directory(paths.support)
             opened = try Store.openRecovering(at: paths.database, backups: paths.backups, clock: clock)
         } catch {
             Self.explainAndQuit(unopenable: paths.database, error: error)
@@ -158,15 +157,13 @@ final class AppEnvironment {
         exit(1)
     }
 
-    /// Save recordings and recent preferences before deciding whether quitting is safe. The control socket stays available
-    /// until termination is approved, so cancelling a quit leaves the app usable.
-    func prepareToQuit() async -> Bool {
-        let recordingsKept = await voice?.awaitAdmissions() ?? true
-        let settingsKept = await settings.flush()
-        return recordingsKept && settingsKept
+    /// The app is quitting: the control socket goes away (a stale file would make a script believe the app is still there) and
+    /// preferences changed a moment ago are saved.
+    func prepareToQuit() async {
+        controlServer?.stop()
+        await voice?.awaitAdmissions() // a recording that has just ended is written before the app goes
+        await settings.flush()
     }
-
-    func finishTermination() { controlServer?.stop() }
 
     /// The system time zone changed (a flight, or the automatic setting): "today", the alerts and the calendar are worked out
     /// again. The clock follows the system zone, but nothing else would notice that a day had begun somewhere else.

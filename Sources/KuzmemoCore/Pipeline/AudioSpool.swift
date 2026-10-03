@@ -12,11 +12,10 @@ public struct AudioSpool: Sendable {
 
     /// Writes the samples atomically and returns the file's path.
     public func write(_ samples: [Float], name: String) throws -> String {
-        try PrivateFiles.directory(directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let url = directory.appendingPathComponent("\(name).f32")
         let data = samples.withUnsafeBytes { Data($0) }
         try data.write(to: url, options: .atomic)
-        try PrivateFiles.file(url)
         return url.path
     }
 

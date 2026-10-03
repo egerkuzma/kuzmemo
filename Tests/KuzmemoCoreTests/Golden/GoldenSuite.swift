@@ -244,7 +244,7 @@ enum Golden {
                     if let ref = e.ref { expect(id == ref, "target \(id), expected \(ref)") }
                     if let date = e.date { expect(changes.date == LocalDate(date), "date \(changes.date.map(\.description) ?? "nil"), expected \(date)") }
                     if let time = e.time { expect(changes.time == LocalTime(time), "time \(changes.time.map(\.description) ?? "nil"), expected \(time)") }
-                case let .moveOccurrence(id, _, newDate, newTime, _, _)?:
+                case let .moveOccurrence(id, _, newDate, newTime)?:
                     if let ref = e.ref { expect(id == ref, "target \(id), expected \(ref)") }
                     if let date = e.date { expect(newDate == LocalDate(date), "date \(newDate), expected \(date)") }
                     if let time = e.time { expect(newTime == LocalTime(time), "time \(newTime.map(\.description) ?? "nil"), expected \(time)") }

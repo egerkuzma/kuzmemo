@@ -51,7 +51,6 @@ public struct MutationPlan: Equatable, Codable, Sendable {
 }
 
 public struct NewItem: Equatable, Codable, Sendable {
-    public var scheduledAt: Int64?
     public var kind: ItemKind
     public var title: String
     public var details: String?
@@ -64,7 +63,7 @@ public struct NewItem: Equatable, Codable, Sendable {
 
     public init(
         kind: ItemKind, title: String, details: String? = nil, keywords: String = "", date: LocalDate? = nil,
-        time: LocalTime? = nil, durationMin: Int? = nil, approximate: Bool = false, recurrence: Recurrence? = nil, scheduledAt: Int64? = nil
+        time: LocalTime? = nil, durationMin: Int? = nil, approximate: Bool = false, recurrence: Recurrence? = nil
     ) {
         self.kind = kind
         self.title = title
@@ -75,18 +74,11 @@ public struct NewItem: Equatable, Codable, Sendable {
         self.durationMin = durationMin
         self.approximate = approximate
         self.recurrence = recurrence
-        self.scheduledAt = scheduledAt
     }
 }
 
 /// Fields to change on an existing item. `nil` leaves a field as it is.
 public struct ItemChanges: Equatable, Codable, Sendable {
-    public enum Field: String, Codable, Hashable, Sendable {
-        case date, time, details, durationMin = "duration_min", recurrence, keywords
-    }
-    /// Optional for backward-compatible decoding of already saved plans.
-    public var clear: Set<Field>?
-    public var scheduledAt: Int64?
     public var kind: ItemKind?
     public var title: String?
     public var details: String?
@@ -98,8 +90,7 @@ public struct ItemChanges: Equatable, Codable, Sendable {
 
     public init(
         kind: ItemKind? = nil, title: String? = nil, details: String? = nil, keywords: String? = nil,
-        date: LocalDate? = nil, time: LocalTime? = nil, durationMin: Int? = nil, recurrence: Recurrence? = nil,
-        clear: Set<Field>? = nil, scheduledAt: Int64? = nil
+        date: LocalDate? = nil, time: LocalTime? = nil, durationMin: Int? = nil, recurrence: Recurrence? = nil
     ) {
         self.kind = kind
         self.title = title
@@ -109,8 +100,6 @@ public struct ItemChanges: Equatable, Codable, Sendable {
         self.time = time
         self.durationMin = durationMin
         self.recurrence = recurrence
-        self.clear = clear.flatMap { $0.isEmpty ? nil : $0 }
-        self.scheduledAt = scheduledAt
     }
 
     public var isEmpty: Bool { self == ItemChanges() }
@@ -128,19 +117,6 @@ public struct ItemChanges: Equatable, Codable, Sendable {
     }
 
     func apply(to item: inout Item) {
-        if date != nil || time != nil || clear?.contains(.date) == true || clear?.contains(.time) == true {
-            item.scheduledAt = scheduledAt
-        }
-        for field in clear ?? [] {
-            switch field {
-            case .date: item.date = nil
-            case .time: item.time = nil
-            case .details: item.details = nil
-            case .durationMin: item.durationMin = nil
-            case .recurrence: item.recurrence = nil
-            case .keywords: item.keywords = ""
-            }
-        }
         if let kind { item.kind = kind }
         if let title { item.title = title }
         if let details { item.details = details }
@@ -149,12 +125,6 @@ public struct ItemChanges: Equatable, Codable, Sendable {
         if let time { item.time = time }
         if let durationMin { item.durationMin = durationMin }
         if let recurrence { item.recurrence = recurrence }
-        if item.date == nil {
-            item.time = nil
-            item.recurrence = nil
-        }
-        if item.time == nil || item.kind != .event { item.durationMin = nil }
-        if item.time == nil { item.remindLeadMin = 0 }
     }
 }
 
@@ -163,7 +133,7 @@ public enum PlannedAction: Equatable, Codable, Sendable {
     /// Edits a one-off item, or the whole series of a recurring one.
     case update(itemID: String, changes: ItemChanges)
     /// Moves one occurrence of a recurring item to another date/time.
-    case moveOccurrence(itemID: String, occurrenceDate: LocalDate, newDate: LocalDate, newTime: LocalTime?, clearsTime: Bool? = nil, scheduledAt: Int64? = nil)
+    case moveOccurrence(itemID: String, occurrenceDate: LocalDate, newDate: LocalDate, newTime: LocalTime?)
     case complete(itemID: String, occurrenceDate: LocalDate?)
     case reopen(itemID: String, occurrenceDate: LocalDate?)
     case delete(itemID: String)

@@ -704,12 +704,3 @@
 "Discard this phrase?" = "Отбросить эту фразу?";
 "The phrase %1$@ will be removed from the list and cannot be brought back." = "Фраза %1$@ пропадёт из списка, вернуть её будет нельзя.";
 "The recording will be removed from the list and cannot be brought back." = "Запись пропадёт из списка, вернуть её будет нельзя.";
-
-/* Persistence and field removal */
-"Should I remove these fields or set new values?" = "Убрать эти поля или задать новые значения?";
-"Settings could not be loaded or saved: %1$@" = "Не удалось загрузить или сохранить настройки: %1$@";
-"Recording settings are still loading. Please try again." = "Настройки записи ещё загружаются. Попробуй снова.";
-"Some recordings or settings could not be saved" = "Некоторые записи или настройки не удалось сохранить";
-"Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway." = "При выходе сейчас они могут потеряться. Останься в Kuzmemo, чтобы повторить сохранение, или выйди без сохранения.";
-"Stay in Kuzmemo" = "Остаться в Kuzmemo";
-"Quit anyway" = "Выйти без сохранения";

@@ -42,14 +42,6 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             SettingsTabBar(selection: $env.settingsTab)
             Divider()
-            if let problem = env.settings.lastReadError ?? env.settings.lastSaveError {
-                HStack {
-                    Text(verbatim: tr("Settings could not be loaded or saved: %1$@", problem)).foregroundStyle(.red)
-                    Spacer()
-                    Button(tr("Retry")) { Task { await env.settings.load(); _ = await env.settings.flush(); env.settings.resumeSaving() } }
-                }
-                .font(.callout).padding()
-            }
             Self.page(env.settingsTab, env: env)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -61,10 +53,10 @@ struct SettingsView: View {
     @ViewBuilder static func page(_ tab: Tab, env: AppEnvironment) -> some View {
         switch tab {
         case .general: GeneralSettingsTab(env: env)
-        case .recording: RecordingSettingsTab(env: env).disabled(!env.settings.isLoaded(.recording))
-        case .recognition: RecognitionSettingsTab(env: env).disabled(!env.settings.isLoaded(.recognition))
-        case .speech: SpeechSettingsTab(env: env).disabled(!env.settings.isLoaded(.speech))
-        case .notifications: NotificationsSettingsTab(env: env).disabled(!env.settings.isLoaded(.notifications))
+        case .recording: RecordingSettingsTab(env: env)
+        case .recognition: RecognitionSettingsTab(env: env)
+        case .speech: SpeechSettingsTab(env: env)
+        case .notifications: NotificationsSettingsTab(env: env)
         case .glossary: GlossarySettingsTab(env: env)
         case .data: DataSettingsTab(env: env)
         }

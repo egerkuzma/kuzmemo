@@ -436,39 +436,3 @@ struct UtteranceProcessorTests {
         #expect(memo.anchorLocal == "2026-09-28 23:50")
     }
 }
-
-extension UtteranceProcessorTests {
-    @Test func anUnkeptAdmissionCanBeSavedAfterItsWorkerFailsWithoutMakingAnotherMemo() async throws {
-        let r = try rig(stt: ScriptedTranscriber([.fail(.transcriptionFailed("busy"))]))
-        defer { try? FileManager.default.removeItem(at: r.directory) }
-        try Data("not a folder".utf8).write(to: r.directory)
-        let samples = recording()
-        let admitted = await r.utterances.admit(Utterance(samples: samples))
-        #expect(admitted.failure != nil)
-        _ = await r.utterances.process(admitted: admitted.memo, samples: samples)
-        #expect(await r.utterances.isKept(memoID: admitted.memo.id) == false)
-        try FileManager.default.removeItem(at: r.directory)
-        try await r.utterances.keepAfterFailure(admitted.memo, samples: samples)
-        #expect(await r.utterances.isKept(memoID: admitted.memo.id))
-        let kept = try #require(try await r.store.memo(id: admitted.memo.id))
-        #expect(kept.status == .failed && kept.audioPath != nil)
-        #expect(try r.spool.read(path: kept.audioPath!) == samples)
-        #expect(try await r.store.overview().memos == 1)
-        try await r.utterances.keepAfterFailure(admitted.memo, samples: samples)
-        #expect(try await r.store.overview().memos == 1 && r.spool.files().count == 1)
-    }
-
-    @Test func aLateAdmissionRetryNeverResurrectsErasedMemos() async throws {
-        let r = try rig(stt: ScriptedTranscriber([.fail(.transcriptionFailed("busy"))]))
-        defer { try? FileManager.default.removeItem(at: r.directory) }
-        try Data("not a folder".utf8).write(to: r.directory)
-        let samples = recording()
-        let admitted = await r.utterances.admit(Utterance(samples: samples))
-        _ = await r.utterances.process(admitted: admitted.memo, samples: samples)
-        try await r.store.eraseEntriesAndHistory()
-        try FileManager.default.removeItem(at: r.directory)
-        try await r.utterances.keepAfterFailure(admitted.memo, samples: samples)
-        #expect(try await r.store.memo(id: admitted.memo.id) == nil)
-        #expect(r.spool.files().isEmpty)
-    }
-}

@@ -155,15 +155,6 @@ struct ClaudeProviderTests {
         await #expect(throws: LLMError.invalidEnvelope("oops, not json\n")) { try await garbage.provider().complete(request()) }
     }
 
-    @Test func runawayOutputIsBoundedAndTheProcessStops() async throws {
-        let fake = try FakeClaude(body: "head -c 10485760 /dev/zero; sleep 30")
-        let started = Date()
-        await #expect(throws: LLMError.processFailed(exitCode: -3, stderr: "CLI output exceeded the size limit")) {
-            try await fake.provider().complete(request())
-        }
-        #expect(Date().timeIntervalSince(started) < 8)
-    }
-
     @Test func structuredAnswerFallsBackToJSONInTheResultText() async throws {
         let body = #"""
         cat <<'JSON'
