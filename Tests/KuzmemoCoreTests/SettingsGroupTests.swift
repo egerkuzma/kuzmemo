@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 @testable import KuzmemoCore
 
@@ -49,5 +50,24 @@ struct SettingsGroupTests {
         #expect(recording.holdThreshold == 0.15 && recording.handsFreeSilence == 8 && recording.maxSeconds == 20)
         try await store.setSetting("not json at all", for: RecognitionSettings.storageKey)
         #expect(await store.settings(RecognitionSettings.self) == RecognitionSettings())
+    }
+
+    /// "Nothing stored" and "a damaged value" are the defaults; "the database could not be read" is not: a caller that saves the
+    /// group later would otherwise write the defaults over the person's stored choices (notifications switched back on, say).
+    @Test func aReadThatFailsIsAnErrorNotTheDefaults() async throws {
+        let store = try makeStore()
+        var off = NotificationSettings()
+        off.enabled = false
+        try await store.save(settings: off)
+        #expect(try await store.loadSettings(NotificationSettings.self).enabled == false)
+        #expect(try await store.loadSettings(SpeechSettings.self) == SpeechSettings()) // nothing stored: the defaults, no error
+        try await store.setSetting("not json at all", for: SpeechSettings.storageKey)
+        #expect(try await store.loadSettings(SpeechSettings.self) == SpeechSettings()) // damaged: the defaults, no error
+
+        try await store.writer.write { db in try db.execute(sql: "ALTER TABLE kv RENAME TO kv_gone") } // the read fails
+        await #expect(throws: (any Error).self) { try await store.loadSettings(NotificationSettings.self) }
+        #expect(await store.settings(NotificationSettings.self).enabled == true) // the forgiving read still answers for a display
+        try await store.writer.write { db in try db.execute(sql: "ALTER TABLE kv_gone RENAME TO kv") }
+        #expect(try await store.loadSettings(NotificationSettings.self).enabled == false) // and the stored choice was never touched
     }
 }

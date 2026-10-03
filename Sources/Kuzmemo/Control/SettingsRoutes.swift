@@ -16,7 +16,10 @@ enum SettingsRoutes {
             "notifications": object(env.settings.notifications),
         ]
         let interface: [String: Any] = ["preference": env.languagePreference.rawValue, "language": env.language.rawValue]
-        return .json(["stored": stored, "live": live, "interface": interface, "loaded": env.settings.loaded])
+        return .json([
+            "stored": stored, "live": live, "interface": interface, "loaded": env.settings.loaded,
+            "saveError": env.settings.lastSaveError as Any? ?? NSNull(),
+        ])
     }
 
     /// `{"speech": {"rate": 0.4}, "recording": {"maxSeconds": 90}, "interface": {"language": "english"}}`: named fields

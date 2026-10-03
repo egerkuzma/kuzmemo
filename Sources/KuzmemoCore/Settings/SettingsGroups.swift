@@ -8,8 +8,17 @@ public protocol SettingsGroup: Codable, Equatable, Sendable {
 }
 
 extension Store {
+    /// The stored group, or the defaults when nothing is stored or the stored value cannot be read as this group. A read that
+    /// fails (the database cannot be read right now) is the defaults too: for whoever only needs something to show.
     public func settings<T: SettingsGroup>(_ type: T.Type = T.self) async -> T {
-        guard let text = try? await setting(T.storageKey), let data = text.data(using: .utf8),
+        (try? await loadSettings(type)) ?? T()
+    }
+
+    /// Like `settings`, but a read that fails is an error, not the defaults. "Nothing stored" and "a damaged value" still fall back
+    /// to the defaults field by field, which is what they mean; "could not read" means nothing about what is stored, and a
+    /// caller that would save the group later must not take the defaults for the person's choices.
+    public func loadSettings<T: SettingsGroup>(_ type: T.Type = T.self) async throws -> T {
+        guard let text = try await setting(T.storageKey), let data = text.data(using: .utf8),
               let value = try? JSONDecoder().decode(T.self, from: data) else { return T() }
         return value
     }
