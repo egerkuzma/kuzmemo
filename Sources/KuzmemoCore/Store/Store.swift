@@ -86,7 +86,8 @@ public struct Store: Sendable {
 
     // MARK: - Writes
 
-    /// Runs `body` in one transaction and journals every row it touches. Returns `nil` when nothing changed.
+    /// Runs `body` in one transaction and journals every row it touches. Returns `nil` when nothing changed. With a `memoID`
+    /// the change is what that phrase meant, and the phrase is marked as applied in the same transaction.
     @discardableResult
     public func perform(
         label: String, memoID: String? = nil, _ body: @escaping @Sendable (Mutator) throws -> Void
@@ -107,14 +108,24 @@ public struct Store: Sendable {
             if let memoID, erased.contains(memoID) { throw StoreError.memoErased(memoID) }
             let mutator = Mutator(db: db, nowMs: stamp, makeID: makeID)
             let value = try body(mutator)
-            guard !mutator.pending.isEmpty else { return (nil, value) }
-            let op = Op(id: makeID(), memoID: memoID, createdAt: stamp, label: label)
-            try op.insert(db)
-            for (index, change) in mutator.pending.enumerated() {
-                try OpChange(
-                    opID: op.id, seq: index, tbl: change.table, rowID: change.rowID,
-                    beforeJSON: change.before, afterJSON: change.after
-                ).insert(db)
+            var op: Op?
+            if !mutator.pending.isEmpty {
+                let made = Op(id: makeID(), memoID: memoID, createdAt: stamp, label: label)
+                try made.insert(db)
+                for (index, change) in mutator.pending.enumerated() {
+                    try OpChange(
+                        opID: made.id, seq: index, tbl: change.table, rowID: change.rowID,
+                        beforeJSON: change.before, afterJSON: change.after
+                    ).insert(db)
+                }
+                op = made
+            }
+            // The phrase and its changes land together. Marked afterwards, in a write of its own, a phrase whose marking failed
+            // looked unfinished: recovery ran it again, and when the person had undone its changes meanwhile, made them anew.
+            if let memoID {
+                try db.execute(
+                    sql: "UPDATE memos SET status = ?, op_id = ? WHERE id = ?", arguments: [MemoStatus.applied.rawValue, op?.id, memoID]
+                )
             }
             return (op, value)
         }

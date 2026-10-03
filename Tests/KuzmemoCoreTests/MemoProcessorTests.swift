@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 @testable import KuzmemoCore
 
@@ -122,8 +123,9 @@ struct MemoProcessorTests {
         #expect(try await store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 0))
     }
 
-    /// "Save as a note" makes the note and then marks the phrase as dealt with, in two writes. If the app quits between them,
-    /// the phrase is still "asking" at the next launch, and closing orphaned questions made the same note a second time.
+    /// "Save as a note" used to make the note and then mark the phrase as dealt with, in two writes. If the app quit between them,
+    /// the phrase was still "asking" at the next launch, and closing orphaned questions made the same note a second time. The
+    /// store now marks the phrase in the note's own transaction; a database written by an older version can still be in that state.
     @Test func savingAPhraseAsANoteTwiceAfterACrashBetweenTheWritesMakesOneNote() async throws {
         let store = try makeStore()
         let provider = ScriptedProvider([])
@@ -133,9 +135,10 @@ struct MemoProcessorTests {
         )
         try await store.save(memo: Memo(id: "asking", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice,
                                         status: .clarifying, transcriptRaw: "позвонить Дмитрию"))
-        // what the first run did before the app was gone: the note and its journal entry, but not the memo's new status
+        // what the older version did before the app was gone: the note and its journal entry, but not the memo's new status
         let plan = MutationPlan(actions: [.create(NewItem(kind: .note, title: "позвонить Дмитрию"))])
         let first = try await store.apply(plan, source: .voice, memoID: "asking", label: "Note from a phrase")
+        try await store.writer.write { db in try db.execute(sql: "UPDATE memos SET status = 'clarifying', op_id = NULL WHERE id = 'asking'") }
         #expect(try await store.memo(id: "asking")?.status == .clarifying)
 
         let outcomes = await processor.closeOrphanedQuestions() // the next launch
@@ -376,18 +379,70 @@ struct MemoProcessorTests {
         #expect(try await store.unfinishedMemos().map(\.id).sorted() == ["later", "recording", "waiting"])
     }
 
+    @Test func aPhraseIsMarkedAppliedInTheTransactionOfItsChanges() async throws {
+        let (_, store, _) = try processor([])
+        try await store.save(memo: Memo(id: "m", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow",
+                                        inputKind: .voice, status: .interpreted, transcriptRaw: "напомни"))
+        let plan = MutationPlan(actions: [.create(NewItem(kind: .reminder, title: "Позвонить", date: LocalDate("2026-09-30")))])
+        let applied = try await store.apply(plan, source: .voice, memoID: "m", label: "Create entry")
+        // No write of the processor's own in between: the row says "applied" the moment the changes are committed.
+        let memo = try #require(try await store.memo(id: "m"))
+        #expect(memo.status == .applied && memo.opID == applied.op?.id && memo.opID != nil)
+    }
+
+    /// The state an older version could leave behind: the changes are in, the phrase still says "interpreted".
+    private func landChangesWithoutMarking(_ store: Store, memoID: String) async throws -> Op {
+        let landed = try #require(try await store.perform(label: "before the crash", memoID: memoID) { m in
+            try m.insert(Item(id: "", kind: .reminder, title: "Уже создано", date: LocalDate("2026-09-30"), source: .voice, memoID: memoID))
+        })
+        try await store.writer.write { db in
+            try db.execute(sql: "UPDATE memos SET status = 'interpreted', op_id = NULL WHERE id = ?", arguments: [memoID])
+        }
+        return landed
+    }
+
     @Test func aMemoWhoseChangesAlreadyLandedIsNotAppliedTwice() async throws {
         let (processor, store, provider) = try processor([.json(createAnswer)])
         try await store.save(memo: Memo(id: "crashed", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow",
                                         inputKind: .voice, status: .interpreted, transcriptRaw: "напомни"))
-        let landed = try #require(try await store.perform(label: "before the crash", memoID: "crashed") { m in
-            try m.insert(Item(id: "", kind: .reminder, title: "Уже создано", date: LocalDate("2026-09-30"), source: .voice, memoID: "crashed"))
-        })
+        let landed = try await landChangesWithoutMarking(store, memoID: "crashed")
         let outcomes = await processor.recoverUnfinished()
         #expect(outcomes.count == 1 && provider.requests.isEmpty)
         let memo = try #require(try await store.memo(id: "crashed"))
         #expect(memo.status == .applied && memo.opID == landed.id)
         #expect(try await store.items(on: LocalDate("2026-09-30")!).count == 1)
+    }
+
+    @Test func aMemoWhoseChangesWereUndoneIsNotAppliedAgainByRecovery() async throws {
+        let (processor, store, provider) = try processor([.json(createAnswer)])
+        try await store.save(memo: Memo(id: "crashed", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow",
+                                        inputKind: .voice, status: .interpreted, transcriptRaw: "напомни"))
+        let landed = try await landChangesWithoutMarking(store, memoID: "crashed")
+        try await store.undo(opID: landed.id) // the person did not want it after all
+        #expect(try await store.items(on: LocalDate("2026-09-30")!).isEmpty)
+        let outcomes = await processor.recoverUnfinished()
+        // The phrase was executed once; that it was undone is not a reason to execute it again.
+        #expect(outcomes.count == 1 && provider.requests.isEmpty)
+        let memo = try #require(try await store.memo(id: "crashed"))
+        #expect(memo.status == .applied && memo.opID == landed.id)
+        #expect(try await store.items(on: LocalDate("2026-09-30")!).isEmpty)
+    }
+
+    @Test func aQuestionWhoseNoteWasUndoneGetsNoSecondNote() async throws {
+        let (processor, store, _) = try processor([])
+        try await store.save(memo: Memo(id: "asked", createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow",
+                                        inputKind: .voice, status: .clarifying, transcriptRaw: "созвон в пятницу"))
+        let first = try #require(await processor.keepAsNote(memoID: "asked"))
+        guard case let .applied(result) = first.kind, let op = result.op else { Issue.record("expected the note"); return }
+        try await store.writer.write { db in // an older version: the note is in, the phrase still asks
+            try db.execute(sql: "UPDATE memos SET status = 'clarifying', op_id = NULL WHERE id = 'asked'")
+        }
+        try await store.undo(opID: op.id)
+        #expect(try await store.inbox().isEmpty)
+        let second = try #require(await processor.keepAsNote(memoID: "asked"))
+        guard case let .applied(again) = second.kind else { Issue.record("expected it to be closed as dealt with"); return }
+        #expect(again.changes.isEmpty && again.op?.id == op.id)
+        #expect(try await store.inbox().isEmpty) // the undone note did not come back
     }
 
     @Test func relativeDatesUseTheMomentTheUserSpokeNotTheRetryTime() async throws {

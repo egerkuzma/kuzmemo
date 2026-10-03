@@ -118,10 +118,10 @@ public actor MemoProcessor {
         guard inFlight.insert(memoID).inserted else { return nil }
         defer { inFlight.remove(memoID) }
         guard var memo = try? await store.memo(id: memoID), memo.status != .applied, memo.opID == nil else { return nil }
-        // The note and the phrase's new status are two writes. If the app was gone between them, the note exists and the phrase
-        // still looks unanswered: it is marked as dealt with, and no second note is made (the phrase's journal entry says so, as
-        // in `process`).
-        if let op = try? await store.op(forMemo: memo.id), op.undoneAt == nil {
+        // A phrase that has a journal entry was dealt with (the note was made, and perhaps undone since): it is marked so, and
+        // no second note is made. The store now marks a phrase together with its changes; this covers phrases written before
+        // it did, as in `process`.
+        if let op = try? await store.op(forMemo: memo.id) {
             memo.status = .applied
             memo.opID = op.id
             memo.failReason = nil
@@ -284,8 +284,10 @@ public actor MemoProcessor {
             return ProcessOutcome(memo: memo, kind: .unknown, interpretation: nil)
         }
 
-        // A crash between "changes committed" and "memo marked applied" must not apply the phrase twice.
-        if let op = try? await store.op(forMemo: memo.id), op.undoneAt == nil {
+        // A phrase that has a journal entry was executed, whether or not the person has undone it since: running it again would
+        // make its changes twice, or make them anew after the undo. (The store marks a phrase applied in the transaction of its
+        // changes; a phrase written by an older version can still be found in this state.)
+        if let op = try? await store.op(forMemo: memo.id) {
             memo.status = .applied
             memo.opID = op.id
             try? await store.save(memo: memo)
