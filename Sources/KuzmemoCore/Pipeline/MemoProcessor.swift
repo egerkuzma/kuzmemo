@@ -309,7 +309,7 @@ public actor MemoProcessor {
         // yes applies it, exactly as it was, without the model: a model asked to make the plan up again could name other
         // entries, and one that misread the no could come back with the deletions. Anything in between goes to the model as a
         // new command, with the limits in force (so the model's answer is asked about again if it is still a bulk change).
-        if let followUp, followUp.askedToConfirmBulk {
+        if let followUp, followUp.askedToConfirm {
             if FollowUp.declines(transcript) {
                 memo.llmModel = "local-router"
                 memo.intent = Intent.unknown.rawValue

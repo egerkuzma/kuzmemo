@@ -518,6 +518,8 @@
 "Works without extra permissions and behaves like Fn." = "Работает без дополнительных разрешений, действует так же, как Fn.";
 "Yes, change" = "Да, изменить";
 "Yes, delete" = "Да, удалить";
+"Delete the whole series “%1$@”?" = "Удалить всю серию «%1$@»?";
+"Only this occurrence" = "Только это вхождение";
 "You have %1$@ overdue:" = "Просрочено %1$@:";
 "You have %1$@ repeating:" = "Повторяющихся %1$@:";
 "“%1$@”" = "«%1$@»";

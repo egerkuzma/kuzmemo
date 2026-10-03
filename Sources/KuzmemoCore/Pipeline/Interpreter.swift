@@ -19,11 +19,13 @@ public struct FollowUp: Equatable, Sendable {
         question.lowercased().range(of: #"во сколько|в какое время|какое время|на какое время|at what time|what time|which time"#, options: .regularExpression) != nil
     }
 
-    /// The question was the app's own "Delete 3 entries?" or "Change 4 entries?" (in either language), asked about a plan that
-    /// is kept with the question. A plain yes applies that plan and a plain no drops it, both without the model (`affirms`,
-    /// `declines`, decided by `MemoProcessor`); anything else is a new command that meets the limits again.
-    public var askedToConfirmBulk: Bool {
+    /// The question was the app's own "Delete 3 entries?", "Change 4 entries?" or "Delete the whole series “X”?" (in either
+    /// language), asked about a plan that is kept with the question. A plain yes applies that plan and a plain no drops it, both
+    /// without the model (`affirms`, `declines`, decided by `MemoProcessor`); anything else is a new command that meets the
+    /// limits again.
+    public var askedToConfirm: Bool {
         question.wholeMatch(of: #/(Delete|Change|Удалить|Изменить) \d+ (?:entr(?:y|ies)|запис(?:ь|и|ей))(?:: .+)?\?/#) != nil
+            || question.wholeMatch(of: #/(Delete the whole series|Удалить всю серию) .+\?/#) != nil
     }
 
     /// A short answer that only says yes. Every word has to be a known one: "yes, but not the third", "да, 2" (a number: which

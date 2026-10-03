@@ -27,7 +27,7 @@ private func item(_ id: String, _ title: String, _ date: String?, _ time: String
 }
 
 private func entry(_ item: Item, occurrence: String? = nil) -> AgendaEntry {
-    AgendaEntry(item: item, date: item.date ?? LocalDate("2026-09-28")!, time: item.time, isDone: false,
+    AgendaEntry(item: item, date: occurrence.flatMap(LocalDate.init) ?? item.date ?? LocalDate("2026-09-28")!, time: item.time, isDone: false,
                 occurrenceDate: occurrence.flatMap(LocalDate.init), wasMoved: false)
 }
 
@@ -182,11 +182,12 @@ struct ValidatorCreateTests {
 
     @Test func theAppsOwnBulkQuestionIsRecognisedInBothLanguages() {
         for question in ["Delete 3 entries?", "Delete 1 entry?", "Change 4 entries?", "Удалить 3 записи?", "Удалить 5 записей?", "Удалить 1 запись?", "Изменить 4 записи?",
-                         "Удалить 3 записи: «Созвон», «Ставки?», «Банк»?", "Delete 2 entries: “Call”, “Rates”?"] {
-            #expect(FollowUp(previous: "x", question: question).askedToConfirmBulk, "question '\(question)'")
+                         "Удалить 3 записи: «Созвон», «Ставки?», «Банк»?", "Delete 2 entries: “Call”, “Rates”?",
+                         "Удалить всю серию «Планёрка»?", "Delete the whole series “Stand-up”?"] {
+            #expect(FollowUp(previous: "x", question: question).askedToConfirm, "question '\(question)'")
         }
         for question in ["На какую дату напомнить?", "Во сколько встреча?", "Удалить запись «Созвон»?", "Delete the call with Anna?", "Какую пятницу имеешь в виду?"] {
-            #expect(!FollowUp(previous: "x", question: question).askedToConfirmBulk, "question '\(question)'")
+            #expect(!FollowUp(previous: "x", question: question).askedToConfirm, "question '\(question)'")
         }
     }
 
@@ -196,7 +197,10 @@ struct ValidatorCreateTests {
         let series = item("s1", "Планёрка", "2026-09-28", "10:00", recurrence: Recurrence(freq: .daily))
         let entries = ["2026-09-29", "2026-09-30", "2026-10-01"].map { entry(series, occurrence: $0) }
         let json = #"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2},{"op":"delete","ref":3}]}"#
-        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected one deletion"); return }
+        // one entry, so no bulk question; a series, so the question about the whole series, with the single deletion as its plan
+        let asked = try #require(clarification(try await validate(json, entries: entries)))
+        #expect(asked.question == "Удалить всю серию «Планёрка»?")
+        let plan = try #require(asked.pending)
         #expect(plan.actions == [.delete(itemID: "s1")])
         #expect(!plan.warnings.isEmpty)
     }
@@ -312,6 +316,38 @@ struct ValidatorTargetTests {
         let rename = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Стендап"}}]}"#, entries: entries)
         guard case let .mutate(renamePlan) = rename else { Issue.record("expected mutate"); return }
         #expect(renamePlan.actions == [.update(itemID: "w1", changes: ItemChanges(title: "Стендап"))])
+    }
+
+    /// A new time for one occurrence together with a new title: the time moves that occurrence, the title (which has no
+    /// per-occurrence home) changes the series. It used to make one update of the series with the date and time in it.
+    @Test func aMoveOfAnOccurrenceWithOtherChangesIsAMoveAndASeriesEdit() async throws {
+        let entries = [entry(weekly, occurrence: "2026-10-05")]
+        let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Стендап","when":{"mode":"none","time":"11:00"}}}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected mutate"); return }
+        #expect(plan.actions == [
+            .moveOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!, newDate: LocalDate("2026-10-05")!, newTime: LocalTime("11:00")),
+            .update(itemID: "w1", changes: ItemChanges(title: "Стендап")),
+        ])
+        #expect(plan.expectedVersions == ["w1": 1])
+    }
+
+    /// Deleting a repeating entry deletes the whole series, which the model may have chosen for one occurrence the person named:
+    /// the person is asked, with the series named, and the plan is kept with the question. A one-off is deleted without a question.
+    @Test func deletingASeriesIsAskedAboutFirst() async throws {
+        let entries = [entry(weekly, occurrence: "2026-10-05"), entry(meeting)]
+        let asked = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1}]}"#, entries: entries)))
+        #expect(asked.question == "Удалить всю серию «Планёрка»?" && asked.reason == .destructiveConfirm)
+        #expect(asked.options == ["Да, удалить", "Только это вхождение", "Нет"])
+        #expect(asked.pending?.actions == [.delete(itemID: "w1")] && asked.pending?.expectedVersions == ["w1": 1])
+        guard case let .mutate(oneOff) = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":2}]}"#, entries: entries) else { Issue.record("expected the deletion"); return }
+        #expect(oneOff.actions == [.delete(itemID: "m1")])
+        // a series among two deletions: the question names both, without the per-occurrence option
+        let both = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1},{"op":"delete","ref":2}]}"#, entries: entries)))
+        #expect(both.question == "Удалить 2 записи: «Встреча с Дмитрием», «Планёрка»?", "\(both.question)")
+        #expect(both.options == ["Да, удалить", "Нет"] && both.pending?.actions.count == 2)
+        // skipping an occurrence is what the model answers to "only this one", and needs no question
+        guard case let .mutate(skip) = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"skip_occurrence","ref":1}]}"#, entries: entries) else { Issue.record("expected the skip"); return }
+        #expect(skip.actions == [.skipOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!)])
     }
 
     /// The model tends to repeat the entry's title or kind beside the one thing that differs. A repeated field is not a change:

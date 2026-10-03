@@ -85,6 +85,8 @@ public enum ActionValidator {
         var warnings: [String] = []
         /// The version of every entry a target resolved to, so that the plan is applied only to the state it was made from.
         var seenVersions: [String: Int] = [:]
+        /// The entries the targets resolved to, by id (for the questions that name them).
+        var seenItems: [String: Item] = [:]
 
         var policy: ValidationPolicy { vc.policy }
         var resolver: RelativeDateResolver { vc.resolver }
@@ -134,7 +136,7 @@ public enum ActionValidator {
             }
 
             var planned: [PlannedAction] = []
-            for action in actions { planned.append(try await plan(action)) }
+            for action in actions { planned.append(contentsOf: try await plan(action)) }
             planned = settle(planned)
             guard !planned.isEmpty else { return .unknown("no valid actions") }
             let plan = MutationPlan(
@@ -164,11 +166,21 @@ public enum ActionValidator {
                     reason: .destructiveConfirm, options: [tr("Yes, change"), tr("No")], pending: plan
                 )))
             }
+            // Deleting a repeating entry deletes the whole series, and the model may have chosen that for one occurrence the
+            // person named. The person is asked, with the series named; "only this occurrence" is an answer the model turns into a
+            // skip of that occurrence.
+            let series = Set(deleted).compactMap { seenItems[$0] }.filter { $0.recurrence != nil }
+            if let only = series.first {
+                let alone = Set(deleted).count == 1
+                let question = alone ? tr("Delete the whole series “%1$@”?", only.title) : naming(deleted, in: trCount("Delete %lld entries?", Set(deleted).count))
+                let options = alone ? [tr("Yes, delete"), tr("Only this occurrence"), tr("No")] : [tr("Yes, delete"), tr("No")]
+                throw Stop(.clarify(Clarification(question: question, reason: .destructiveConfirm, options: options, pending: plan)))
+            }
             return .mutate(plan)
         }
 
         /// "Delete 3 entries?" names the entries when there are few enough to say: "Delete 3 entries: “A”, “B”, “C”?". The person
-        /// then confirms something they can see; `FollowUp.askedToConfirmBulk` knows both forms.
+        /// then confirms something they can see; `FollowUp.askedToConfirm` knows both forms.
         func naming(_ itemIDs: [String], in question: String) -> String {
             var titles: [String] = []
             for id in Set(itemIDs).sorted() {
@@ -202,30 +214,32 @@ public enum ActionValidator {
             return result
         }
 
-        mutating func plan(_ action: ParsedAction) async throws -> PlannedAction {
+        /// One parsed action becomes one planned action, except an update that moves one occurrence of a series AND changes
+        /// its fields: that is a move of the occurrence and an edit of the series, two actions.
+        mutating func plan(_ action: ParsedAction) async throws -> [PlannedAction] {
             switch action.op {
             case .create:
                 guard let item = action.item else { throw Stop(.unknown("create without an item")) }
-                return .create(try newItem(from: item))
+                return [.create(try newItem(from: item))]
             case .update:
                 let target = try await resolveTarget(action)
                 guard let changes = action.changes else { throw Stop(.unknown("update without changes")) }
-                return try updateAction(target: target, action: action, changes: changes)
+                return try updateActions(target: target, action: action, changes: changes)
             case .complete:
                 let target = try await resolveTarget(action)
-                return .complete(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))
+                return [.complete(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))]
             case .reopen:
                 let target = try await resolveTarget(action)
-                return .reopen(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))
+                return [.reopen(itemID: target.item.id, occurrenceDate: try occurrence(for: target, action: action))]
             case .delete:
                 let target = try await resolveTarget(action)
-                return .delete(itemID: target.item.id)
+                return [.delete(itemID: target.item.id)]
             case .skipOccurrence:
                 let target = try await resolveTarget(action)
                 guard target.item.recurrence != nil, let date = target.occurrenceDate ?? action.occurrenceDate else {
                     throw Stop(.clarify(Clarification(question: tr("Which occurrence should I skip?"), reason: .ambiguousTarget)))
                 }
-                return .skipOccurrence(itemID: target.item.id, occurrenceDate: date)
+                return [.skipOccurrence(itemID: target.item.id, occurrenceDate: date)]
             }
         }
 
@@ -243,6 +257,7 @@ public enum ActionValidator {
         mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
             let target = try await findTarget(action)
             seenVersions[target.item.id] = target.item.version
+            seenItems[target.item.id] = target.item
             return target
         }
 
@@ -336,7 +351,7 @@ public enum ActionValidator {
 
         // MARK: Updates
 
-        mutating func updateAction(target: Target, action: ParsedAction, changes parsed: ParsedChanges) throws -> PlannedAction {
+        mutating func updateActions(target: Target, action: ParsedAction, changes parsed: ParsedChanges) throws -> [PlannedAction] {
             var changes = ItemChanges()
             changes.kind = parsed.kind
             changes.title = clean(parsed.title).map { String($0.prefix(policy.maxTitleLength)) }
@@ -362,20 +377,21 @@ public enum ActionValidator {
                 newTime = resolved.time
             }
 
-            let onlyTimingChanged = changes.isEmpty
-            if target.item.recurrence != nil, onlyTimingChanged, newDate != nil || newTime != nil,
-               let occurrence = target.occurrenceDate ?? action.occurrenceDate {
-                // "Move it to 18:00" keeps the day the entry is on now, "to Friday" keeps its time: for an occurrence that was
-                // moved before, that is where it stands, not the rule's day and the series' hour.
-                return .moveOccurrence(
+            if target.item.recurrence != nil, newDate != nil || newTime != nil, let occurrence = target.occurrenceDate ?? action.occurrenceDate {
+                // A new date or time for one occurrence of a series moves that occurrence, never the series: "move it to 18:00"
+                // keeps the day the entry is on now, "to Friday" keeps its time (for an occurrence that was moved before, that is
+                // where it stands, not the rule's day and the series' hour). Whatever else changes (a title, details) has no
+                // per-occurrence home and is an edit of the series, beside the move.
+                let move = PlannedAction.moveOccurrence(
                     itemID: target.item.id, occurrenceDate: occurrence,
                     newDate: newDate ?? target.shownDate ?? occurrence, newTime: newTime ?? target.shownTime ?? target.item.time
                 )
+                return changes.isEmpty ? [move] : [move, .update(itemID: target.item.id, changes: changes)]
             }
             changes.date = newDate
             changes.time = newTime
             guard !changes.isEmpty else { throw Stop(.unknown("update changes nothing")) }
-            return .update(itemID: target.item.id, changes: changes)
+            return [.update(itemID: target.item.id, changes: changes)]
         }
 
         // MARK: Dates
