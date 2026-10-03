@@ -110,8 +110,8 @@ public final class CalendarModel {
     /// scheduled before it finished: an arrow key held down) or that failed leaves the window as it was; it used to show an
     /// empty calendar, because a cancelled read throws and the error was turned into "no entries".
     public func reload() async {
-        let now = clock.localNow().date
-        today = now
+        advanceDay()
+        let now = today
         let range = grid.range
         let shown = selectedDate
         let month: [AgendaEntry], overdue: [AgendaEntry], inbox: [Item], failed: [Memo]
@@ -203,13 +203,20 @@ public final class CalendarModel {
 
     /// The day changed while the window was open (or the Mac slept through midnight): move "today" along.
     public func rolloverIfNeeded() async {
+        guard clock.localNow().date != today else { return }
+        await reload() // every reload begins with the change of day
+    }
+
+    /// Moves "today" to the current day, and with it a selection that was on today. Every reload starts here: a reload that only
+    /// updated "today" (the database observer firing after midnight, the window reopened in the morning) used to leave the
+    /// selection on yesterday, and the day timer's rollover then found nothing to do.
+    private func advanceDay() {
         let now = clock.localNow().date
         guard now != today else { return }
         let followsToday = selectedDate == today
         today = now
         if followsToday { selectedDate = now }
         if !grid.isInMonth(selectedDate) { grid = MonthGrid(containing: selectedDate) }
-        await reload()
     }
 
     private func secondsUntilMidnight() -> TimeInterval {

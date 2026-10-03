@@ -315,4 +315,30 @@ struct CalendarModelTests {
         await model.rolloverIfNeeded()
         #expect(model.today == day("2026-09-30") && model.selectedDate == day("2026-10-15"))
     }
+
+    /// After midnight the database observer (or a reopened window) may reload before the day timer fires. That reload used to
+    /// move "today" without the selection, and the rollover that followed saw nothing left to do: the window stayed on yesterday.
+    @Test func aReloadThatCrossesMidnightMovesTheSelectionAlongWithToday() async throws {
+        let clock = TickingNow(local: "2026-09-28 23:50")
+        let store = try makeStore(now: "2026-09-28 23:50")
+        let model = CalendarModel(store: store, clock: clock)
+        await model.reload()
+        #expect(model.selectedDate == day("2026-09-28"))
+
+        clock.advance(days: 1)
+        await model.reload() // a write landed just after midnight
+        #expect(model.today == day("2026-09-29") && model.selectedDate == day("2026-09-29"))
+        await model.rolloverIfNeeded() // the timer, later: nothing more to do, and nothing undone
+        #expect(model.today == day("2026-09-29") && model.selectedDate == day("2026-09-29"))
+
+        // a selection the person moved elsewhere stays where it is; one on today follows it across a month boundary too
+        model.select(day("2026-10-15"))
+        clock.advance(days: 1)
+        await model.reload()
+        #expect(model.today == day("2026-09-30") && model.selectedDate == day("2026-10-15"))
+        model.goToToday()
+        clock.advance(days: 1)
+        await model.reload()
+        #expect(model.today == day("2026-10-01") && model.selectedDate == day("2026-10-01") && model.grid.isInMonth(day("2026-10-01")))
+    }
 }

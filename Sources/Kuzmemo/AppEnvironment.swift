@@ -96,6 +96,7 @@ final class AppEnvironment {
     @ObservationIgnored private var controlServer: ControlServer?
     @ObservationIgnored private var observer: Task<Void, Never>?
     @ObservationIgnored private var timeZoneObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var wakeObserver: (any NSObjectProtocol)?
     @ObservationIgnored private var questionExpiry: Task<Void, Never>?
     @ObservationIgnored private var toastDismissal: Task<Void, Never>?
     /// Registered by a SwiftUI view that is always alive (the menu-bar label): opens the main window's scene.
@@ -189,6 +190,16 @@ final class AppEnvironment {
         calendar.startObserving()
         timeZoneObserver = NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.timeZoneChanged() }
+        }
+        // The Mac slept through midnight: the day timer fires late, and until then the window would show yesterday as today.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Task {
+                    await self.calendar.rolloverIfNeeded()
+                    await self.reloadToday()
+                }
+            }
         }
         voice = VoiceController(env: self)
         voice.start()
