@@ -326,6 +326,22 @@ struct ValidatorTargetTests {
         #expect(renamePlan.actions == [.update(itemID: "w1", changes: ItemChanges(title: "Стендап"))])
     }
 
+    /// The model tends to repeat the entry's title or kind beside the one thing that differs. A repeated field is not a change:
+    /// with it, the move of one occurrence became a change of the whole series (its start day and its time).
+    @Test func fieldsThatRepeatWhatTheEntryHasAreNotChanges() async throws {
+        let entries = [entry(weekly, occurrence: "2026-10-05")]
+        let echoed = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"kind":"event","title":"Планёрка","when":{"mode":"weekday","weekday":"wed","week_offset":0,"time":"16:00","phrase":"на среду в четыре"}}}]}"#
+        guard case let .mutate(plan) = try await validate(echoed, entries: entries) else { Issue.record("expected mutate"); return }
+        #expect(plan.actions == [.moveOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!, newDate: LocalDate("2026-09-30")!, newTime: LocalTime("16:00"))])
+
+        // a repeated title with nothing else is nothing to do, and a repeated title beside a real rename is just the rename
+        let nothing = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"title":"Планёрка","kind":"event"}}]}"#, entries: entries)
+        guard case .unknown = nothing else { Issue.record("expected nothing to change: \(nothing)"); return }
+        let oneOff = [entry(meeting)]
+        guard case let .mutate(renamed) = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"kind":"event","title":"Встреча с Анной"}}]}"#, entries: oneOff) else { Issue.record("expected mutate"); return }
+        #expect(renamed.actions == [.update(itemID: "m1", changes: ItemChanges(title: "Встреча с Анной"))])
+    }
+
     @Test func aTimeOnlyChangeKeepsTheDate() async throws {
         let entries = [entry(meeting)]
         let result = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"none","time":"16:00"}}}]}"#, entries: entries)

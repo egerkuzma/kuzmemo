@@ -91,6 +91,18 @@ public struct ItemChanges: Equatable, Sendable {
 
     public var isEmpty: Bool { self == ItemChanges() }
 
+    /// Drops the fields that would set what `item` already has. The model tends to repeat the title or the kind beside the one
+    /// thing that differs; a repeated field is not a change, and for a series it would turn the move of one occurrence into a
+    /// change of the whole series. The date and the time are left alone: where an occurrence stands is decided separately.
+    mutating func removeUnchanged(comparedWith item: Item) {
+        if kind == item.kind { kind = nil }
+        if title == item.title { title = nil }
+        if details == item.details { details = nil }
+        if keywords == item.keywords { keywords = nil }
+        if durationMin == item.durationMin { durationMin = nil }
+        if recurrence == item.recurrence { recurrence = nil }
+    }
+
     func apply(to item: inout Item) {
         if let kind { item.kind = kind }
         if let title { item.title = title }

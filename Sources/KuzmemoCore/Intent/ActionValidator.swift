@@ -347,6 +347,7 @@ public enum ActionValidator {
             if let keywords = parsed.keywords { changes.keywords = keywords.compactMap { clean($0) }.prefix(6).joined(separator: " ") }
             changes.durationMin = parsed.durationMin.flatMap { (1 ... 1440).contains($0) ? $0 : nil }
             changes.recurrence = parsed.recurrence.flatMap { sanitize($0, start: target.item.date) }
+            changes.removeUnchanged(comparedWith: target.item)
 
             var newDate: LocalDate?
             var newTime: LocalTime?
