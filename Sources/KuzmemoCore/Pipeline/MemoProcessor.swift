@@ -312,63 +312,71 @@ public actor MemoProcessor {
 
         let anchor = Self.parseAnchor(memo.anchorLocal) ?? clock.localNow()
         let timeZone = TimeZone(identifier: memo.tz) ?? clock.timeZone
-        let started = Date()
-        let result: InterpretResult
-        do {
-            result = try await interpreter.interpret(InterpretRequest(
-                transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp
-            ))
-        } catch let error as LLMError {
-            return await fail(memo, error, elapsed: Date().timeIntervalSince(started))
-        } catch {
-            return await fail(memo, .processFailed(exitCode: -1, stderr: "\(error)"), elapsed: Date().timeIntervalSince(started))
-        }
-
-        memo.llmModel = result.llm.model
-        memo.llmMs = result.llm.wallMs
-        memo.llmUsageJSON = result.llm.usageJSON
-        memo.llmResponseJSON = result.llm.structuredJSON
-        memo.intent = result.response.intent.rawValue
-        memo.confidence = result.response.confidence
-        memo.transcriptCorrected = result.transcriptSent == transcript ? result.response.transcriptCorrected : result.transcriptSent
-        memo.failStage = nil
-        memo.failReason = nil
-        memo.nextRetryAt = nil
-        memo.status = .interpreted
-        // The model took seconds, and everything may have been erased meanwhile: a phrase that is gone stays gone (a failed
-        // write, as opposed to a refused one, is not a reason to stop).
-        guard (try? await store.saveUnlessErased(memo: memo)) != false else {
-            return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
-        }
-
-        switch result.interpretation {
-        case let .mutate(plan):
+        // Read once more when an entry the plan was made for changed while the model was answering (the person edited it
+        // meanwhile): the second reading sees the entry as it is now. A second conflict is reported.
+        var readings = 0
+        while true {
+            readings += 1
+            let started = Date()
+            let result: InterpretResult
             do {
-                let applied = try await store.apply(
-                    plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id,
-                    label: Self.label(for: plan)
-                )
-                memo.status = .applied
-                memo.opID = applied.op?.id
-                try? await store.save(memo: memo)
-                return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: result)
-            } catch StoreError.memoErased {
-                return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
+                result = try await interpreter.interpret(InterpretRequest(
+                    transcript: transcript, anchor: anchor, timeZone: timeZone, followUp: followUp
+                ))
+            } catch let error as LLMError {
+                return await fail(memo, error, elapsed: Date().timeIntervalSince(started))
             } catch {
-                return await fail(memo, .processFailed(exitCode: -2, stderr: "apply: \(error)"), elapsed: 0, stage: "apply")
+                return await fail(memo, .processFailed(exitCode: -1, stderr: "\(error)"), elapsed: Date().timeIntervalSince(started))
             }
-        case let .query(plan):
-            memo.status = .answered
-            try? await store.save(memo: memo)
-            return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: result)
-        case let .clarify(clarification):
-            memo.status = .clarifying
-            try? await store.save(memo: memo)
-            return ProcessOutcome(memo: memo, kind: .clarify(clarification), interpretation: result)
-        case .unknown:
-            memo.status = .discarded
-            try? await store.save(memo: memo)
-            return ProcessOutcome(memo: memo, kind: .unknown, interpretation: result)
+
+            memo.llmModel = result.llm.model
+            memo.llmMs = result.llm.wallMs
+            memo.llmUsageJSON = result.llm.usageJSON
+            memo.llmResponseJSON = result.llm.structuredJSON
+            memo.intent = result.response.intent.rawValue
+            memo.confidence = result.response.confidence
+            memo.transcriptCorrected = result.transcriptSent == transcript ? result.response.transcriptCorrected : result.transcriptSent
+            memo.failStage = nil
+            memo.failReason = nil
+            memo.nextRetryAt = nil
+            memo.status = .interpreted
+            // The model took seconds, and everything may have been erased meanwhile: a phrase that is gone stays gone (a failed
+            // write, as opposed to a refused one, is not a reason to stop).
+            guard (try? await store.saveUnlessErased(memo: memo)) != false else {
+                return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
+            }
+
+            switch result.interpretation {
+            case let .mutate(plan):
+                do {
+                    let applied = try await store.apply(
+                        plan, source: memo.inputKind == .voice ? .voice : .quickadd, memoID: memo.id,
+                        label: Self.label(for: plan)
+                    )
+                    memo.status = .applied
+                    memo.opID = applied.op?.id
+                    try? await store.save(memo: memo)
+                    return ProcessOutcome(memo: memo, kind: .applied(applied), interpretation: result)
+                } catch StoreError.memoErased {
+                    return ProcessOutcome(memo: memo, kind: .erased, interpretation: result)
+                } catch StoreError.changedMeanwhile where readings < 2 {
+                    continue
+                } catch {
+                    return await fail(memo, .processFailed(exitCode: -2, stderr: "apply: \(error)"), elapsed: 0, stage: "apply")
+                }
+            case let .query(plan):
+                memo.status = .answered
+                try? await store.save(memo: memo)
+                return ProcessOutcome(memo: memo, kind: .answered(plan), interpretation: result)
+            case let .clarify(clarification):
+                memo.status = .clarifying
+                try? await store.save(memo: memo)
+                return ProcessOutcome(memo: memo, kind: .clarify(clarification), interpretation: result)
+            case .unknown:
+                memo.status = .discarded
+                try? await store.save(memo: memo)
+                return ProcessOutcome(memo: memo, kind: .unknown, interpretation: result)
+            }
         }
     }
 

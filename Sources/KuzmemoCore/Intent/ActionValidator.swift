@@ -91,6 +91,8 @@ public enum ActionValidator {
         let response: ParserResponse
         let vc: ValidationContext
         var warnings: [String] = []
+        /// The version of every entry a target resolved to, so that the plan is applied only to the state it was made from.
+        var seenVersions: [String: Int] = [:]
 
         var policy: ValidationPolicy { vc.policy }
         var resolver: RelativeDateResolver { vc.resolver }
@@ -161,7 +163,8 @@ public enum ActionValidator {
             guard !planned.isEmpty else { return .unknown("no valid actions") }
             return .mutate(MutationPlan(
                 actions: planned, warnings: warnings,
-                correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1)
+                correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1),
+                expectedVersions: seenVersions
             ))
         }
 
@@ -250,6 +253,12 @@ public enum ActionValidator {
         // MARK: Targets
 
         mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
+            let target = try await findTarget(action)
+            seenVersions[target.item.id] = target.item.version
+            return target
+        }
+
+        private mutating func findTarget(_ action: ParsedAction) async throws -> Target {
             if let ref = action.ref {
                 if let entry = vc.context.entry(number: ref) {
                     return Target(item: entry.item, occurrenceDate: entry.occurrenceDate, shownDate: entry.date, shownTime: entry.time)

@@ -1,10 +1,31 @@
 import Foundation
 import GRDB
+import Synchronization
 import Testing
 @testable import KuzmemoCore
 
 private let createAnswer = ParserResponseTests.create
 private let moscow = TimeZone(identifier: "Europe/Moscow")!
+
+/// Answers like `inner`, but the n-th call waits for the n-th gate (one gate per call, so a test can hold each answer apart).
+private final class SteppedProvider: LLMProvider, Sendable {
+    let gates: [Gate]
+    private let inner: ScriptedProvider
+    private let calls = Mutex(0)
+
+    init(_ inner: ScriptedProvider, steps: Int) {
+        self.inner = inner
+        gates = (0 ..< steps).map { _ in Gate() }
+    }
+
+    var callCount: Int { calls.withLock { $0 } }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let index = calls.withLock { $0 += 1; return $0 - 1 }
+        if index < gates.count { await gates[index].wait() }
+        return try await inner.complete(request)
+    }
+}
 
 private func processor(
     _ steps: [ScriptedProvider.Step], now: String = "2026-09-28 14:30", retry: RetryPolicy = .standard
@@ -168,6 +189,64 @@ struct MemoProcessorTests {
         #expect(results.compactMap { $0 }.count == 1, "only one retry may run")
         #expect(provider.callCount == 1)
         #expect(try await store.items(on: LocalDate("2026-09-30")!).count == 1)
+    }
+
+    /// The model answers in seconds, and the person may edit the very entry meanwhile (the editor, a notification's Done). The
+    /// plan was made from the entry as the model saw it: it is not applied over the person's change. The phrase is read again,
+    /// against the entry as it is now, and that reading is what is applied.
+    @Test func aLateAnswerDoesNotOverwriteAnEntryEditedWhileTheModelWasThinking() async throws {
+        let store = try makeStore()
+        let stale = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"absolute","date":"2026-10-02","phrase":"на пятницу"}}}]}"#
+        let fresh = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"absolute","date":"2026-10-09","phrase":"на 9 октября"}}}]}"#
+        let scripted = ScriptedProvider([.json(stale), .json(fresh)])
+        let provider = GatedProvider(scripted)
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider), clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        let made = try await store.create(ItemDraft(kind: .event, title: "Встреча с Дмитрием", date: LocalDate("2026-09-30"), time: LocalTime("15:00")))
+        let phrase = Task { await processor.submit(text: "перенеси встречу с Дмитрием на пятницу", inputKind: .voice) }
+        while provider.callCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        // meanwhile, in the editor: the meeting moves to the 5th
+        var draft = ItemDraft(made.item)
+        draft.date = LocalDate("2026-10-05")
+        try await store.save(draft, as: made.item.id, expectingVersion: 1)
+        await provider.gate.open()
+
+        let outcome = await phrase.value
+        guard case let .applied(result) = outcome.kind else { Issue.record("expected applied: \(outcome.kind)"); return }
+        #expect(provider.callCount == 2) // read again, against the entry as it is now
+        let item = try #require(try await store.item(id: made.item.id))
+        #expect(item.date == LocalDate("2026-10-09") && item.version == 3 && result.changes.count == 1)
+        // the second reading was shown the edited entry, not the one the first answer was made for
+        let second = try #require(scripted.requests.last?.userMessage)
+        #expect(second.contains("2026-10-05") && !second.contains("2026-09-30"))
+    }
+
+    /// A second conflict in a row is not tried a third time: the phrase fails and waits for the person.
+    @Test func aSecondConflictInARowFailsThePhrase() async throws {
+        let store = try makeStore()
+        let move = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"absolute","date":"2026-10-02","phrase":"на пятницу"}}}]}"#
+        let provider = SteppedProvider(ScriptedProvider([.json(move), .json(move), .json(move)]), steps: 3)
+        let processor = MemoProcessor(
+            store: store, interpreter: Interpreter(store: store, provider: provider), clock: FixedNow(local: "2026-09-28 14:30", in: moscow)!
+        )
+        let made = try await store.create(ItemDraft(kind: .event, title: "Встреча с Дмитрием", date: LocalDate("2026-09-30"), time: LocalTime("15:00")))
+        let phrase = Task { await processor.submit(text: "перенеси встречу с Дмитрием на пятницу", inputKind: .voice) }
+        var draft = ItemDraft(made.item)
+        while provider.callCount < 1 { try await Task.sleep(for: .milliseconds(10)) }
+        draft.title = "Встреча с Дмитрием и Анной" // an edit while the first answer is on its way
+        try await store.save(draft, as: made.item.id)
+        await provider.gates[0].open()
+        while provider.callCount < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        draft.details = "в переговорной" // and another while the second one is
+        try await store.save(draft, as: made.item.id)
+        await provider.gates[1].open()
+
+        let outcome = await phrase.value
+        guard case let .failed(error, _) = outcome.kind else { Issue.record("expected failed: \(outcome.kind)"); return }
+        #expect("\(error)".contains("changedMeanwhile") && provider.callCount == 2)
+        #expect(try await store.item(id: made.item.id)?.date == LocalDate("2026-09-30")) // never moved
+        #expect(try await store.memo(id: outcome.memo.id)?.status == .failed)
     }
 
     @Test func aDoubleClickOnSaveAsANoteMakesOneNote() async throws {

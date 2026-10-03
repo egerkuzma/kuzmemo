@@ -22,22 +22,30 @@ public struct Clarification: Equatable, Sendable {
     }
 }
 
-public struct MutationPlan: Equatable, Sendable {
+public struct MutationPlan: Equatable, Codable, Sendable {
     public var actions: [PlannedAction]
     /// Things the validator corrected or dropped; logged, never shown as errors.
     public var warnings: [String]
     public var correctedTranscript: String?
     public var confidence: Double
+    /// The version each entry the plan touches had when the plan was made (the entries the model was shown). The plan was
+    /// worked out from that state; applying it checks that the entries have not moved on meanwhile (the person edited one
+    /// while the model was answering), and refuses with `StoreError.changedMeanwhile` when one has.
+    public var expectedVersions: [String: Int]
 
-    public init(actions: [PlannedAction], warnings: [String] = [], correctedTranscript: String? = nil, confidence: Double = 1) {
+    public init(
+        actions: [PlannedAction], warnings: [String] = [], correctedTranscript: String? = nil, confidence: Double = 1,
+        expectedVersions: [String: Int] = [:]
+    ) {
         self.actions = actions
         self.warnings = warnings
         self.correctedTranscript = correctedTranscript
         self.confidence = confidence
+        self.expectedVersions = expectedVersions
     }
 }
 
-public struct NewItem: Equatable, Sendable {
+public struct NewItem: Equatable, Codable, Sendable {
     public var kind: ItemKind
     public var title: String
     public var details: String?
@@ -65,7 +73,7 @@ public struct NewItem: Equatable, Sendable {
 }
 
 /// Fields to change on an existing item. `nil` leaves a field as it is.
-public struct ItemChanges: Equatable, Sendable {
+public struct ItemChanges: Equatable, Codable, Sendable {
     public var kind: ItemKind?
     public var title: String?
     public var details: String?
@@ -115,7 +123,7 @@ public struct ItemChanges: Equatable, Sendable {
     }
 }
 
-public enum PlannedAction: Equatable, Sendable {
+public enum PlannedAction: Equatable, Codable, Sendable {
     case create(NewItem)
     /// Edits a one-off item, or the whole series of a recurring one.
     case update(itemID: String, changes: ItemChanges)

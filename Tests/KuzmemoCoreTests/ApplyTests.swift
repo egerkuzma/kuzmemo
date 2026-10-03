@@ -4,6 +4,10 @@ import Testing
 
 private func day(_ text: String) -> LocalDate { LocalDate(text)! }
 
+private extension ItemDraft {
+    func with(date: LocalDate) -> ItemDraft { var copy = self; copy.date = date; return copy }
+}
+
 private func seedWeekly(_ store: Store) async throws {
     var series = Item(id: "", kind: .event, title: "Планёрка", date: day("2026-10-05"), time: LocalTime("10:00"), source: .voice)
     series.recurrence = Recurrence(freq: .weekly, byWeekday: [.mon])
@@ -62,6 +66,36 @@ struct ApplyTests {
         }
         #expect(try await store.inbox().isEmpty)
         #expect(try await store.lastUndoableOp() == nil)
+    }
+
+    /// A plan is made from the entries the model was shown. One of them edited meanwhile (the person, while the model was
+    /// answering) is a different entry: the plan does not apply to it, and nothing of the plan is applied.
+    @Test func aPlanMadeForAnEntryThatChangedMeanwhileIsRefusedWhole() async throws {
+        let store = try makeStore()
+        let made = try await store.create(ItemDraft(kind: .task, title: "Купить молоко", date: day("2026-09-29")))
+        let plan = MutationPlan(
+            actions: [.create(NewItem(kind: .task, title: "Не должно сохраниться")), .update(itemID: made.item.id, changes: ItemChanges(date: day("2026-10-02")))],
+            expectedVersions: [made.item.id: made.item.version]
+        )
+        // meanwhile: the person moved it
+        try await store.save(ItemDraft(try #require(try await store.item(id: made.item.id))).with(date: day("2026-10-05")), as: made.item.id)
+        await #expect(throws: StoreError.changedMeanwhile(made.item.id)) {
+            try await store.apply(plan, source: .voice, memoID: nil, label: "late")
+        }
+        let item = try #require(try await store.item(id: made.item.id))
+        #expect(item.date == day("2026-10-05") && item.version == 2) // the person's move stands
+        #expect(try await store.inbox().isEmpty) // and the creation did not happen either
+        // the same plan made from the current state applies
+        var fresh = plan
+        fresh.expectedVersions = [made.item.id: 2]
+        let applied = try await store.apply(fresh, source: .voice, memoID: nil, label: "fresh")
+        #expect(applied.changes.count == 2)
+        #expect(try await store.item(id: made.item.id)?.date == day("2026-10-02"))
+        // an entry deleted meanwhile counts as changed too
+        var gone = plan
+        gone.expectedVersions = [made.item.id: 3]
+        try await store.perform(.delete(itemID: made.item.id), label: "gone")
+        await #expect(throws: StoreError.changedMeanwhile(made.item.id)) { try await store.apply(gone, source: .voice, memoID: nil, label: "late") }
     }
 
     @Test func oneOffItemsCanBeCompletedAndReopened() async throws {

@@ -342,6 +342,18 @@ struct ValidatorTargetTests {
         #expect(renamed.actions == [.update(itemID: "m1", changes: ItemChanges(title: "Встреча с Анной"))])
     }
 
+    /// The plan carries the version of every entry it resolved, so that applying it can tell when one changed meanwhile.
+    @Test func thePlanRemembersTheVersionsOfTheEntriesItTouches() async throws {
+        var newer = meeting
+        newer.version = 4
+        let entries = [entry(item("a", "Другое", "2026-09-29")), entry(newer), entry(weekly, occurrence: "2026-10-05")]
+        let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":2,"changes":{"title":"Встреча с Анной"}},{"op":"complete","ref":3}]}"#
+        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected mutate"); return }
+        #expect(plan.expectedVersions == ["m1": 4, "w1": 1])
+        guard case let .mutate(creation) = try await validate(ParserResponseTests.create, entries: entries) else { Issue.record("expected mutate"); return }
+        #expect(creation.expectedVersions.isEmpty) // a creation touches no existing entry
+    }
+
     @Test func aTimeOnlyChangeKeepsTheDate() async throws {
         let entries = [entry(meeting)]
         let result = try await validate(#"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":1,"changes":{"when":{"mode":"none","time":"16:00"}}}]}"#, entries: entries)
