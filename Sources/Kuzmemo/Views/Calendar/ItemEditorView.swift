@@ -19,10 +19,20 @@ struct ItemEditorView: View {
     @State private var problem: String?
     /// The save is under way: a second press must not make a second entry.
     @State private var saving = false
-    /// The revision of the entry when the editor opened (`Store.revision(of:)`: every write to the entry or its occurrences
-    /// counts, an undo too). A save checks it, so that a change that reached the entry meanwhile (a voice command, a
-    /// notification's Done, an undo) is not quietly put back; after that has been said once, the next Save replaces it.
-    @State private var expectedRevision: Int?
+    /// What the editor knows about the entry's revision. The entry and its revision are read together when the sheet opens
+    /// (`Store.itemSnapshot`); the save checks the revision, so that a change that reached the entry meanwhile (a voice command, a
+    /// notification's Done, an undo) is not quietly put back. Until the read has worked, Save is off: a copy whose revision is
+    /// unknown is not safe to write. Only after a refused save does the person's next Save go through without the check.
+    private enum Revision: Equatable {
+        case loading
+        case loaded(Int)
+        /// The entry could not be read (or is gone): nothing is saved until a read works.
+        case failed
+        /// The person was told the entry changed meanwhile and pressed Save again: their decision.
+        case overwriteApproved
+    }
+
+    @State private var revision = Revision.loading
     @State private var sourceText: String?
     @FocusState private var titleFocused: Bool
 
@@ -34,21 +44,73 @@ struct ItemEditorView: View {
         case let .new(draft): start = draft
         case let .edit(item): start = ItemDraft(item)
         }
+        let fields = Self.fields(for: start, selectedDate: env.calendar.selectedDate)
         _draft = State(initialValue: start)
-        _hasDate = State(initialValue: start.date != nil)
-        _dateValue = State(initialValue: DateBridge.date(start.date ?? env.calendar.selectedDate))
-        _hasTime = State(initialValue: start.time != nil)
-        _timeValue = State(initialValue: DateBridge.date(start.time ?? LocalTime(hour: 9, minute: 0)!))
-        let form = RecurrenceForm(start.recurrence)
-        _form = State(initialValue: form)
-        let base = DateBridge.date(start.date ?? env.calendar.selectedDate)
-        if case let .until(date) = form.end { _untilValue = State(initialValue: DateBridge.date(date)) } else {
-            _untilValue = State(initialValue: base.addingTimeInterval(86_400 * 90))
-        }
-        if case let .count(count) = form.end { _countValue = State(initialValue: count) } else { _countValue = State(initialValue: 10) }
+        _hasDate = State(initialValue: fields.hasDate)
+        _dateValue = State(initialValue: fields.dateValue)
+        _hasTime = State(initialValue: fields.hasTime)
+        _timeValue = State(initialValue: fields.timeValue)
+        _form = State(initialValue: fields.form)
+        _untilValue = State(initialValue: fields.untilValue)
+        _countValue = State(initialValue: fields.countValue)
     }
 
     private var isNew: Bool { if case .new = request { true } else { false } }
+
+    /// The form's controls for a draft.
+    private struct Fields {
+        var hasDate: Bool, dateValue: Date, hasTime: Bool, timeValue: Date, form: RecurrenceForm, untilValue: Date, countValue: Int
+    }
+
+    private static func fields(for start: ItemDraft, selectedDate: LocalDate) -> Fields {
+        let form = RecurrenceForm(start.recurrence)
+        let base = DateBridge.date(start.date ?? selectedDate)
+        var until = base.addingTimeInterval(86_400 * 90)
+        if case let .until(date) = form.end { until = DateBridge.date(date) }
+        var count = 10
+        if case let .count(n) = form.end { count = n }
+        return Fields(
+            hasDate: start.date != nil, dateValue: base, hasTime: start.time != nil,
+            timeValue: DateBridge.date(start.time ?? LocalTime(hour: 9, minute: 0)!), form: form, untilValue: until, countValue: count
+        )
+    }
+
+    /// Shows `start` in every control (what `init` does, for an entry read after the sheet opened).
+    private func show(_ start: ItemDraft) {
+        let fields = Self.fields(for: start, selectedDate: env.calendar.selectedDate)
+        draft = start
+        hasDate = fields.hasDate; dateValue = fields.dateValue; hasTime = fields.hasTime; timeValue = fields.timeValue
+        form = fields.form; untilValue = fields.untilValue; countValue = fields.countValue
+    }
+
+    /// Reads the entry and its revision together. The `Item` the sheet was opened with is a copy from the window, which may be
+    /// older than the entry; the draft is replaced by the fresh copy while the person has not touched it. If they have, and
+    /// the entry differs, they are told, and the next Save is their decision, as after any refused save.
+    private func loadRevision(of item: Item) async {
+        revision = .loading
+        guard let snapshot = try? await env.store.itemSnapshot(id: item.id) else {
+            revision = .failed
+            problem = AppEnvironment.describe(StoreError.itemNotFound(item.id))
+            return
+        }
+        let shown = ItemDraft(item)
+        if draft == shown {
+            if ItemDraft(snapshot.item) != shown { show(ItemDraft(snapshot.item)) }
+            revision = .loaded(snapshot.revision)
+        } else if ItemDraft(snapshot.item) == shown {
+            revision = .loaded(snapshot.revision) // what the person started from is what the entry is
+        } else {
+            problem = AppEnvironment.describe(StoreError.changedMeanwhile(item.id))
+            revision = .overwriteApproved
+        }
+    }
+
+    private var canSave: Bool {
+        switch revision {
+        case .loaded, .overwriteApproved: true
+        case .loading, .failed: isNew
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -121,7 +183,7 @@ struct ItemEditorView: View {
         .task {
             titleFocused = isNew
             if case let .edit(item) = request {
-                expectedRevision = try? await env.store.revision(of: item.id)
+                await loadRevision(of: item)
                 if let memoID = item.memoID { sourceText = try? await env.store.memo(id: memoID)?.transcriptRaw }
             }
         }
@@ -244,7 +306,12 @@ struct ItemEditorView: View {
     private var footer: some View {
         VStack(spacing: 8) {
             if let problem {
-                Text(verbatim: problem).font(.callout).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(verbatim: problem).font(.callout).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+                    if revision == .failed, case let .edit(item) = request {
+                        Button(tr("Retry")) { Task { await loadRevision(of: item) } }
+                    }
+                }
             }
             HStack {
                 if case let .edit(item) = request {
@@ -255,7 +322,7 @@ struct ItemEditorView: View {
                 }
                 Spacer()
                 Button(tr("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isNew ? tr("Add") : tr("Save"), action: save).keyboardShortcut(.defaultAction).disabled(saving)
+                Button(isNew ? tr("Add") : tr("Save"), action: save).keyboardShortcut(.defaultAction).disabled(saving || !canSave)
             }
         }
         .padding(.horizontal, 20)
@@ -273,7 +340,7 @@ struct ItemEditorView: View {
             problem = AppEnvironment.describe(error)
             return
         }
-        guard !saving else { return }
+        guard !saving, canSave else { return }
         saving = true
         problem = nil
         // The sheet closes when the entry is saved, not before: a failed save (a full disk, a locked file, an entry that was
@@ -283,9 +350,12 @@ struct ItemEditorView: View {
             let failure: (any Error)?
             switch request {
             case .new: failure = await env.attempt { try await env.calendar.create(out) }
-            case let .edit(item): failure = await env.attempt { try await env.calendar.save(out, as: item.id, expectingRevision: expectedRevision) }
+            case let .edit(item):
+                var expected: Int?
+                if case let .loaded(current) = revision { expected = current }
+                failure = await env.attempt { try await env.calendar.save(out, as: item.id, expectingRevision: expected) }
             }
-            if case StoreError.changedMeanwhile? = failure { expectedRevision = nil } // the next Save is the person's decision
+            if case StoreError.changedMeanwhile? = failure { revision = .overwriteApproved } // the next Save is the person's decision
             if let failure { problem = AppEnvironment.describe(failure) } else { dismiss() }
         }
     }

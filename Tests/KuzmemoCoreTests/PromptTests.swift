@@ -192,6 +192,16 @@ struct ContextPlannerTests {
         #expect(plan.entries.first?.item.title == "дело 0")
     }
 
+    /// The list carries the revision of every entry on it, from the same read as the entries themselves.
+    @Test func theListCarriesTheRevisionsOfItsEntriesFromTheSameRead() async throws {
+        let store = try await seeded()
+        let plan = try await ContextPlanner().plan(transcript: "перенеси встречу с Дмитрием на четверг", anchor: anchor, store: store)
+        let ids = Set(plan.entries.map(\.item.id))
+        #expect(!ids.isEmpty && Set(plan.revisions.keys) == ids)
+        let current = try await store.revisions(of: ids)
+        #expect(plan.revisions == current)
+    }
+
     /// A full fortnight of nearer entries used to push the one entry the words pointed at (a month away) out of the list: the
     /// model then could not see what it was asked to change.
     @Test func anEntryFoundByTheWordsSurvivesTheCut() async throws {

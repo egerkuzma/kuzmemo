@@ -7,6 +7,7 @@ private func day(_ text: String) -> LocalDate { LocalDate(text)! }
 private extension ItemDraft {
     func with(date: LocalDate) -> ItemDraft { var copy = self; copy.date = date; return copy }
     func with(title: String) -> ItemDraft { var copy = self; copy.title = title; return copy }
+    func with(time: LocalTime) -> ItemDraft { var copy = self; copy.time = time; return copy }
 }
 
 private func seedWeekly(_ store: Store) async throws {
@@ -132,6 +133,27 @@ struct ApplyTests {
         let afterUndo = try #require(try await store.revision(of: id))
         #expect(afterUndo > afterRename) // …the revision only ever grows
         await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.apply(stale, source: .voice, memoID: nil, label: "late") }
+    }
+
+    /// An entry and the revision a plan or an editor will be checked against are read in one snapshot: a revision read a moment
+    /// after the entry could already be the next one's, and an old copy would then pass as current.
+    @Test func anEntryAndItsRevisionAreReadTogether() async throws {
+        let store = try makeStore()
+        let made = try await store.create(ItemDraft(kind: .event, title: "Встреча с Дмитрием", date: day("2026-09-30"), time: LocalTime("10:00")))
+        let id = made.item.id
+        let opened = try #require(try await store.itemSnapshot(id: id))
+        let current = try await store.revision(of: id)
+        #expect(opened.item.time == LocalTime("10:00") && opened.revision == current)
+        // the entry changes after the snapshot: a plan made from the snapshot's copy is refused, however late its check runs
+        try await store.save(ItemDraft(opened.item).with(time: LocalTime("15:00")!), as: id)
+        let stale = MutationPlan(actions: [.update(itemID: id, changes: ItemChanges(time: LocalTime("11:00")))], expectedRevisions: [id: opened.revision])
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.apply(stale, source: .voice, memoID: nil, label: "late") }
+        #expect(try await store.item(id: id)?.time == LocalTime("15:00"))
+        // the same for what a search finds
+        let found = try await store.searchSnapshot("Дмитрием", limit: 5)
+        let afterEdit = try await store.revision(of: id)
+        #expect(found.items.map(\.id) == [id] && found.revisions[id] == afterEdit)
+        #expect(try await store.itemSnapshot(id: "nobody") == nil)
     }
 
     @Test func oneOffItemsCanBeCompletedAndReopened() async throws {

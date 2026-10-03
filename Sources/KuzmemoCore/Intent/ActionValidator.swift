@@ -269,34 +269,30 @@ public enum ActionValidator {
         // MARK: Targets
 
         mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
-            let target = try await findTarget(action)
-            // The revision the model's list was made at; an entry found by its words was read just now. An entry without one (not
-            // in the database) gets a revision nothing can match, and the plan is refused at apply.
-            if let listed = vc.context.revisions[target.item.id] {
-                seenRevisions[target.item.id] = listed
-            } else {
-                seenRevisions[target.item.id] = try await vc.store.revision(of: target.item.id) ?? -1
-            }
+            let (target, revision) = try await findTarget(action)
+            // The revision belongs to the same snapshot as the entry (the model's list, or the search that found it). An entry
+            // without one (not in the database) gets a revision nothing can match, and the plan is refused at apply.
+            seenRevisions[target.item.id] = revision ?? -1
             seenItems[target.item.id] = target.item
             return target
         }
 
-        private mutating func findTarget(_ action: ParsedAction) async throws -> Target {
+        private mutating func findTarget(_ action: ParsedAction) async throws -> (Target, Int?) {
             if let ref = action.ref {
                 if let entry = vc.context.entry(number: ref) {
-                    return Target(item: entry.item, occurrenceDate: entry.occurrenceDate, shownDate: entry.date, shownTime: entry.time)
+                    return (Target(item: entry.item, occurrenceDate: entry.occurrenceDate, shownDate: entry.date, shownTime: entry.time), vc.context.revisions[entry.item.id])
                 }
                 warnings.append("ref \(ref) is not in the list the model was shown")
             }
             guard let hint = clean(action.targetHint) else {
                 throw Stop(.clarify(Clarification(question: tr("Which entry do you mean?"), reason: .targetNotFound)))
             }
-            let hits = try await vc.store.search(hint, limit: 5)
+            let (hits, revisions) = try await vc.store.searchSnapshot(hint, limit: 5)
             switch hits.count {
             case 0:
                 throw Stop(.clarify(Clarification(question: tr("I did not find the entry “%1$@”. What exactly should I change?", hint), reason: .targetNotFound)))
             case 1:
-                return Target(item: hits[0], occurrenceDate: action.occurrenceDate)
+                return (Target(item: hits[0], occurrenceDate: action.occurrenceDate), revisions[hits[0].id])
             default:
                 throw Stop(.clarify(Clarification(
                     question: tr("Which one of these entries?"), reason: .ambiguousTarget,

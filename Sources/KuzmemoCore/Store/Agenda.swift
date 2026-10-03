@@ -37,11 +37,17 @@ public struct AgendaEntry: Hashable, Sendable, Identifiable {
 
 extension Store {
     /// Everything on the calendar within `range`: one-off items plus expanded occurrences of recurring
-    /// items, all-day entries first within a day. Skipped occurrences are left out.
+    /// items, all-day entries first within a day. Skipped occurrences are left out. One snapshot: the one-offs, the series
+    /// and their overrides are read in a single transaction, so a write landing between them cannot show an entry twice,
+    /// not at all, or with an override that belongs to another state of the series.
     public func agenda(in range: ClosedRange<LocalDate>, includeDone: Bool = true) async throws -> [AgendaEntry] {
-        let oneOffs = try await items(in: range)
-        let allSeries = try await recurringSeries()
-        let exceptions = try await exceptions(for: allSeries.map(\.id))
+        try await writer.read { db in try Store.agenda(db, in: range, includeDone: includeDone) }
+    }
+
+    static func agenda(_ db: Database, in range: ClosedRange<LocalDate>, includeDone: Bool = true) throws -> [AgendaEntry] {
+        let oneOffs = try items(db, in: range)
+        let allSeries = try recurringSeries(db)
+        let exceptions = try exceptions(db, for: allSeries.map(\.id))
         // A series that starts after the range has nothing in it, unless one of its occurrences was moved back into it (to a
         // day before the series' own start): those moves are looked at before the series is passed over.
         let movedIn = Set(exceptions.filter { $0.movedDate.map(range.contains) == true }.map(\.itemID))

@@ -1,6 +1,17 @@
 import Foundation
 import GRDB
 
+/// An entry and its revision, read together.
+public struct ItemSnapshot: Equatable, Sendable {
+    public var item: Item
+    public var revision: Int
+
+    public init(item: Item, revision: Int) {
+        self.item = item
+        self.revision = revision
+    }
+}
+
 /// The single entry point for reading and changing calendar data. Every change goes through
 /// `perform`, which journals before/after snapshots so it can be undone atomically.
 public struct Store: Sendable {
@@ -30,9 +41,20 @@ public struct Store: Sendable {
     // MARK: - Reads
 
     public func item(id: String, includeDeleted: Bool = false) async throws -> Item? {
+        try await writer.read { db in try Store.item(db, id: id, includeDeleted: includeDeleted) }
+    }
+
+    static func item(_ db: Database, id: String, includeDeleted: Bool = false) throws -> Item? {
+        guard let item = try Item.fetchOne(db, key: id) else { return nil }
+        return (item.deletedAt == nil || includeDeleted) ? item : nil
+    }
+
+    /// An entry together with its revision, read in one snapshot: what an editor opens on, so that its copy and the revision it
+    /// will be checked against belong to the same moment (a revision read a moment later could already be the next one's).
+    public func itemSnapshot(id: String) async throws -> ItemSnapshot? {
         try await writer.read { db in
-            guard let item = try Item.fetchOne(db, key: id) else { return nil }
-            return (item.deletedAt == nil || includeDeleted) ? item : nil
+            guard let item = try Store.item(db, id: id) else { return nil }
+            return ItemSnapshot(item: item, revision: try Store.revisions(db, of: [id])[id] ?? -1)
         }
     }
 
@@ -43,14 +65,16 @@ public struct Store: Sendable {
 
     /// One-off (non-recurring) dated items within a date range, ordered by date, time (all-day first), creation.
     public func items(in range: ClosedRange<LocalDate>) async throws -> [Item] {
-        try await writer.read { db in
-            try Item
-                .filter(Column("deleted_at") == nil)
-                .filter(Column("recurrence_json") == nil)
-                .filter(Column("date") >= range.lowerBound && Column("date") <= range.upperBound)
-                .order(Column("date"), Column("time"), Column("created_at"))
-                .fetchAll(db)
-        }
+        try await writer.read { db in try Store.items(db, in: range) }
+    }
+
+    static func items(_ db: Database, in range: ClosedRange<LocalDate>) throws -> [Item] {
+        try Item
+            .filter(Column("deleted_at") == nil)
+            .filter(Column("recurrence_json") == nil)
+            .filter(Column("date") >= range.lowerBound && Column("date") <= range.upperBound)
+            .order(Column("date"), Column("time"), Column("created_at"))
+            .fetchAll(db)
     }
 
     /// Open items without a date, newest first.
@@ -64,12 +88,14 @@ public struct Store: Sendable {
     }
 
     public func recurringSeries() async throws -> [Item] {
-        try await writer.read { db in
-            try Item
-                .filter(Column("deleted_at") == nil && Column("recurrence_json") != nil)
-                .order(Column("date"), Column("created_at"))
-                .fetchAll(db)
-        }
+        try await writer.read { db in try Store.recurringSeries(db) }
+    }
+
+    static func recurringSeries(_ db: Database) throws -> [Item] {
+        try Item
+            .filter(Column("deleted_at") == nil && Column("recurrence_json") != nil)
+            .order(Column("date"), Column("created_at"))
+            .fetchAll(db)
     }
 
     /// The revision of each entry: a number that grows with every write to the entry's row or to its overrides, undo included
@@ -93,15 +119,25 @@ public struct Store: Sendable {
     }
 
     public func exceptions(for itemIDs: [String]) async throws -> [ItemException] {
+        try await writer.read { db in try Store.exceptions(db, for: itemIDs) }
+    }
+
+    static func exceptions(_ db: Database, for itemIDs: [String]) throws -> [ItemException] {
         guard !itemIDs.isEmpty else { return [] }
-        return try await writer.read { db in
-            try ItemException.filter(itemIDs.contains(Column("item_id"))).fetchAll(db)
-        }
+        return try ItemException.filter(itemIDs.contains(Column("item_id"))).fetchAll(db)
     }
 
     /// Substring search over title, details and keywords that tolerates Russian word endings.
     public func search(_ text: String, limit: Int = 50) async throws -> [Item] {
         try await writer.read { db in try SearchIndex.search(db, query: text, limit: limit) }
+    }
+
+    /// The search together with the revisions of what it found, in one snapshot (for a plan that will act on the hits).
+    public func searchSnapshot(_ text: String, limit: Int = 50) async throws -> (items: [Item], revisions: [String: Int]) {
+        try await writer.read { db in
+            let items = try SearchIndex.search(db, query: text, limit: limit)
+            return (items, try Store.revisions(db, of: items.map(\.id)))
+        }
     }
 
     // MARK: - Writes

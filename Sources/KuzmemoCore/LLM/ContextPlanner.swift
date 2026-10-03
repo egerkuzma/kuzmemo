@@ -54,15 +54,22 @@ public struct ContextPlanner: Sendable {
         "evening", "night", "afternoon",
     ]
 
+    /// Everything the model is shown comes from ONE read transaction, revisions included: the entries and the revisions they
+    /// are checked against at apply belong to the same moment. Read apart, a change landing between the two gave an old entry
+    /// the new revision, and a plan made from the old entry passed the check.
     public func plan(transcript: String, anchor: LocalDateTime, store: Store) async throws -> ContextPlan {
+        try await store.writer.read { db in try self.plan(db, transcript: transcript, anchor: anchor) }
+    }
+
+    func plan(_ db: Database, transcript: String, anchor: LocalDateTime) throws -> ContextPlan {
         let words = SearchText.tokens(transcript)
         let expanded = words.contains { word in Self.editCues.contains { word.hasPrefix($0) } }
         let days = expanded ? expandedDays : baseDays
         let limit = expanded ? expandedLimit : baseLimit
         let today = anchor.date
 
-        var entries = try await store.agenda(in: today...today.adding(days: days), includeDone: false)
-        let overdue = try await store.overdue(before: today, limit: 10)
+        var entries = try Store.agenda(db, in: today...today.adding(days: days), includeDone: false)
+        let overdue = try Store.overdue(db, before: today, limit: 10)
         var seen = Set(entries.map(\.id))
         for item in overdue {
             let entry = AgendaEntry(
@@ -76,7 +83,7 @@ public struct ContextPlanner: Sendable {
         if expanded {
             var hits: [Item] = []
             for word in words where word.count >= 4 && !Self.stopWords.contains(word) && !Self.editCues.contains(where: { word.hasPrefix($0) }) {
-                for item in try await store.search(word, limit: 5) where !hits.contains(where: { $0.id == item.id }) {
+                for item in try SearchIndex.search(db, query: word, limit: 5) where !hits.contains(where: { $0.id == item.id }) {
                     hits.append(item)
                 }
                 if hits.count >= searchHitLimit { break }
@@ -89,7 +96,7 @@ public struct ContextPlanner: Sendable {
                 let entry: AgendaEntry
                 if item.recurrence != nil {
                     if upcoming == nil {
-                        let year = try await store.agenda(in: today...today.adding(days: 366), includeDone: false)
+                        let year = try Store.agenda(db, in: today...today.adding(days: 366), includeDone: false)
                         upcoming = Dictionary(year.map { ($0.item.id, $0) }, uniquingKeysWith: { first, _ in first })
                     }
                     // a series with nothing ahead has no occurrence to name: the entry carries none and the validator asks
@@ -111,7 +118,7 @@ public struct ContextPlanner: Sendable {
             return ($0.time?.minutesSinceMidnight ?? -1) < ($1.time?.minutesSinceMidnight ?? -1)
         }
         let listed = Self.cut(entries, to: limit, keeping: found)
-        return ContextPlan(entries: listed, expanded: expanded, revisions: try await store.revisions(of: Set(listed.map(\.item.id))))
+        return ContextPlan(entries: listed, expanded: expanded, revisions: try Store.revisions(db, of: Array(Set(listed.map(\.item.id)))))
     }
 
     /// The first `limit` entries, except that an entry of an item the words pointed at is never the one dropped: a full fortnight
@@ -132,13 +139,15 @@ public struct ContextPlanner: Sendable {
 extension Store {
     /// Open, dated, one-off items whose date is before `date`, newest first.
     public func overdue(before date: LocalDate, limit: Int = 20) async throws -> [Item] {
-        try await writer.read { db in
-            try Item
-                .filter(Column("deleted_at") == nil && Column("recurrence_json") == nil)
-                .filter(Column("status") == ItemStatus.open && Column("date") < date)
-                .order(Column("date").desc, Column("time").desc)
-                .limit(limit)
-                .fetchAll(db)
-        }
+        try await writer.read { db in try Store.overdue(db, before: date, limit: limit) }
+    }
+
+    static func overdue(_ db: Database, before date: LocalDate, limit: Int) throws -> [Item] {
+        try Item
+            .filter(Column("deleted_at") == nil && Column("recurrence_json") == nil)
+            .filter(Column("status") == ItemStatus.open && Column("date") < date)
+            .order(Column("date").desc, Column("time").desc)
+            .limit(limit)
+            .fetchAll(db)
     }
 }
