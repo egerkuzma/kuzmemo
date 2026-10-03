@@ -72,6 +72,26 @@ public struct Store: Sendable {
         }
     }
 
+    /// The revision of each entry: a number that grows with every write to the entry's row or to its overrides, undo included
+    /// (`items.version` does neither). A plan or an editor made from an entry at one revision is applied only while it holds.
+    public func revisions(of itemIDs: some Collection<String>) async throws -> [String: Int] {
+        let ids = Array(itemIDs)
+        guard !ids.isEmpty else { return [:] }
+        return try await writer.read { db in try Store.revisions(db, of: ids) }
+    }
+
+    public func revision(of itemID: String) async throws -> Int? {
+        try await revisions(of: [itemID])[itemID]
+    }
+
+    static func revisions(_ db: Database, of ids: [String]) throws -> [String: Int] {
+        let rows = try Row.fetchAll(
+            db, sql: "SELECT item_id, revision FROM item_revisions WHERE item_id IN (\(ids.map { _ in "?" }.joined(separator: ",")))",
+            arguments: StatementArguments(ids)
+        )
+        return Dictionary(rows.map { ($0["item_id"] as String, $0["revision"] as Int) }, uniquingKeysWith: { first, _ in first })
+    }
+
     public func exceptions(for itemIDs: [String]) async throws -> [ItemException] {
         guard !itemIDs.isEmpty else { return [] }
         return try await writer.read { db in

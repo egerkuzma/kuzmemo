@@ -6,6 +6,7 @@ private func day(_ text: String) -> LocalDate { LocalDate(text)! }
 
 private extension ItemDraft {
     func with(date: LocalDate) -> ItemDraft { var copy = self; copy.date = date; return copy }
+    func with(title: String) -> ItemDraft { var copy = self; copy.title = title; return copy }
 }
 
 private func seedWeekly(_ store: Store) async throws {
@@ -73,29 +74,64 @@ struct ApplyTests {
     @Test func aPlanMadeForAnEntryThatChangedMeanwhileIsRefusedWhole() async throws {
         let store = try makeStore()
         let made = try await store.create(ItemDraft(kind: .task, title: "Купить молоко", date: day("2026-09-29")))
+        let id = made.item.id
+        let seen = try #require(try await store.revision(of: id))
         let plan = MutationPlan(
-            actions: [.create(NewItem(kind: .task, title: "Не должно сохраниться")), .update(itemID: made.item.id, changes: ItemChanges(date: day("2026-10-02")))],
-            expectedVersions: [made.item.id: made.item.version]
+            actions: [.create(NewItem(kind: .task, title: "Не должно сохраниться")), .update(itemID: id, changes: ItemChanges(date: day("2026-10-02")))],
+            expectedRevisions: [id: seen]
         )
         // meanwhile: the person moved it
-        try await store.save(ItemDraft(try #require(try await store.item(id: made.item.id))).with(date: day("2026-10-05")), as: made.item.id)
-        await #expect(throws: StoreError.changedMeanwhile(made.item.id)) {
+        try await store.save(ItemDraft(try #require(try await store.item(id: id))).with(date: day("2026-10-05")), as: id)
+        await #expect(throws: StoreError.changedMeanwhile(id)) {
             try await store.apply(plan, source: .voice, memoID: nil, label: "late")
         }
-        let item = try #require(try await store.item(id: made.item.id))
-        #expect(item.date == day("2026-10-05") && item.version == 2) // the person's move stands
+        let item = try #require(try await store.item(id: id))
+        #expect(item.date == day("2026-10-05")) // the person's move stands
         #expect(try await store.inbox().isEmpty) // and the creation did not happen either
         // the same plan made from the current state applies
         var fresh = plan
-        fresh.expectedVersions = [made.item.id: 2]
+        fresh.expectedRevisions = [id: try #require(try await store.revision(of: id))]
         let applied = try await store.apply(fresh, source: .voice, memoID: nil, label: "fresh")
         #expect(applied.changes.count == 2)
-        #expect(try await store.item(id: made.item.id)?.date == day("2026-10-02"))
+        #expect(try await store.item(id: id)?.date == day("2026-10-02"))
         // an entry deleted meanwhile counts as changed too
         var gone = plan
-        gone.expectedVersions = [made.item.id: 3]
-        try await store.perform(.delete(itemID: made.item.id), label: "gone")
-        await #expect(throws: StoreError.changedMeanwhile(made.item.id)) { try await store.apply(gone, source: .voice, memoID: nil, label: "late") }
+        gone.expectedRevisions = [id: try #require(try await store.revision(of: id))]
+        try await store.perform(.delete(itemID: id), label: "gone")
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.apply(gone, source: .voice, memoID: nil, label: "late") }
+    }
+
+    /// The revision sees what `version` does not: a moved (or ticked, or skipped) occurrence writes only an override, and an
+    /// undo puts the old version number back. Both are changes to the entry, and a plan made before them is refused.
+    @Test func anOccurrenceOverrideAndAnUndoCountAsChangesToTheEntry() async throws {
+        let store = try makeStore()
+        let made = try await store.create(ItemDraft(
+            kind: .event, title: "Планёрка", date: day("2026-09-28"), time: LocalTime("10:00"), recurrence: Recurrence(freq: .weekly, byWeekday: [.mon])
+        ))
+        let id = made.item.id
+        let seen = try #require(try await store.revision(of: id))
+        // the model's plan: Monday the 5th to Wednesday; meanwhile the person moved that occurrence to Thursday
+        let plan = MutationPlan(
+            actions: [.moveOccurrence(itemID: id, occurrenceDate: day("2026-10-05"), newDate: day("2026-10-07"), newTime: nil)], expectedRevisions: [id: seen]
+        )
+        try await store.perform(.moveOccurrence(itemID: id, occurrenceDate: day("2026-10-05"), newDate: day("2026-10-08"), newTime: nil), label: "by hand")
+        #expect(try await store.item(id: id)?.version == made.item.version) // the row itself is untouched…
+        #expect(try await store.revision(of: id) == seen + 1) // …but the entry has changed
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.apply(plan, source: .voice, memoID: nil, label: "late") }
+        let shown = try await store.agenda(in: day("2026-10-05") ... day("2026-10-09")).map(\.date.description)
+        #expect(shown == ["2026-10-08"]) // Thursday, the person's move
+
+        // an undo: the version goes back to what a plan once saw, the revision does not
+        let current = try #require(try await store.item(id: id))
+        let renamed = try #require(try await store.save(ItemDraft(current).with(title: "Стендап"), as: id))
+        let afterRename = try #require(try await store.revision(of: id))
+        let stale = MutationPlan(actions: [.update(itemID: id, changes: ItemChanges(details: "в переговорной"))], expectedRevisions: [id: afterRename])
+        try await store.undo(opID: renamed.id)
+        let back = try #require(try await store.item(id: id))
+        #expect(back.title == "Планёрка" && back.version == made.item.version) // the old version number is back…
+        let afterUndo = try #require(try await store.revision(of: id))
+        #expect(afterUndo > afterRename) // …the revision only ever grows
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.apply(stale, source: .voice, memoID: nil, label: "late") }
     }
 
     @Test func oneOffItemsCanBeCompletedAndReopened() async throws {

@@ -10,12 +10,12 @@ private func anchor(_ text: String = "2026-09-28 14:30") -> LocalDateTime {
 /// Runs a raw model answer through the validator against the given entries.
 private func validate(
     _ json: String, entries: [AgendaEntry] = [], store: Store? = nil, at anchorText: String = "2026-09-28 14:30",
-    followUp: Bool = false, timeAsked: Bool = false
+    followUp: Bool = false, timeAsked: Bool = false, revisions: [String: Int] = [:]
 ) async throws -> Interpretation {
     let response = try JSONDecoder().decode(ParserResponse.self, from: Data(json.utf8))
     let store = try store ?? makeStore()
     let context = ValidationContext(
-        context: ContextPlan(entries: entries, expanded: false),
+        context: ContextPlan(entries: entries, expanded: false, revisions: revisions),
         resolver: RelativeDateResolver(anchor: anchor(anchorText)), store: store, isFollowUp: followUp, timeWasAsked: timeAsked
     )
     return await ActionValidator.validate(response, in: context)
@@ -145,7 +145,7 @@ struct ValidatorCreateTests {
         #expect(asked.reason == .destructiveConfirm && asked.question == "Удалить 3 записи: «Запись 1», «Запись 2», «Запись 3»?")
         let plan = try #require(asked.pending)
         #expect(plan.actions == [.delete(itemID: "i1"), .delete(itemID: "i2"), .delete(itemID: "i3")])
-        #expect(plan.expectedVersions == ["i1": 1, "i2": 1, "i3": 5])
+        #expect(plan.expectedRevisions == ["i1": -1, "i2": -1, "i3": -1])
 
         let updates = (1 ... 4).map { #"{"op":"update","ref":\#($0),"changes":{"title":"Новое \#($0)"}}"# }.joined(separator: ",")
         let bulkUpdate = #"{"intent":"update","confidence":0.9,"actions":[\#(updates)]}"#
@@ -328,7 +328,7 @@ struct ValidatorTargetTests {
             .moveOccurrence(itemID: "w1", occurrenceDate: LocalDate("2026-10-05")!, newDate: LocalDate("2026-10-05")!, newTime: LocalTime("11:00")),
             .update(itemID: "w1", changes: ItemChanges(title: "Стендап")),
         ])
-        #expect(plan.expectedVersions == ["w1": 1])
+        #expect(plan.expectedRevisions == ["w1": -1]) // not in the database: a revision nothing matches
     }
 
     /// Deleting a repeating entry deletes the whole series, which the model may have chosen for one occurrence the person named:
@@ -338,7 +338,7 @@ struct ValidatorTargetTests {
         let asked = try #require(clarification(try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":1}]}"#, entries: entries)))
         #expect(asked.question == "Удалить всю серию «Планёрка»?" && asked.reason == .destructiveConfirm)
         #expect(asked.options == ["Да, удалить", "Только это вхождение", "Нет"])
-        #expect(asked.pending?.actions == [.delete(itemID: "w1")] && asked.pending?.expectedVersions == ["w1": 1])
+        #expect(asked.pending?.actions == [.delete(itemID: "w1")] && asked.pending?.expectedRevisions == ["w1": -1])
         guard case let .mutate(oneOff) = try await validate(#"{"intent":"delete","confidence":0.9,"actions":[{"op":"delete","ref":2}]}"#, entries: entries) else { Issue.record("expected the deletion"); return }
         #expect(oneOff.actions == [.delete(itemID: "m1")])
         // a series among two deletions: the question names both, without the per-occurrence option
@@ -366,16 +366,17 @@ struct ValidatorTargetTests {
         #expect(renamed.actions == [.update(itemID: "m1", changes: ItemChanges(title: "Встреча с Анной"))])
     }
 
-    /// The plan carries the version of every entry it resolved, so that applying it can tell when one changed meanwhile.
-    @Test func thePlanRemembersTheVersionsOfTheEntriesItTouches() async throws {
-        var newer = meeting
-        newer.version = 4
-        let entries = [entry(item("a", "Другое", "2026-09-29")), entry(newer), entry(weekly, occurrence: "2026-10-05")]
+    /// The plan carries the revision of every entry it resolved (as listed for the model), so that applying it can tell when one
+    /// changed meanwhile. An entry the list has no revision for is read now; one that is nowhere gets a revision nothing matches.
+    @Test func thePlanRemembersTheRevisionsOfTheEntriesItTouches() async throws {
+        let entries = [entry(item("a", "Другое", "2026-09-29")), entry(meeting), entry(weekly, occurrence: "2026-10-05")]
         let json = #"{"intent":"update","confidence":0.9,"actions":[{"op":"update","ref":2,"changes":{"title":"Встреча с Анной"}},{"op":"complete","ref":3}]}"#
-        guard case let .mutate(plan) = try await validate(json, entries: entries) else { Issue.record("expected mutate"); return }
-        #expect(plan.expectedVersions == ["m1": 4, "w1": 1])
+        guard case let .mutate(plan) = try await validate(json, entries: entries, revisions: ["m1": 4, "w1": 7]) else { Issue.record("expected mutate"); return }
+        #expect(plan.expectedRevisions == ["m1": 4, "w1": 7])
+        guard case let .mutate(unlisted) = try await validate(json, entries: entries) else { Issue.record("expected mutate"); return }
+        #expect(unlisted.expectedRevisions == ["m1": -1, "w1": -1]) // not in the database at all
         guard case let .mutate(creation) = try await validate(ParserResponseTests.create, entries: entries) else { Issue.record("expected mutate"); return }
-        #expect(creation.expectedVersions.isEmpty) // a creation touches no existing entry
+        #expect(creation.expectedRevisions.isEmpty) // a creation touches no existing entry
     }
 
     @Test func aTimeOnlyChangeKeepsTheDate() async throws {

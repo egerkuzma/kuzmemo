@@ -471,6 +471,7 @@ struct MaintenanceTests {
         #expect(try await store.overview() == DataOverview(entries: 0, memos: 0, undoSteps: 0, glossaryTerms: 1))
         #expect(try await store.search("кенгуру").isEmpty)
         #expect(try await store.writer.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM items_fts") } == 0)
+        #expect(try await store.writer.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM item_revisions") } == 0) // the revisions go with the entries
         #expect(try await store.glossary().map(\.canonical) == ["Notion"])
         #expect(try await store.setting("settings.speech") == "{\"rate\":0.4}")
         #expect(try await store.integrityCheck().isHealthy)

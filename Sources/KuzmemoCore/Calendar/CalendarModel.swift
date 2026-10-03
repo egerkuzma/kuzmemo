@@ -274,8 +274,8 @@ public final class CalendarModel {
     }
 
     @discardableResult
-    public func save(_ draft: ItemDraft, as itemID: String, expectingVersion: Int? = nil) async throws -> ActionOutcome {
-        let op = try await store.save(draft, as: itemID, expectingVersion: expectingVersion)
+    public func save(_ draft: ItemDraft, as itemID: String, expectingRevision: Int? = nil) async throws -> ActionOutcome {
+        let op = try await store.save(draft, as: itemID, expectingRevision: expectingRevision)
         return ActionOutcome(op: op, lines: [tr("Saved · %1$@", Wording.quoted(draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))])
     }
 

@@ -21,15 +21,13 @@ public struct ApplyResult: Equatable, Sendable {
 
 extension Store {
     /// Applies a validated plan in a single transaction (all or nothing) and journals it for Undo. An entry the plan expects at
-    /// a version it no longer has (`expectedVersions`) stops the whole plan with `StoreError.changedMeanwhile`: the plan was
+    /// a revision it no longer has (`expectedRevisions`) stops the whole plan with `StoreError.changedMeanwhile`: the plan was
     /// made from a state that is gone.
     public func apply(_ plan: MutationPlan, source: ItemSource, memoID: String?, label: String) async throws -> ApplyResult {
         let actions = plan.actions
-        let expected = plan.expectedVersions
+        let expected = plan.expectedRevisions
         let result = try await performReturning(label: label, memoID: memoID) { mutator -> [AppliedChange] in
-            for (id, version) in expected.sorted(by: { $0.key < $1.key }) {
-                guard let current = try mutator.item(id: id), current.version == version else { throw StoreError.changedMeanwhile(id) }
-            }
+            try mutator.require(revisions: expected)
             var applied: [AppliedChange] = []
             for action in actions {
                 switch action {

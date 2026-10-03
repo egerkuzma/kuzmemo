@@ -82,6 +82,34 @@ public enum Schema {
             try db.execute(sql: "ALTER TABLE memos ADD COLUMN pending_plan_json TEXT")
         }
 
+        // A revision of every entry that only ever grows: kept by the database itself, so that every write to the entry's row
+        // and to its per-occurrence overrides counts, including the writes an undo makes. `items.version` is restored by an
+        // undo and does not see an occurrence moved, so it cannot tell a plan (or an editor) that the entry has moved on.
+        migrator.registerMigration("v4-item-revisions") { db in
+            try db.execute(sql: """
+            CREATE TABLE item_revisions(item_id TEXT PRIMARY KEY NOT NULL, revision INTEGER NOT NULL);
+            INSERT INTO item_revisions(item_id, revision) SELECT id, version FROM items;
+            CREATE TRIGGER items_revision_insert AFTER INSERT ON items BEGIN
+              INSERT INTO item_revisions(item_id, revision) VALUES (NEW.id, 1) ON CONFLICT(item_id) DO UPDATE SET revision = revision + 1;
+            END;
+            CREATE TRIGGER items_revision_update AFTER UPDATE ON items BEGIN
+              INSERT INTO item_revisions(item_id, revision) VALUES (NEW.id, 1) ON CONFLICT(item_id) DO UPDATE SET revision = revision + 1;
+            END;
+            CREATE TRIGGER items_revision_delete AFTER DELETE ON items BEGIN
+              DELETE FROM item_revisions WHERE item_id = OLD.id;
+            END;
+            CREATE TRIGGER item_exceptions_revision_insert AFTER INSERT ON item_exceptions BEGIN
+              UPDATE item_revisions SET revision = revision + 1 WHERE item_id = NEW.item_id;
+            END;
+            CREATE TRIGGER item_exceptions_revision_update AFTER UPDATE ON item_exceptions BEGIN
+              UPDATE item_revisions SET revision = revision + 1 WHERE item_id = NEW.item_id;
+            END;
+            CREATE TRIGGER item_exceptions_revision_delete AFTER DELETE ON item_exceptions BEGIN
+              UPDATE item_revisions SET revision = revision + 1 WHERE item_id = OLD.item_id;
+            END;
+            """)
+        }
+
         return migrator
     }
 }

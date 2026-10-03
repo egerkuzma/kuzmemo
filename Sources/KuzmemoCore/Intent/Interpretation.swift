@@ -32,20 +32,21 @@ public struct MutationPlan: Equatable, Codable, Sendable {
     public var warnings: [String]
     public var correctedTranscript: String?
     public var confidence: Double
-    /// The version each entry the plan touches had when the plan was made (the entries the model was shown). The plan was
-    /// worked out from that state; applying it checks that the entries have not moved on meanwhile (the person edited one
-    /// while the model was answering), and refuses with `StoreError.changedMeanwhile` when one has.
-    public var expectedVersions: [String: Int]
+    /// The revision each entry the plan touches had when the plan was made (the entries the model was shown; see
+    /// `Store.revisions`). The plan was worked out from that state; applying it checks that the entries have not moved on
+    /// meanwhile (the person edited one, moved an occurrence, undid something while the model was answering), and refuses
+    /// with `StoreError.changedMeanwhile` when one has.
+    public var expectedRevisions: [String: Int]
 
     public init(
         actions: [PlannedAction], warnings: [String] = [], correctedTranscript: String? = nil, confidence: Double = 1,
-        expectedVersions: [String: Int] = [:]
+        expectedRevisions: [String: Int] = [:]
     ) {
         self.actions = actions
         self.warnings = warnings
         self.correctedTranscript = correctedTranscript
         self.confidence = confidence
-        self.expectedVersions = expectedVersions
+        self.expectedRevisions = expectedRevisions
     }
 }
 

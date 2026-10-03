@@ -109,30 +109,42 @@ struct ManualEditTests {
     }
 
     /// The editor reads an entry and saves its whole draft later. A change that reached the entry in between (a voice command, a
-    /// Done from a notification, an undo) used to be quietly overwritten by the editor's older copy.
+    /// Done from a notification, an undo) used to be quietly overwritten by the editor's older copy. The check is on the entry's
+    /// revision, which an undo does not put back (the version number it does: B at v2, undone to v1, edited to C at v2 again).
     @Test func savingAnEditorCopyOfAnEntryThatChangedMeanwhileIsRefused() async throws {
         let store = try makeStore()
         let made = try await store.create(ItemDraft(kind: .task, title: "Купить молоко", date: date("2026-09-29")))
         let id = made.item.id
-        var draft = ItemDraft(made.item) // what the editor shows, read at version 1
+        let opened = try #require(try await store.revision(of: id)) // what the editor shows was read at this revision
+        var draft = ItemDraft(made.item)
         draft.title = "Купить молоко и хлеб"
         // meanwhile: a voice command moves the entry
         try await store.apply(MutationPlan(actions: [.update(itemID: id, changes: ItemChanges(date: date("2026-09-30")))]), source: .voice, memoID: nil, label: "Move")
-        let moved = try #require(try await store.item(id: id))
-        #expect(moved.version == 2)
-
-        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.save(draft, as: id, expectingVersion: made.item.version) }
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.save(draft, as: id, expectingRevision: opened) }
         let untouched = try #require(try await store.item(id: id))
-        #expect(untouched.title == "Купить молоко" && untouched.date == date("2026-09-30") && untouched.version == 2) // nothing was written
-        // the person decides: a save without a version to check replaces the entry with the editor's copy (and the undo journal
+        #expect(untouched.title == "Купить молоко" && untouched.date == date("2026-09-30")) // nothing was written
+        // the person decides: a save without a revision to check replaces the entry with the editor's copy (and the undo journal
         // still has the move)
-        try await store.save(draft, as: id, expectingVersion: nil)
+        try await store.save(draft, as: id, expectingRevision: nil)
         let replaced = try #require(try await store.item(id: id))
-        #expect(replaced.title == "Купить молоко и хлеб" && replaced.date == date("2026-09-29") && replaced.version == 3)
-        // a save with the current version goes through as before
+        #expect(replaced.title == "Купить молоко и хлеб" && replaced.date == date("2026-09-29"))
+        // a save with the current revision goes through as before
         draft.title = "Молоко"
-        try await store.save(draft, as: id, expectingVersion: 3)
+        try await store.save(draft, as: id, expectingRevision: try #require(try await store.revision(of: id)))
         #expect(try await store.item(id: id)?.title == "Молоко")
+
+        // the undo hole: B at version 2, undone back to version 1, edited to C at version 2 again; an editor opened at B is stale
+        let b = try #require(try await store.item(id: id))
+        let atB = try #require(try await store.revision(of: id))
+        let lastOp = try #require(try await store.lastUndoableOp())
+        try await store.undo(opID: lastOp.id)
+        var c = ItemDraft(try #require(try await store.item(id: id)))
+        c.title = "Хлеб"
+        try await store.save(c, as: id)
+        #expect(try await store.item(id: id)?.version == b.version) // the same number as when the editor opened…
+        var fromB = ItemDraft(b)
+        fromB.details = "обезжиренное"
+        await #expect(throws: StoreError.changedMeanwhile(id)) { try await store.save(fromB, as: id, expectingRevision: atB) } // …still refused
     }
 
     @Test func editingADateMakesAnApproximateItemExact() async throws {

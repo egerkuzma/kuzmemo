@@ -76,15 +76,15 @@ extension Store {
         return (result.op, result.value)
     }
 
-    /// Saves the editor's changes to an existing item (the whole series when it repeats). `expectingVersion` is the version the
-    /// editor read: when the item has moved on since (a voice command, a notification's Done, an undo), the save is refused
-    /// with `StoreError.changedMeanwhile` instead of quietly putting the editor's older copy back.
+    /// Saves the editor's changes to an existing item (the whole series when it repeats). `expectingRevision` is the revision
+    /// the editor read (`Store.revision(of:)`): when the item has moved on since (a voice command, a notification's Done, an
+    /// undo), the save is refused with `StoreError.changedMeanwhile` instead of quietly putting the editor's older copy back.
     @discardableResult
-    public func save(_ draft: ItemDraft, as itemID: String, expectingVersion: Int? = nil, label: String = "Edit entry") async throws -> Op? {
+    public func save(_ draft: ItemDraft, as itemID: String, expectingRevision: Int? = nil, label: String = "Edit entry") async throws -> Op? {
         let clean = try draft.validated()
         return try await perform(label: label) { mutator in
+            if let expectingRevision { try mutator.require(revisions: [itemID: expectingRevision]) }
             _ = try mutator.update(id: itemID) { item in
-                if let expectingVersion, item.version != expectingVersion { throw StoreError.changedMeanwhile(itemID) }
                 item.kind = clean.kind
                 item.title = clean.title
                 item.details = clean.details.isEmpty ? nil : clean.details

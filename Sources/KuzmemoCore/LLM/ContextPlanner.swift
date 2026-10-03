@@ -7,10 +7,14 @@ public struct ContextPlan: Sendable, Equatable {
     public var entries: [AgendaEntry]
     /// True when the phrase looks like an edit or a question and the wider window was used.
     public var expanded: Bool
+    /// The revision of every listed entry at the moment the list was made (`Store.revisions`): a plan made from this list is
+    /// applied only while the entries it touches still have these.
+    public var revisions: [String: Int]
 
-    public init(entries: [AgendaEntry], expanded: Bool) {
+    public init(entries: [AgendaEntry], expanded: Bool, revisions: [String: Int] = [:]) {
         self.entries = entries
         self.expanded = expanded
+        self.revisions = revisions
     }
 
     /// The entry the model meant by `[number]`.
@@ -106,7 +110,8 @@ public struct ContextPlanner: Sendable {
             if $0.date != $1.date { return $0.date < $1.date }
             return ($0.time?.minutesSinceMidnight ?? -1) < ($1.time?.minutesSinceMidnight ?? -1)
         }
-        return ContextPlan(entries: Self.cut(entries, to: limit, keeping: found), expanded: expanded)
+        let listed = Self.cut(entries, to: limit, keeping: found)
+        return ContextPlan(entries: listed, expanded: expanded, revisions: try await store.revisions(of: Set(listed.map(\.item.id))))
     }
 
     /// The first `limit` entries, except that an entry of an item the words pointed at is never the one dropped: a full fortnight

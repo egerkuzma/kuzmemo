@@ -170,4 +170,14 @@ public final class Mutator {
     }
 
     static func exceptionKey(_ itemID: String, _ date: LocalDate) -> String { "\(itemID)|\(date)" }
+
+    /// Checks that each entry still has the revision it had when the plan (or the editor's copy) was made; an entry that
+    /// has moved on, or is gone, stops the transaction with `StoreError.changedMeanwhile`.
+    public func require(revisions expected: [String: Int]) throws {
+        guard !expected.isEmpty else { return }
+        let current = try Store.revisions(db, of: Array(expected.keys))
+        for (id, revision) in expected.sorted(by: { $0.key < $1.key }) where current[id] != revision {
+            throw StoreError.changedMeanwhile(id)
+        }
+    }
 }

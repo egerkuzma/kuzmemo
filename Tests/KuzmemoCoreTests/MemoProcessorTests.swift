@@ -209,7 +209,7 @@ struct MemoProcessorTests {
         // meanwhile, in the editor: the meeting moves to the 5th
         var draft = ItemDraft(made.item)
         draft.date = LocalDate("2026-10-05")
-        try await store.save(draft, as: made.item.id, expectingVersion: 1)
+        try await store.save(draft, as: made.item.id)
         await provider.gate.open()
 
         let outcome = await phrase.value

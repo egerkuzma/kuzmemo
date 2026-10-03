@@ -83,8 +83,8 @@ public enum ActionValidator {
         let response: ParserResponse
         let vc: ValidationContext
         var warnings: [String] = []
-        /// The version of every entry a target resolved to, so that the plan is applied only to the state it was made from.
-        var seenVersions: [String: Int] = [:]
+        /// The revision of every entry a target resolved to, so that the plan is applied only to the state it was made from.
+        var seenRevisions: [String: Int] = [:]
         /// The entries the targets resolved to, by id (for the questions that name them).
         var seenItems: [String: Item] = [:]
 
@@ -142,7 +142,7 @@ public enum ActionValidator {
             let plan = MutationPlan(
                 actions: planned, warnings: warnings,
                 correctedTranscript: clean(response.transcriptCorrected), confidence: min(max(response.confidence, 0), 1),
-                expectedVersions: seenVersions
+                expectedRevisions: seenRevisions
             )
             // Entries, not actions: every occurrence of a series is listed under a number of its own, so "delete all the
             // stand-ups this week" can name one item three times. The plan is complete when the question is asked, and the
@@ -256,7 +256,13 @@ public enum ActionValidator {
 
         mutating func resolveTarget(_ action: ParsedAction) async throws -> Target {
             let target = try await findTarget(action)
-            seenVersions[target.item.id] = target.item.version
+            // The revision the model's list was made at; an entry found by its words was read just now. An entry without one (not
+            // in the database) gets a revision nothing can match, and the plan is refused at apply.
+            if let listed = vc.context.revisions[target.item.id] {
+                seenRevisions[target.item.id] = listed
+            } else {
+                seenRevisions[target.item.id] = try await vc.store.revision(of: target.item.id) ?? -1
+            }
             seenItems[target.item.id] = target.item
             return target
         }
