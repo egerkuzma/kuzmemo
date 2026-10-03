@@ -586,6 +586,51 @@ struct RecoveryTests {
         #expect(try await pool.read { try String.fetchOne($0, sql: "PRAGMA integrity_check") } == "ok")
     }
 
+    /// The copy proves itself beside the database and the two change places in one step, so a launch that is killed in the middle
+    /// never leaves the database missing. Killed right after the swap, it leaves the damaged file at the staging path: the next
+    /// launch sets it aside like any damaged file and opens the restored database as a sound one.
+    @Test func aLaunchKilledAfterTheSwapLeavesASoundDatabaseAndTheDamagedFileIsSetAsideNext() async throws {
+        let (root, database, backups) = try await prepare()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let staging = DatabaseRecovery.stagingURL(for: database)
+        try Data(repeating: 0xFF, count: 4096 * 3).write(to: staging) // the damaged file, where the swap left it
+        try Data("shm of the damaged file".utf8).write(to: URL(fileURLWithPath: staging.path + "-shm"))
+
+        let (pool, outcome) = try DatabaseRecovery.open(at: database, backups: backups, now: FixedNow(local: "2026-09-29 09:15", in: TimeZone(identifier: "Europe/Moscow")!)!.now(), zone: TimeZone(identifier: "Europe/Moscow")!)
+        #expect(outcome == .opened)
+        #expect(try titles(pool) == ["Из копии", "После копии"])
+        #expect(!FileManager.default.fileExists(atPath: staging.path))
+        #expect(names(in: root).contains("kuzmemo-damaged-2026-09-29-091500.sqlite") && names(in: root).contains("kuzmemo-damaged-2026-09-29-091500.sqlite-shm"))
+
+        // and a stale, unchecked staging file beside a damaged database does not get in the way of a new recovery
+        try Data(repeating: 0xFF, count: 4096 * 3).write(to: database)
+        try Data("stale".utf8).write(to: staging)
+        let (restored, second) = try DatabaseRecovery.open(at: database, backups: backups, now: FixedNow(local: "2026-09-29 09:20", in: TimeZone(identifier: "Europe/Moscow")!)!.now(), zone: TimeZone(identifier: "Europe/Moscow")!)
+        guard case .restored = second else { Issue.record("expected .restored, got \(second)"); return }
+        #expect(try titles(restored) == ["Из копии"])
+        #expect(!FileManager.default.fileExists(atPath: staging.path))
+        #expect(names(in: root).filter { $0.hasPrefix("kuzmemo-damaged-2026-09-29-0920") && $0.hasSuffix(".sqlite") }.count == 2, "\(names(in: root))") // the stale file and the damaged database
+        #expect(!names(in: root).contains { $0.contains(".restoring") }, "\(names(in: root))") // no log files of the checked copy left behind
+    }
+
+    /// Copies that cannot be listed are not "no copies": the damaged file stays where it is, nothing is started empty, and the
+    /// person gets the error. Only a copy that is itself damaged makes the search go on to the next one.
+    @Test func troubleWithTheCopiesIsPassedOnInsteadOfStartingEmpty() async throws {
+        let (root, database, backups) = try await prepare()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(repeating: 0xFF, count: 4096 * 3).write(to: database)
+        let before = names(in: root)
+        let unreadable = root.appendingPathComponent("not-a-folder")
+        try Data("in the way".utf8).write(to: unreadable) // a file where the copies' folder should be
+        #expect(throws: (any Error).self) { try DatabaseRecovery.open(at: database, backups: unreadable) }
+        #expect(names(in: root) == (before + ["not-a-folder"]).sorted()) // nothing moved, nothing made
+        #expect(try Data(contentsOf: database) == Data(repeating: 0xFF, count: 4096 * 3)) // the damaged file is still there for the next try
+        // with the copies readable again, the same launch recovers
+        let (pool, outcome) = try DatabaseRecovery.open(at: database, backups: backups)
+        guard case .restored = outcome else { Issue.record("expected .restored, got \(outcome)"); return }
+        #expect(try titles(pool) == ["Из копии"])
+    }
+
     @Test func troubleThatIsNotDamageIsPassedOnAndNothingIsMoved() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("kuzmemo-notdamage-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
