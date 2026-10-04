@@ -148,6 +148,13 @@ struct ClaudeProviderTests {
         #expect(Date().timeIntervalSince(started) < 8)
     }
 
+    @Test func descendantsIgnoringTerminationAreStoppedAtTheHardDeadline() async throws {
+        let fake = try FakeClaude(body: "trap '' TERM; sleep 30")
+        let started = Date()
+        await #expect(throws: LLMError.timedOut(seconds: 1)) { try await fake.provider().complete(request(timeout: 1)) }
+        #expect(Date().timeIntervalSince(started) < 8)
+    }
+
     @Test func crashesAndGarbageBecomeDistinctErrors() async throws {
         let crash = try FakeClaude(body: "echo boom >&2; exit 3")
         await #expect(throws: LLMError.processFailed(exitCode: 3, stderr: "boom\n")) { try await crash.provider().complete(request()) }

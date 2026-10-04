@@ -45,6 +45,8 @@ enum ProcessRunner {
         private let err = Buffer()
         private let lock = NSLock()
         private var timedOut = false
+        private var stopRequested = false
+        private var terminationSent = false
         private var resumed = false
         private var started = Date()
 
@@ -59,11 +61,21 @@ enum ProcessRunner {
         }
 
         func terminate() {
+            lock.lock(); stopRequested = true; lock.unlock()
             guard process.isRunning else { return }
-            process.terminate()
+            lock.lock()
+            guard !terminationSent else { lock.unlock(); return }
+            terminationSent = true
+            lock.unlock()
             let pid = process.processIdentifier
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-                if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+            // Foundation normally gives the child its own group. Stop its descendants too: a child shell can wait
+            // for them and they can keep our pipes open. Never signal the caller's inherited process group.
+            let privateGroup = getpgid(pid) == pid
+            if privateGroup { kill(-pid, SIGTERM) } else { process.terminate() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [self] in
+                // A delayed kill must still refer to this running child, not a PID reused after it exited.
+                guard process.isRunning, process.processIdentifier == pid else { return }
+                if privateGroup, getpgid(pid) == pid { kill(-pid, SIGKILL) } else { kill(pid, SIGKILL) }
             }
         }
 
@@ -110,6 +122,8 @@ enum ProcessRunner {
                     return
                 }
                 _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+                lock.lock(); let cancelledBeforeLaunch = stopRequested; lock.unlock()
+                if cancelledBeforeLaunch { terminate() }
 
                 for (handle, buffer) in [(outPipe.fileHandleForReading, out), (errPipe.fileHandleForReading, err)] {
                     DispatchQueue.global().async {
