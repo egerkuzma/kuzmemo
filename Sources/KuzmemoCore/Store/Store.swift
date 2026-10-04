@@ -296,6 +296,19 @@ public struct Store: Sendable {
         try await writer.read { db in try Memo.fetchOne(db, key: id) }
     }
 
+    /// Add audio after a failed admission without resurrecting erased phrases or overwriting a completed worker's state.
+    func keepRecording(for input: Memo, at path: String) async throws -> Bool {
+        let erased = self.erased
+        return try await writer.write { db in
+            guard !erased.contains(input.id) else { return false }
+            var memo = try Memo.fetchOne(db, key: input.id) ?? input
+            guard memo.transcriptRaw == nil, !MemoProcessor.finalStatuses.contains(memo.status) else { return false }
+            memo.audioPath = path
+            try memo.save(db)
+            return true
+        }
+    }
+
     /// Memos that never reached a final state; the pipeline resumes them after a restart.
     public func unfinishedMemos() async throws -> [Memo] {
         let final: [MemoStatus] = [.applied, .answered, .discarded, .superseded]

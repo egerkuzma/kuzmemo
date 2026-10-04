@@ -133,6 +133,23 @@ public actor UtteranceProcessor {
         return await transcribe(memo, samples: samples, onStage: onStage)
     }
 
+    /// A durable phrase, or one that was deliberately erased/discarded, no longer needs its in-memory samples.
+    public func isKept(memoID: String) async -> Bool {
+        if store.erased.contains(memoID) { return true }
+        guard let memo = try? await store.memo(id: memoID) else { return false }
+        if memo.transcriptRaw != nil || MemoProcessor.finalStatuses.contains(memo.status) { return true }
+        return memo.audioPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+    }
+
+    /// Retry only once the worker has finished; reuse the memo ID and retain the latest transcript/status in the database.
+    public func keepAfterFailure(_ memo: Memo, samples: [Float]) async throws {
+        guard inFlight.insert(memo.id).inserted else { throw CocoaError(.fileWriteUnknown) }
+        defer { inFlight.remove(memo.id) }
+        if await isKept(memoID: memo.id) { return }
+        let path = try spool.write(samples, name: memo.id)
+        if try await !store.keepRecording(for: memo, at: path) { spool.remove(path: path) }
+    }
+
     /// Picks up recordings that were never transcribed (the app quit, the model was missing) and those due for
     /// another attempt. `includeBlocked` also retries recordings that were waiting for the user to fix something
     /// (for example to install the speech model); do that at launch and on "retry", not on a timer.
