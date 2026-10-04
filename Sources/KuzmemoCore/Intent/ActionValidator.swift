@@ -307,7 +307,15 @@ public enum ActionValidator {
             let (target, revision) = try await findTarget(action)
             // The revision belongs to the same snapshot as the entry (the model's list, or the search that found it). An entry
             // without one (not in the database) gets a revision nothing can match, and the plan is refused at apply.
-            seenRevisions[target.item.id] = revision ?? -1
+            let current = revision ?? -1
+            if let previous = seenRevisions[target.item.id], previous != current {
+                // A ref may use the model's old context while a hint uses a fresh search (in either order). Never let one
+                // snapshot lend its revision to actions built from the other. Refuse the whole plan at apply, even when
+                // settle() later drops the action that exposed the conflict; the pipeline then reads the context again.
+                seenRevisions[target.item.id] = -1
+            } else {
+                seenRevisions[target.item.id] = current
+            }
             seenItems[target.item.id] = target.item
             return target
         }
