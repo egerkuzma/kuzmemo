@@ -89,9 +89,11 @@ enum ProcessRunner {
                 process.terminationHandler = { [self] finished in
                     // The process holds this handler and the job holds the process: let go of it, or neither is ever freed.
                     process.terminationHandler = nil
-                    // Give the readers a moment to reach EOF; a stray grandchild holding a pipe must not hang us.
+                    // Give the readers time to reach EOF: on a loaded Mac half a second was not enough for them to be scheduled,
+                    // and a child that had answered in full was read as having said nothing. A stray grandchild holding a pipe
+                    // must still not hang us (the group kill at the timeout makes that rare), so the wait stays bounded.
                     DispatchQueue.global().async { [self] in
-                        _ = readers.wait(timeout: .now() + 0.5)
+                        _ = readers.wait(timeout: .now() + 3)
                         lock.lock()
                         let flagged = timedOut
                         let already = resumed
