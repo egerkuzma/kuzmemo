@@ -180,7 +180,8 @@ public enum ActionValidator {
             let changed = edited + moved
             let seriesDeleted = Set(deleted).compactMap { seenItems[$0] }.filter { $0.recurrence != nil }
             let overLimit = Set(deleted).count > policy.maxDeletesWithoutConfirmation || Set(changed).count > policy.maxUpdatesWithoutConfirmation
-            guard vc.confirmAnyChange || overLimit || !seriesDeleted.isEmpty else { return nil }
+            let seriesEdited = edited.contains { seenItems[$0]?.recurrence != nil }
+            guard vc.confirmAnyChange || overLimit || !seriesDeleted.isEmpty || seriesEdited else { return nil }
 
             // One series deletion on its own keeps its own question, with the occurrence as a way out ("only this occurrence" is
             // an answer the model turns into a skip).
