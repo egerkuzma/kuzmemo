@@ -157,13 +157,14 @@ final class AppEnvironment {
         exit(1)
     }
 
-    /// The app is quitting: the control socket goes away (a stale file would make a script believe the app is still there) and
-    /// preferences changed a moment ago are saved.
-    func prepareToQuit() async {
-        controlServer?.stop()
-        await voice?.awaitAdmissions() // a recording that has just ended is written before the app goes
+    /// Save before deciding whether quitting is safe. Keep the control channel available if the quit is cancelled.
+    func prepareToQuit() async -> Bool {
+        let recordingsKept = await voice?.awaitAdmissions() ?? true
         await settings.flush()
+        return recordingsKept
     }
+
+    func finishTermination() { controlServer?.stop() }
 
     /// The system time zone changed (a flight, or the automatic setting): "today", the alerts and the calendar are worked out
     /// again. The clock follows the system zone, but nothing else would notice that a day had begun somewhere else.
