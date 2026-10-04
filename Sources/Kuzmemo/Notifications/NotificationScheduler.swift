@@ -113,13 +113,18 @@ final class NotificationScheduler: NSObject, UNUserNotificationCenterDelegate {
         let now = env.clock.now()
         let zone = env.clock.timeZone
         let today = env.clock.localNow().date
-        // A calendar that cannot be read is not an empty calendar: the system keeps what it holds until a read works.
+        // A calendar that cannot be read is not an empty calendar: the system keeps what it holds until a read works. With
+        // notifications off nothing is planned whatever the calendar says, and the removal below must not wait for a read.
         let entries: [AgendaEntry]
-        do {
-            entries = try await env.store.agenda(in: today ... today.adding(days: settings.horizonDays), includeDone: false)
-        } catch {
-            lastError = "\(error)"
-            return
+        if settings.enabled {
+            do {
+                entries = try await env.store.agenda(in: today ... today.adding(days: settings.horizonDays), includeDone: false)
+            } catch {
+                lastError = "\(error)"
+                return
+            }
+        } else {
+            entries = []
         }
         planned = AlertPlanner.plan(entries: entries, settings: settings, now: now, timeZone: zone)
         submitted.formIntersection(planned.map(\.id))
