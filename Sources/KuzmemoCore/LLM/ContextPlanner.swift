@@ -121,18 +121,20 @@ public struct ContextPlanner: Sendable {
         return ContextPlan(entries: listed, expanded: expanded, revisions: try Store.revisions(db, of: Array(Set(listed.map(\.item.id)))))
     }
 
-    /// The first `limit` entries, except that an entry of an item the words pointed at is never the one dropped: a full fortnight
-    /// of nearer entries used to push "the meeting with Dmitry" in a month out of the list, and the model could not see what it
-    /// was asked to change. The latest entries go first; found ones go only when they alone exceed the limit.
+    /// The first `limit` entries, except that every item the words pointed at keeps at least its first entry: a full fortnight of
+    /// nearer entries used to push "the meeting with Dmitry" in a month out of the list, and the model could not see what it was
+    /// asked to change. The places left go to the earliest entries, the other occurrences of a found series among them, so a
+    /// found series with many occurrences cannot push out another found item either.
     static func cut(_ entries: [AgendaEntry], to limit: Int, keeping found: Set<String>) -> [AgendaEntry] {
-        guard entries.count > limit else { return entries }
-        var kept = entries
-        var index = kept.count - 1
-        while kept.count > limit, index >= 0 {
-            if !found.contains(kept[index].item.id) { kept.remove(at: index) }
-            index -= 1
+        guard entries.count > limit, limit > 0 else { return Array(entries.prefix(max(limit, 0))) }
+        var kept = Set<Int>()
+        var represented = Set<String>()
+        for (index, entry) in entries.enumerated() where found.contains(entry.item.id) && represented.insert(entry.item.id).inserted {
+            kept.insert(index)
+            if kept.count == limit { break }
         }
-        return Array(kept.prefix(limit))
+        for index in entries.indices where kept.count < limit { kept.insert(index) }
+        return kept.sorted().map { entries[$0] }
     }
 }
 

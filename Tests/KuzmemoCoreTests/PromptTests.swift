@@ -192,6 +192,23 @@ struct ContextPlannerTests {
         #expect(plan.entries.first?.item.title == "дело 0")
     }
 
+    /// Found items keep a place each: three daily series the words pointed at used to fill the whole list with their occurrences and
+    /// push the fourth found item, a one-off a month away, out of it.
+    @Test func everyFoundItemKeepsAPlaceEvenBesideFoundSeriesWithManyOccurrences() async throws {
+        let store = try makeStore()
+        try await store.perform(label: "many") { m in
+            for n in 1 ... 3 {
+                try m.insert(Item(id: "s\(n)", kind: .event, title: "Созвон с Дмитрием \(n)", date: LocalDate("2026-09-28"), time: LocalTime(hour: 8 + n, minute: 0), recurrence: Recurrence(freq: .daily)))
+            }
+            try m.insert(reminder("Встреча с Дмитрием", on: "2026-11-20", at: "15:00"))
+        }
+        let plan = try await ContextPlanner().plan(transcript: "перенеси встречу с Дмитрием на четверг", anchor: anchor, store: store)
+        #expect(plan.expanded && plan.entries.count == 40)
+        #expect(plan.entries.contains { $0.item.title == "Встреча с Дмитрием" })
+        #expect(plan.entries.filter { $0.item.id == "s1" }.count >= 10) // the series still show most of their fortnight
+        #expect(plan.entries.first?.item.title == "Созвон с Дмитрием 1")
+    }
+
     /// The list carries the revision of every entry on it, from the same read as the entries themselves.
     @Test func theListCarriesTheRevisionsOfItsEntriesFromTheSameRead() async throws {
         let store = try await seeded()
