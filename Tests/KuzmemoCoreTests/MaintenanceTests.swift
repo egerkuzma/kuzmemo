@@ -585,6 +585,25 @@ struct RecoveryTests {
         #expect(try titles(pool).isEmpty)
         #expect(try Data(contentsOf: aside) == Data("this is not a database at all".utf8))
         #expect(try await pool.read { try String.fetchOne($0, sql: "PRAGMA integrity_check") } == "ok")
+        // the empty database took the damaged file's place in one step, like a copy does: no staging leftovers
+        #expect(!names(in: root).contains { $0.contains(".restoring") }, "\(names(in: root))")
+    }
+
+    /// A copies folder that is not there holds no copies; one that cannot be entered is trouble, and the recovery stops rather
+    /// than start an empty database beside copies it could not see.
+    @Test func aMissingCopiesFolderHoldsNoCopiesButAnUnreadableOneIsAnError() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("kuzmemo-copies-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(try BackupService.listing(in: root.appendingPathComponent("never-made")).isEmpty)
+        let locked = root.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path) }
+        if getuid() != 0 { // root can read anything
+            #expect(throws: (any Error).self) { try BackupService.listing(in: locked) }
+            #expect(BackupService.list(in: locked).isEmpty) // the forgiving listing for the page still answers "none"
+        }
     }
 
     /// The copy proves itself beside the database and the two change places in one step, so a launch that is killed in the middle

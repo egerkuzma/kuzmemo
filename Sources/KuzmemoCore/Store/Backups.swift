@@ -82,9 +82,14 @@ public actor BackupService {
     /// The copies, newest first; a folder that cannot be read is an error (a missing one holds no copies). Recovery needs the
     /// difference: "no copies" starts an empty database, "cannot read the copies" must not.
     public static func listing(in directory: URL) throws -> [BackupFile] {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) else { return [] }
-        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        // Only a folder that is not there holds no copies; one that cannot be entered (a permission, a volume gone) is an error.
+        // `fileExists` says "no" for both, so the listing itself tells them apart.
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return []
+        }
         return names.compactMap { name -> BackupFile? in
             guard let parsed = Self.parse(name) else { return nil }
             let url = directory.appendingPathComponent(name)

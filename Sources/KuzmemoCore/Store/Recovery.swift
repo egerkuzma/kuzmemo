@@ -68,20 +68,30 @@ public enum DatabaseRecovery {
                 removeFiles(of: staging) // no room, no permission, a lock: no copy would do better, and the person has to know
                 throw error
             }
-            // The damaged file's log files go first (they are its, and SQLite would apply them to the restored file), the two
-            // database files change places in one step, and the damaged one is set aside under its own name.
-            let damaged = try damagedName(for: url, now: now, zone: zone)
-            try moveLogFiles(of: url, to: damaged)
-            guard renamex_np(staging.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "could not put the copy in place: \(String(cString: strerror(errno)))"])
-            }
-            try FileManager.default.moveItem(at: staging, to: damaged)
+            let damaged = try swap(staging, into: url, now: now, zone: zone)
             return (try KuzmemoDatabase.open(at: url), .restored(from: copy, damagedFile: damaged))
         }
+        // No usable copy: the empty database is made whole beside the damaged file too, and takes its place in the same single
+        // step. Moving the damaged file away first left a launch killed in between with no database at all, and the next
+        // launch made a fresh one without a word about the damage.
+        let empty = try KuzmemoDatabase.open(at: staging)
+        try empty.writeWithoutTransaction { db in _ = try db.checkpoint(.truncate) }
+        try empty.close()
+        removeLogFiles(of: staging)
+        let damaged = try swap(staging, into: url, now: now, zone: zone)
+        return (try KuzmemoDatabase.open(at: url), .startedEmpty(damagedFile: damaged))
+    }
+
+    /// The damaged file's log files go first (they are its, and SQLite would apply them to the replacement), the two database
+    /// files change places in one step, and the damaged one is set aside under its own name, which is returned.
+    private static func swap(_ staging: URL, into url: URL, now: Date, zone: TimeZone) throws -> URL {
         let damaged = try damagedName(for: url, now: now, zone: zone)
         try moveLogFiles(of: url, to: damaged)
-        try FileManager.default.moveItem(at: url, to: damaged)
-        return (try KuzmemoDatabase.open(at: url), .startedEmpty(damagedFile: damaged))
+        guard renamex_np(staging.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "could not put the replacement in place: \(String(cString: strerror(errno)))"])
+        }
+        try FileManager.default.moveItem(at: staging, to: damaged)
+        return damaged
     }
 
     /// A launch that was killed right after the files changed places left the damaged file at the staging path: it is set
