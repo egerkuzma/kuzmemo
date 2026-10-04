@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !(await AppEnvironment.shared.prepareToQuit()) {
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = tr("Some recordings could not be saved")
+                alert.messageText = tr("Some recordings or settings could not be saved")
                 alert.informativeText = tr("Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway.")
                 alert.addButton(withTitle: tr("Stay in Kuzmemo"))
                 alert.addButton(withTitle: tr("Quit anyway"))

@@ -706,7 +706,7 @@
 "The recording will be removed from the list and cannot be brought back." = "Запись пропадёт из списка, вернуть её будет нельзя.";
 
 /* Unsaved recordings on quit */
-"Some recordings could not be saved" = "Не удалось сохранить некоторые записи";
+"Some recordings or settings could not be saved" = "Не удалось сохранить некоторые записи или настройки";
 "Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway." = "Если выйти сейчас, они могут потеряться. Останься в Kuzmemo, чтобы повторить сохранение, или выйди всё равно.";
 "Stay in Kuzmemo" = "Остаться в Kuzmemo";
 "Quit anyway" = "Выйти всё равно";

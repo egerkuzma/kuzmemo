@@ -35,7 +35,7 @@
 "%lld saved phrases|other" = "%lld saved phrases";
 
 /* Unsaved recordings on quit */
-"Some recordings could not be saved" = "Some recordings could not be saved";
+"Some recordings or settings could not be saved" = "Some recordings or settings could not be saved";
 "Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway." = "Quitting now may lose them. Stay in Kuzmemo to try saving again, or quit anyway.";
 "Stay in Kuzmemo" = "Stay in Kuzmemo";
 "Quit anyway" = "Quit anyway";

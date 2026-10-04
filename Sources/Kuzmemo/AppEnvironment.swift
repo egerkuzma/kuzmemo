@@ -160,8 +160,8 @@ final class AppEnvironment {
     /// Save before deciding whether quitting is safe. Keep the control channel available if the quit is cancelled.
     func prepareToQuit() async -> Bool {
         let recordingsKept = await voice?.awaitAdmissions() ?? true
-        await settings.flush()
-        return recordingsKept
+        let settingsKept = await settings.flush()
+        return recordingsKept && settingsKept
     }
 
     func finishTermination() { controlServer?.stop() }
