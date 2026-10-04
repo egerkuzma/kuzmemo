@@ -93,8 +93,11 @@ struct ItemEditorView: View {
             problem = AppEnvironment.describe(StoreError.itemNotFound(item.id))
             return
         }
+        // "Untouched" is judged on the whole form (the date, time and repeat controls live beside the draft), the same way a
+        // save reads it: a date the person already moved is not put back by the fresh copy.
         let shown = ItemDraft(item)
-        if draft == shown {
+        let untouched = normalized(composed()) == normalized(shown)
+        if untouched {
             if ItemDraft(snapshot.item) != shown { show(ItemDraft(snapshot.item)) }
             revision = .loaded(snapshot.revision)
         } else if ItemDraft(snapshot.item) == shown {
@@ -103,6 +106,27 @@ struct ItemEditorView: View {
             problem = AppEnvironment.describe(StoreError.changedMeanwhile(item.id))
             revision = .overwriteApproved
         }
+    }
+
+    /// The draft as the controls have it: what a save writes.
+    private func composed() -> ItemDraft {
+        var out = draft
+        out.date = hasDate ? DateBridge.localDate(dateValue) : nil
+        out.time = hasDate && hasTime ? DateBridge.localTime(timeValue) : nil
+        if !(hasDate && hasTime) { out.remindLeadMin = 0 }
+        if out.kind != .event || out.time == nil { out.durationMin = nil }
+        out.recurrence = hasDate ? currentRule : nil
+        return out
+    }
+
+    /// Two drafts compare as the editor shows them (a rule is compared after the same normalisation a save applies).
+    private func normalized(_ draft: ItemDraft) -> ItemDraft {
+        var copy = draft
+        copy.recurrence = draft.recurrence?.normalized(start: draft.date)
+        if copy.date == nil { copy.time = nil; copy.recurrence = nil }
+        if copy.time == nil { copy.remindLeadMin = 0 }
+        if copy.kind != .event || copy.time == nil { copy.durationMin = nil }
+        return copy
     }
 
     private var canSave: Bool {
@@ -330,12 +354,7 @@ struct ItemEditorView: View {
     }
 
     private func save() {
-        var out = draft
-        out.date = hasDate ? DateBridge.localDate(dateValue) : nil
-        out.time = hasDate && hasTime ? DateBridge.localTime(timeValue) : nil
-        if !(hasDate && hasTime) { out.remindLeadMin = 0 }
-        if out.kind != .event || out.time == nil { out.durationMin = nil }
-        out.recurrence = hasDate ? currentRule : nil
+        let out = composed()
         do { _ = try out.validated() } catch {
             problem = AppEnvironment.describe(error)
             return
