@@ -58,25 +58,23 @@ final class AppSettings {
         do { firstLaunch = try await store.setting(RecognitionSettings.storageKey) == nil } catch { firstLaunch = false }
         await read(Set(Group.allCases))
         if firstLaunch, loadedGroups.contains(.recognition), AppLanguage.best() == .english {
-            loading = true
-            recognition.language = "en"
-            loading = false
+            place { recognition.language = "en" }
         }
         for group in Group.allCases { notify(group) }
         scheduleRetryIfNeeded()
     }
 
-    /// Reads the given groups; the ones that could not be read keep what they show and stay unloaded.
+    /// Reads the given groups; the ones that could not be read keep what they show and stay unloaded. `loading` covers only the
+    /// moment a read value is put in place, never the database read itself: a change the person makes while a read is under way
+    /// (to this group or another one) is a change like any other and has to be saved, not taken for the value being read.
     private func read(_ groups: Set<Group>) async {
-        loading = true
-        defer { loading = false }
         for group in Group.allCases where groups.contains(group) {
             do {
                 switch group {
-                case .speech: speech = try await store.loadSettings(SpeechSettings.self)
-                case .recognition: recognition = try await store.loadSettings(RecognitionSettings.self)
-                case .recording: recording = try await store.loadSettings(RecordingSettings.self)
-                case .notifications: notifications = try await store.loadSettings(NotificationSettings.self)
+                case .speech: let value = try await store.loadSettings(SpeechSettings.self); place { speech = value }
+                case .recognition: let value = try await store.loadSettings(RecognitionSettings.self); place { recognition = value }
+                case .recording: let value = try await store.loadSettings(RecordingSettings.self); place { recording = value }
+                case .notifications: let value = try await store.loadSettings(NotificationSettings.self); place { notifications = value }
                 }
                 loadedGroups.insert(group)
             } catch {
@@ -84,6 +82,13 @@ final class AppSettings {
             }
         }
         loaded = loadedGroups.count == Group.allCases.count
+    }
+
+    /// Puts a value that was read (not chosen) in place without it counting as a change.
+    private func place(_ assignment: () -> Void) {
+        loading = true
+        assignment()
+        loading = false
     }
 
     /// The groups that could not be read are read again, a little later and then less often, until they have been.
@@ -158,15 +163,15 @@ final class AppSettings {
     /// The app is quitting: every group with a change that has not reached the database goes there now (a preference changed and
     /// the app quit within the delay used to be lost; a change whose write had failed is tried once more). Only dirty groups
     /// are written: the others hold what was read, or defaults that were never read, and neither must replace the stored
-    /// values. Returns whether every change is in the database.
+    /// values. A change that lands while a write is under way stays dirty (its own write would have settled it), so a second
+    /// pass writes it. Returns whether nothing is left dirty: that, not how the writes went, is what a quit must know.
     @discardableResult
     func flush() async -> Bool {
         for task in saves.values { task.cancel() }
         saves = [:]
-        var allSaved = true
-        for group in Group.allCases where dirty.contains(group) {
-            if await !save(group) { allSaved = false }
+        for _ in 0 ..< 3 where !dirty.isEmpty {
+            for group in Group.allCases where dirty.contains(group) { await save(group) }
         }
-        return allSaved
+        return dirty.isEmpty
     }
 }
