@@ -90,17 +90,16 @@ public struct ContextPlanner: Sendable {
             }
             // A series found by its words but outside the window is listed at its next occurrence: its own date is the day it
             // started, and "complete", "skip" or "move" on that would hit an occurrence from months ago.
-            var upcoming: [String: AgendaEntry]?
             found = Set(hits.prefix(searchHitLimit).map(\.id))
-            for item in hits.prefix(searchHitLimit) where !entries.contains(where: { $0.item.id == item.id }) {
+            // Only the series that were found are looked at: expanding the whole calendar for a year to take one entry of one
+            // series out of it took half a second with a few hundred series, before the model was even asked.
+            let outside = hits.prefix(searchHitLimit).filter { hit in !entries.contains { $0.item.id == hit.id } }
+            let upcoming = try Store.upcoming(db, of: outside, from: today, through: today.adding(days: 366))
+            for item in outside {
                 let entry: AgendaEntry
                 if item.recurrence != nil {
-                    if upcoming == nil {
-                        let year = try Store.agenda(db, in: today...today.adding(days: 366), includeDone: false)
-                        upcoming = Dictionary(year.map { ($0.item.id, $0) }, uniquingKeysWith: { first, _ in first })
-                    }
                     // a series with nothing ahead has no occurrence to name: the entry carries none and the validator asks
-                    entry = upcoming?[item.id] ?? AgendaEntry(
+                    entry = upcoming[item.id] ?? AgendaEntry(
                         item: item, date: item.date ?? today, time: item.time, isDone: false, occurrenceDate: nil, wasMoved: false
                     )
                 } else {

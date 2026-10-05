@@ -148,11 +148,7 @@ public final class CalendarModel {
 
     /// The repeating series with their next occurrence, or `nil` when they could not be read (or the read was cancelled).
     private func loadRecurring() async -> [RecurringSeries]? {
-        guard let series = try? await store.recurringSeries(),
-              let upcoming = try? await store.agenda(in: today ... today.adding(days: 366), includeDone: false) else { return nil }
-        return series.map { item in
-            RecurringSeries(item: item, next: upcoming.first { $0.item.id == item.id }?.date)
-        }
+        try? await store.recurringWithNext(from: today)
     }
 
     private func runSearch() async {
