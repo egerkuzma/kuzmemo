@@ -85,13 +85,17 @@ enum SearchIndex {
                 ORDER BY rank LIMIT ?
                 """, arguments: [match, limit])
         }
-        // Only very short words: scan the (small) corpus and filter in Swift.
+        // Only very short words: the trigram index cannot help, so the index's own (already normalised) text is scanned inside
+        // SQLite, every entry of it. The entries were once read into Swift and filtered there, which cost time that grew with
+        // the calendar and looked at the first 5 000 entries only. The scan is the outer loop: a join the other way round would
+        // read the whole index once per entry.
         let words = SearchText.tokens(query)
         guard !words.isEmpty else { return [] }
-        let all = try Item.filter(Column("deleted_at") == nil).limit(5000).fetchAll(db)
-        return Array(all.filter { item in
-            let haystack = SearchText.normalize([item.title, item.details ?? "", item.keywords].joined(separator: " "))
-            return words.allSatisfy { haystack.contains($0) }
-        }.prefix(limit))
+        let clauses = words.map { _ in "instr(items_fts.title || ' ' || items_fts.details || ' ' || items_fts.keywords, ?) > 0" }
+        return try Item.fetchAll(db, sql: """
+            SELECT items.* FROM items
+            WHERE items.deleted_at IS NULL AND items.id IN (SELECT item_id FROM items_fts WHERE \(clauses.joined(separator: " AND ")))
+            ORDER BY items.created_at DESC, items.id LIMIT ?
+            """, arguments: StatementArguments(words.map(\.databaseValue) + [limit.databaseValue]))
     }
 }
