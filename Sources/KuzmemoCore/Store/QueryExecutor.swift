@@ -12,19 +12,35 @@ public struct QueryResult: Equatable, Sendable {
 }
 
 extension Store {
-    /// A stream that yields whenever calendar rows (items, per-occurrence overrides) or memos change, so views can
-    /// reload. The first value arrives immediately. A read that fails ends GRDB's observation, and a stream that ended with
-    /// it would leave every window frozen on what it last showed until the app was restarted: the observation is started
-    /// again after a pause (doubling up to half a minute), and its first value makes the views read afresh.
+    /// What the windows show that the database can change under them: the entries and their overrides (the revision counter of an
+    /// entry grows with every write to either) and the phrases that failed, which the Inbox lists. A phrase moving from one stage
+    /// to the next is none of that, though it is written at every stage.
+    private struct Watched: Equatable {
+        var entries: [Int]
+        var failed: [Memo]
+    }
+
+    /// A stream that yields whenever the entries, their overrides or the list of failed phrases change, so views can reload.
+    /// The first value arrives immediately. The other writes to a phrase used to wake every window as well: five stages of one
+    /// spoken command meant five reloads of the month with nothing changed. A read that fails ends GRDB's observation, and a
+    /// stream that ended with it would leave every window frozen on what it last showed until the app was restarted: the
+    /// observation is started again after a pause (doubling up to half a minute), and its first value makes the views read afresh.
     public func changes(retryAfter: Duration = .seconds(1)) -> AsyncStream<Void> {
         let writer = self.writer
         return AsyncStream { continuation in
             let task = Task {
                 var pause = retryAfter
                 while !Task.isCancelled {
-                    let observation = ValueObservation.tracking { db -> Int in
-                        try Item.fetchCount(db) + ItemException.fetchCount(db) + Memo.fetchCount(db)
-                    }
+                    let observation = ValueObservation.tracking { db -> Watched in
+                        let entries = try Row.fetchOne(db, sql: """
+                            SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM item_exceptions),
+                                   (SELECT count(*) FROM item_revisions), (SELECT COALESCE(SUM(revision), 0) FROM item_revisions)
+                            """)
+                        return Watched(
+                            entries: (0 ..< 4).map { index in entries?[index] ?? 0 },
+                            failed: try Memo.filter(Column("status") == MemoStatus.failed).order(Column("created_at"), Column("id")).fetchAll(db)
+                        )
+                    }.removeDuplicates()
                     do {
                         for try await _ in observation.values(in: writer) {
                             continuation.yield()

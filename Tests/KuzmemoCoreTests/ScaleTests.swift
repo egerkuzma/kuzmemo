@@ -231,3 +231,86 @@ struct ScaleContextTests {
         #expect(plan.entries.count == 40)
     }
 }
+
+/// The stream that keeps the windows in step with the database woke them for every write to a saved phrase, and a phrase is
+/// written at each of its stages: five statuses meant five full reloads of the month with no entry changed.
+@Suite("Scale: the stream of changes")
+struct ScaleChangesTests {
+    private final class Count: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func bump() { lock.lock(); value += 1; lock.unlock() }
+        var current: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    private func memo(_ status: MemoStatus, id: String = "m1") -> Memo {
+        Memo(id: id, createdAt: 1, anchorLocal: "2026-09-28 14:30", tz: "Europe/Moscow", inputKind: .voice, status: status, transcriptRaw: "напомни")
+    }
+
+    /// Waits (polling, never a fixed sleep) until the stream has delivered more than `count` values.
+    private func delivered(more count: Int, than seen: Count) async throws -> Bool {
+        for _ in 0 ..< 200 where seen.current <= count { try await Task.sleep(for: .milliseconds(15)) }
+        return seen.current > count
+    }
+
+    private func watching(_ store: Store) async throws -> (seen: Count, stop: () -> Void, initial: Int) {
+        let seen = Count()
+        let observer = Task { for await _ in store.changes() { seen.bump() } }
+        #expect(try await delivered(more: 0, than: seen)) // the first value arrives at once
+        return (seen, { observer.cancel() }, seen.current)
+    }
+
+    @Test func aPhraseMovingThroughItsStagesDoesNotWakeTheCalendar() async throws {
+        let store = try makeStore()
+        let (seen, stop, initial) = try await watching(store)
+        defer { stop() }
+        for status in [MemoStatus.recorded, .transcribing, .transcribed, .thinking, .interpreted, .applied] { try await store.save(memo: memo(status)) }
+        try await Task.sleep(for: .milliseconds(200)) // long enough for a value to have been delivered, had there been one
+        #expect(seen.current == initial, "\(seen.current - initial) value(s) for writes that changed no entry")
+    }
+
+    /// Waits for the value an event should have produced, then lets a coalesced pair of writes settle; returns the new count.
+    private func settle(_ seen: Count, after expected: Int, _ what: String) async throws -> Int {
+        #expect(try await delivered(more: expected, than: seen), "\(what) delivered nothing")
+        try await Task.sleep(for: .milliseconds(40))
+        return seen.current
+    }
+
+    @Test func aChangeToAnEntryOrToItsOverridesWakesIt() async throws {
+        let store = try makeStore()
+        var weekly = Item(id: "series", kind: .event, title: "Планёрка", date: day("2026-09-28"), time: LocalTime("10:00"), source: .voice)
+        weekly.recurrence = Recurrence(freq: .weekly)
+        let created = weekly
+        let (seen, stop, initial) = try await watching(store)
+        defer { stop() }
+        try await store.perform(label: "add") { try $0.insert(created) }
+        var expected = try await settle(seen, after: initial, "an insert")
+        // ticking one occurrence writes only to the overrides: no row of the series itself changes
+        try await store.perform(label: "tick") { try $0.setException(ItemException(itemID: "series", occDate: day("2026-09-28"), action: .done)) }
+        expected = try await settle(seen, after: expected, "a tick of one occurrence")
+        try await store.perform(label: "move") {
+            try $0.setException(ItemException(itemID: "series", occDate: day("2026-09-28"), action: .moved, movedDate: day("2026-09-29")))
+        }
+        expected = try await settle(seen, after: expected, "a move of one occurrence") // the same override row, other contents
+        try await store.perform(label: "rename") { _ = try $0.update(id: "series") { $0.title = "Планёрка команды" } }
+        expected = try await settle(seen, after: expected, "an edit")
+        try await store.perform(label: "done") { _ = try $0.update(id: "series") { $0.date = day("2026-10-05") } }
+        _ = try await settle(seen, after: expected, "a move of the date")
+    }
+
+    /// The Inbox lists the phrases that failed: one turning failed, changing while failed, and leaving the state all show.
+    @Test func aPhraseThatFailedAppearsChangesAndLeavesTheInboxAndThatWakesIt() async throws {
+        let store = try makeStore()
+        try await store.save(memo: memo(.thinking))
+        let (seen, stop, initial) = try await watching(store)
+        defer { stop() }
+        try await store.save(memo: memo(.failed))
+        var expected = try await settle(seen, after: initial, "a phrase that failed")
+        var again = memo(.failed)
+        again.failReason = "no network"
+        try await store.save(memo: again)
+        expected = try await settle(seen, after: expected, "a new reason")
+        try await store.save(memo: memo(.recorded)) // retried
+        _ = try await settle(seen, after: expected, "a retried phrase")
+    }
+}
